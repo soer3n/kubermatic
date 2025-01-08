@@ -258,6 +258,9 @@ const (
 	// AuditWebhookVolumeName is the name of the volume that contains the audit webhook configuration mounted into kube-apisever.
 	AuditWebhookVolumeName = "audit-webhook-backend"
 
+	// StructuredAuthenticationConfigVolumeName is the name of the volume that contains the audit webhook configuration mounted into kube-apisever.
+	StructuredAuthenticationConfigVolumeName = "structured-auth-conf"
+
 	// AdmissionControlConfigMapName is the name for the configmap that contains the Admission Controller config file.
 	AdmissionControlConfigMapName = "adm-control"
 
@@ -980,6 +983,8 @@ alertmanager_config: |
 	KonnectivityKubeApiserverEgress        = "kube-apiserver-egress"
 	KonnectivityUDS                        = "konnectivity-uds"
 	KonnectivityPodDisruptionBudgetName    = "konnectivity-agent"
+
+	StructuredAuthenticationConfig = "structured-authentication-config"
 )
 
 const (

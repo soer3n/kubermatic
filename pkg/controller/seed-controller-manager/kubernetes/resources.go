@@ -766,7 +766,7 @@ func (r *Reconciler) ensureNetworkPolicies(ctx context.Context, c *kubermaticv1.
 }
 
 // GetConfigMapReconcilers returns all ConfigMapReconcilers that are currently in use.
-func GetConfigMapReconcilers(data *resources.TemplateData) []reconciling.NamedConfigMapReconcilerFactory {
+func GetConfigMapReconcilers(data *resources.TemplateData, enableAPIserverOIDCAuthentication bool) []reconciling.NamedConfigMapReconcilerFactory {
 	creators := []reconciling.NamedConfigMapReconcilerFactory{
 		apiserver.AuditConfigMapReconciler(data),
 		apiserver.AdmissionControlReconciler(data),
@@ -785,11 +785,15 @@ func GetConfigMapReconcilers(data *resources.TemplateData) []reconciling.NamedCo
 		)
 	}
 
+	if enableAPIserverOIDCAuthentication {
+		creators = append(creators, apiserver.StructuredAuthenticationConfigReconciler(data, enableAPIserverOIDCAuthentication))
+	}
+
 	return creators
 }
 
 func (r *Reconciler) ensureConfigMaps(ctx context.Context, c *kubermaticv1.Cluster, data *resources.TemplateData) error {
-	creators := GetConfigMapReconcilers(data)
+	creators := GetConfigMapReconcilers(data, r.features.KubernetesOIDCAuthentication)
 
 	if err := reconciling.ReconcileConfigMaps(ctx, creators, c.Status.NamespaceName, r.Client); err != nil {
 		return fmt.Errorf("failed to ensure that the ConfigMap exists: %w", err)

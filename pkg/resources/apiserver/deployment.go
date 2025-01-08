@@ -89,8 +89,8 @@ func DeploymentReconciler(data *resources.TemplateData, enableOIDCAuthentication
 			auditLogEnabled := data.Cluster().Spec.AuditLogging != nil && data.Cluster().Spec.AuditLogging.Enabled
 			auditWebhookBackendEnabled := data.Cluster().Spec.AuditLogging != nil && data.Cluster().Spec.AuditLogging.WebhookBackend != nil
 
-			volumes := getVolumes(data, enableEncryptionConfiguration, auditLogEnabled, auditWebhookBackendEnabled)
-			volumeMounts := getVolumeMounts(data.IsKonnectivityEnabled(), enableEncryptionConfiguration, auditWebhookBackendEnabled)
+			volumes := getVolumes(data, enableEncryptionConfiguration, auditLogEnabled, auditWebhookBackendEnabled, enableOIDCAuthentication || (data.Cluster().Spec.OIDC.IssuerURL != "" && data.Cluster().Spec.OIDC.ClientID != ""))
+			volumeMounts := getVolumeMounts(data.IsKonnectivityEnabled(), enableEncryptionConfiguration, auditWebhookBackendEnabled, enableOIDCAuthentication || (data.Cluster().Spec.OIDC.IssuerURL != "" && data.Cluster().Spec.OIDC.ClientID != ""))
 
 			version := data.Cluster().Status.Versions.Apiserver.Semver()
 			address := data.Cluster().Status.Address
@@ -419,37 +419,8 @@ func getApiserverFlags(data *resources.TemplateData, etcdEndpoints []string, ena
 	}
 
 	oidcSettings := cluster.Spec.OIDC
-	if oidcSettings.IssuerURL != "" && oidcSettings.ClientID != "" {
-		flags = append(flags,
-			"--oidc-ca-file", fmt.Sprintf("/etc/kubernetes/pki/ca-bundle/%s", resources.CABundleConfigMapKey),
-			"--oidc-issuer-url", oidcSettings.IssuerURL,
-			"--oidc-client-id", oidcSettings.ClientID,
-		)
-
-		if oidcSettings.UsernameClaim != "" {
-			flags = append(flags, "--oidc-username-claim", oidcSettings.UsernameClaim)
-		}
-		if oidcSettings.GroupsClaim != "" {
-			flags = append(flags, "--oidc-groups-claim", oidcSettings.GroupsClaim)
-		}
-		if oidcSettings.RequiredClaim != "" {
-			flags = append(flags, "--oidc-required-claim", oidcSettings.RequiredClaim)
-		}
-		if oidcSettings.GroupsPrefix != "" {
-			flags = append(flags, "--oidc-groups-prefix", oidcSettings.GroupsPrefix)
-		}
-		if oidcSettings.UsernamePrefix != "" {
-			flags = append(flags, "--oidc-username-prefix", oidcSettings.UsernamePrefix)
-		}
-	} else if enableOIDCAuthentication {
-		flags = append(flags,
-			"--oidc-ca-file", fmt.Sprintf("/etc/kubernetes/pki/ca-bundle/%s", resources.CABundleConfigMapKey),
-			"--oidc-issuer-url", data.OIDCIssuerURL(),
-			"--oidc-client-id", data.OIDCIssuerClientID(),
-			"--oidc-username-claim", "email",
-			"--oidc-groups-prefix", "oidc:",
-			"--oidc-groups-claim", "groups",
-		)
+	if enableOIDCAuthentication || (oidcSettings.IssuerURL != "" && oidcSettings.ClientID != "") {
+		flags = append(flags, "--authentication-config", "/etc/kubernetes/structured-auth/structured-authentication-config.yaml")
 	}
 
 	featureGates := data.GetCSIMigrationFeatureGates(cluster.Status.Versions.Apiserver.Semver())
@@ -498,7 +469,7 @@ func getApiserverOverrideFlags(data *resources.TemplateData) (kubermaticv1.APISe
 	return settings, nil
 }
 
-func getVolumeMounts(isKonnectivityEnabled, isEncryptionEnabled bool, isAuditWebhookEnabled bool) []corev1.VolumeMount {
+func getVolumeMounts(isKonnectivityEnabled, isEncryptionEnabled bool, isAuditWebhookEnabled bool, enableOIDCAuthentication bool) []corev1.VolumeMount {
 	vms := []corev1.VolumeMount{
 		{
 			MountPath: "/etc/kubernetes/tls",
@@ -597,10 +568,18 @@ func getVolumeMounts(isKonnectivityEnabled, isEncryptionEnabled bool, isAuditWeb
 		})
 	}
 
+	if enableOIDCAuthentication {
+		vms = append(vms, corev1.VolumeMount{
+			Name:      resources.StructuredAuthenticationConfigVolumeName,
+			MountPath: "/etc/kubernetes/structured-auth/",
+			ReadOnly:  true,
+		})
+	}
+
 	return vms
 }
 
-func getVolumes(data *resources.TemplateData, isEncryptionEnabled, isAuditEnabled bool, isAuditWebhookEnabled bool) []corev1.Volume {
+func getVolumes(data *resources.TemplateData, isEncryptionEnabled, isAuditEnabled bool, isAuditWebhookEnabled bool, enableOIDCAuthentication bool) []corev1.Volume {
 	vs := []corev1.Volume{
 		{
 			Name: resources.ApiserverTLSSecretName,
@@ -806,6 +785,20 @@ func getVolumes(data *resources.TemplateData, isEncryptionEnabled, isAuditEnable
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: data.Cluster().Spec.AuditLogging.WebhookBackend.AuditWebhookConfig.Name,
+				},
+			},
+		})
+	}
+
+	if enableOIDCAuthentication {
+		vs = append(vs, corev1.Volume{
+			Name: resources.StructuredAuthenticationConfigVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: resources.StructuredAuthenticationConfig,
+					},
+					DefaultMode: intPtr(420),
 				},
 			},
 		})

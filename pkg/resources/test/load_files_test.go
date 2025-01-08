@@ -932,7 +932,7 @@ func generateAndVerifyResources(t *testing.T, ctx context.Context, client ctrlru
 	}
 
 	var namedConfigMapReconcilerFactories []reconciling.NamedConfigMapReconcilerFactory
-	namedConfigMapReconcilerFactories = append(namedConfigMapReconcilerFactories, kubernetescontroller.GetConfigMapReconcilers(data)...)
+	namedConfigMapReconcilerFactories = append(namedConfigMapReconcilerFactories, kubernetescontroller.GetConfigMapReconcilers(data, true)...)
 	namedConfigMapReconcilerFactories = append(namedConfigMapReconcilerFactories, monitoringcontroller.GetConfigMapReconcilers(data)...)
 	for _, factory := range namedConfigMapReconcilerFactories {
 		name, reconciler := factory()
