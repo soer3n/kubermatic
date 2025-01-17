@@ -25,6 +25,9 @@ metadata:
 spec:
   description: Cluster autoscaler -  a component that automatically adjusts the size of a Kubernetes Cluster so that all pods have a place to run and there are no unneeded nodes.
   displayName: Cluster autoscaler
+  defaultNamespace:
+    name: kube-system
+    create: false
   method: helm
   versions:
     - template:
