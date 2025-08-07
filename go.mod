@@ -122,7 +122,10 @@ require (
 	sigs.k8s.io/yaml v1.4.0
 )
 
-require gopkg.in/yaml.v2 v2.4.0
+require (
+	gopkg.in/yaml.v2 v2.4.0
+	k8c.io/machine-controller v1.61.1-0.20250520212857-7a93ac526de3
+)
 
 require (
 	cel.dev/expr v0.19.1 // indirect

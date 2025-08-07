@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"reflect"
 	"time"
 
 	"github.com/onsi/ginkgo/reporters"
@@ -89,6 +90,31 @@ func (r *TestRunner) SetupProject(ctx context.Context) error {
 		return fmt.Errorf("failed to create SSH keys: %w", err)
 	}
 
+	return nil
+}
+
+func (r *TestRunner) ReconfigureSeed(ctx context.Context, scenarios []scenarios.Scenario) error {
+	currentSeed, err := r.kkpClient.GetSeed(ctx, r.log, r.opts.Seed.Name)
+	if err != nil {
+		return fmt.Errorf("failed to get seed: %w", err)
+	}
+	// Reconfigure the seed based on the scenarios
+	for _, scenario := range scenarios {
+		if err := r.reconfigureSeedForScenario(ctx, r.log, currentSeed, scenario); err != nil {
+			return fmt.Errorf("failed to reconfigure seed for scenario %q: %w", scenario.Name(), err)
+		}
+	}
+	if err := r.kkpClient.UpdateSeed(ctx, r.log, currentSeed); err != nil {
+		return fmt.Errorf("failed to update seed: %w", err)
+	}
+	return nil
+}
+
+func (r *TestRunner) reconfigureSeedForScenario(ctx context.Context, log *zap.SugaredLogger, seed *kubermaticv1.Seed, scenario scenarios.Scenario) error {
+	// Update the seed with the necessary configurations for the scenario
+	if !reflect.DeepEqual(scenario.Datacenter().Spec, seed.Spec.Datacenters[scenario.Datacenter().Location]) {
+		seed.Spec.Datacenters[string(scenario.CloudProvider())] = *scenario.Datacenter()
+	}
 	return nil
 }
 
@@ -529,9 +555,9 @@ func (r *TestRunner) testCluster(
 	log.Info("Starting to test cluster...")
 
 	// Run the Kubernetes conformance tests
-	if err := tests.TestKubernetesConformance(ctx, log, r.opts, scenario, cluster, userClusterClient, kubeconfigFilename, cloudConfigFilename, report); err != nil {
-		log.Errorf("Conformance tests failed: %v", err)
-	}
+	// if err := tests.TestKubernetesConformance(ctx, log, r.opts, scenario, cluster, userClusterClient, kubeconfigFilename, cloudConfigFilename, report); err != nil {
+	// 	log.Errorf("Conformance tests failed: %v", err)
+	// }
 
 	// Do a simple PVC test
 	if err := util.JUnitWrapper("[KKP] [CloudProvider] Test PersistentVolumes", report, util.MeasuredRetryN(

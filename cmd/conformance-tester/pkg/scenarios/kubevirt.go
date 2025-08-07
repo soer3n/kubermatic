@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,14 +19,16 @@ package scenarios
 import (
 	"context"
 	"fmt"
+	"log"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
-	"k8c.io/kubermatic/v2/pkg/machine/provider"
 	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	"k8c.io/machine-controller/sdk/providerconfig"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/utils/ptr"
 )
 
@@ -35,7 +37,7 @@ const (
 	kubevirtVCPUs              = 2
 	kubevirtMemory             = "4Gi"
 	kubevirtDiskSize           = "25Gi"
-	kubevirtStorageClassName   = "local-path"
+	kubevirtStorageClassName   = "standard"
 )
 
 type kubevirtScenario struct {
@@ -80,32 +82,93 @@ func (s *kubevirtScenario) Cluster(secrets types.Secrets) *kubermaticv1.ClusterS
 }
 
 func (s *kubevirtScenario) MachineDeployments(_ context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string) ([]clusterv1alpha1.MachineDeployment, error) {
-	image, err := s.getOSImage()
+	// image, err := s.getOSImage()
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// baseCloudProviderSpec := provider.NewKubevirtConfig().
+	// 	WithVCPUs(kubevirtVCPUs).
+	// 	WithMemory(kubevirtMemory).
+	// 	WithPrimaryDiskOSImage(image).
+	// 	WithPrimaryDiskSize(kubevirtDiskSize).
+	// 	WithPrimaryDiskStorageClassName(kubevirtStorageClassName).
+	// 	Build()
+
+	// log.Printf("Using base KubeVirt cloud provider spec: %v", baseCloudProviderSpec)
+
+	config, err := clientcmd.NewClientConfigFromBytes([]byte(secrets.Kubevirt.Kubeconfig))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create client config from kubevirt kubeconfig: %w", err)
 	}
 
-	cloudProviderSpec := provider.NewKubevirtConfig().
-		WithVCPUs(kubevirtVCPUs).
-		WithMemory(kubevirtMemory).
-		WithPrimaryDiskOSImage(image).
-		WithPrimaryDiskSize(kubevirtDiskSize).
-		WithPrimaryDiskStorageClassName(kubevirtStorageClassName).
-		Build()
+	results := make(map[string][]runtime.RawExtension)
+	restConfig, _ := config.ClientConfig()
+	limit := 10
 
-	md, err := s.createMachineDeployment(cluster, num, cloudProviderSpec, sshPubKeys, secrets)
+	cases, err := GenerateProviderTestCases("kubevirt", limit, restConfig, secrets)
 	if err != nil {
-		return nil, err
+		log.Printf("Error generating cases for %s: %v", "kubevirt", err)
+		return nil, fmt.Errorf("failed to generate test cases for kubevirt: %w", err)
+	}
+	results["kubevirt"] = cases
+	mds := make([]clusterv1alpha1.MachineDeployment, 0, len(results["kubevirt"]))
+	for _, providerConfig := range results["kubevirt"] {
+		md, err := s.createMachineDeployment(cluster, num, providerConfig, sshPubKeys, secrets)
+		if err != nil {
+			return nil, err
+		}
+		mds = append(mds, md)
 	}
 
-	return []clusterv1alpha1.MachineDeployment{md}, nil
+	return mds, nil
 }
 
 func (s *kubevirtScenario) getOSImage() (string, error) {
 	switch s.operatingSystem {
 	case providerconfig.OperatingSystemUbuntu:
-		return kubevirtImageHTTPServerSvc + "/ubuntu-22.04.img", nil
+		return "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04", nil
 	default:
 		return "", fmt.Errorf("unsupported OS %q selected", s.operatingSystem)
 	}
+}
+
+func (s *kubevirtScenario) DatacenterMatrix() ([]*kubermaticv1.Datacenter, error) {
+	datacenters := []*kubermaticv1.Datacenter{{
+		Spec: kubermaticv1.DatacenterSpec{
+			Kubevirt: &kubermaticv1.DatacenterSpecKubevirt{
+				EnableDefaultNetworkPolicies: ptr.To(false),
+				DNSPolicy:                    "ClusterFirst",
+				InfraStorageClasses: []kubermaticv1.KubeVirtInfraStorageClass{{
+					IsDefaultClass: ptr.To(true),
+					Name:           kubevirtStorageClassName,
+				}},
+				Images: kubermaticv1.KubeVirtImageSources{
+					HTTP: &kubermaticv1.KubeVirtHTTPSource{},
+				},
+			},
+		},
+	}, {
+		Spec: kubermaticv1.DatacenterSpec{
+			Kubevirt: &kubermaticv1.DatacenterSpecKubevirt{
+				EnableDefaultNetworkPolicies: ptr.To(true),
+				DNSPolicy:                    "ClusterFirst",
+				InfraStorageClasses: []kubermaticv1.KubeVirtInfraStorageClass{{
+					IsDefaultClass: ptr.To(true),
+					Name:           kubevirtStorageClassName,
+				}},
+				Images: kubermaticv1.KubeVirtImageSources{
+					HTTP: &kubermaticv1.KubeVirtHTTPSource{
+						OperatingSystems: map[providerconfig.OperatingSystem]kubermaticv1.OSVersions{
+							providerconfig.OperatingSystemUbuntu: {
+								"22.04": "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04",
+							},
+						},
+					},
+				},
+			},
+		},
+	}}
+
+	return datacenters, nil
 }

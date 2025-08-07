@@ -37,7 +37,7 @@ import (
 )
 
 var (
-	kubevirtStorageClassName = "kubevirt-local-path"
+	kubevirtStorageClassName = "kubevirt-conformance-rwx"
 )
 
 func supportsStorage(cluster *kubermaticv1.Cluster) bool {

@@ -57,6 +57,27 @@ func (c *kubeClient) Setup(ctx context.Context, log *zap.SugaredLogger) error {
 	return nil
 }
 
+func (c *kubeClient) GetSeed(ctx context.Context, log *zap.SugaredLogger, name string) (*kubermaticv1.Seed, error) {
+	c.log(log).Infof("Getting seed %s...", name)
+
+	seed := &kubermaticv1.Seed{}
+	if err := c.opts.SeedClusterClient.Get(ctx, ctrlruntimeclient.ObjectKey{Name: name, Namespace: "kubermatic"}, seed); err != nil {
+		return nil, fmt.Errorf("failed to get seed %s: %w", name, err)
+	}
+
+	return seed, nil
+}
+
+func (c *kubeClient) UpdateSeed(ctx context.Context, log *zap.SugaredLogger, obj *kubermaticv1.Seed) error {
+	c.log(log).Infof("Updating seed %s...", obj.Name)
+
+	if err := c.opts.SeedClusterClient.Update(ctx, obj); err != nil {
+		return fmt.Errorf("failed to update seed %s: %w", obj.Name, err)
+	}
+
+	return nil
+}
+
 func (c *kubeClient) log(log *zap.SugaredLogger) *zap.SugaredLogger {
 	return log.With("client", "kube")
 }

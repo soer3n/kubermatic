@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/crypto/ssh"
 
+	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/metrics"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/runner"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/scenarios"
@@ -116,6 +117,15 @@ func main() {
 		log.Fatalw("Failed to setup runner", zap.Error(err))
 	}
 
+	// TODO: here we need to generate all possible seed specs for the given
+	// cloud providers, operating systems and versions. This is done by the
+	// scenarios generator, which will generate all possible scenarios based on
+	// the given options.
+	log.Info("Generating scenarios...")
+	// use the scenarios generator to create a set of scenarios based on the
+	// given options. This will generate all possible scenarios based on the
+	// given options, which will then be used by the test runner to execute the
+	// tests.
 	// determine what's to do
 	scenarios, err := scenarios.NewGenerator().
 		WithCloudProviders(sets.List(opts.Providers)...).
@@ -153,39 +163,79 @@ func main() {
 	log.Info("Running E2E tests...")
 	start := time.Now()
 
-	results, err := testRunner.Run(rootCtx, scenarios)
+	scenariosSlices := interleaveScenarioSlices(scenarios)
+	log.Info("Interleaved scenario slices: ", len(scenariosSlices))
+	for _, scenarios := range scenariosSlices {
+		// TODO: reconfigure seed accordingly to what should be tested
+		// if err := testRunner.ReconfigureSeed(rootCtx, scenarios); err != nil {
+		// 	log.Fatalw("Failed to reconfigure seed", zap.Error(err))
+		// }
+		// log.Infow("Reconfigured seed", "seed", opts.KubermaticSeedName, "namespace", opts.KubermaticNamespace)
+		results, err := testRunner.Run(rootCtx, scenarios)
 
-	// always print the test results
-	if results != nil {
-		results.PrintJUnitDetails()
-		results.PrintSummary()
+		// always print the test results
+		if results != nil {
+			results.PrintJUnitDetails()
+			results.PrintSummary()
 
-		if filename := opts.ResultsFile; filename != "" {
-			log.Infow("Writing results file", "filename", filename)
+			if filename := opts.ResultsFile; filename != "" {
+				log.Infow("Writing results file", "filename", filename)
 
-			// Merge the previous tests with the new, current results; otherwise if we'd only
-			// dump the new results, those would not contain skipped/successful scenarios from
-			// the previous run, effectively shrinking the results file every time it is used.
-			if previousResults != nil {
-				results = runner.MergeResults(previousResults, results)
+				// Merge the previous tests with the new, current results; otherwise if we'd only
+				// dump the new results, those would not contain skipped/successful scenarios from
+				// the previous run, effectively shrinking the results file every time it is used.
+				if previousResults != nil {
+					results = runner.MergeResults(previousResults, results)
+				}
+
+				if err := results.WriteToFile(filename); err != nil {
+					log.Warnw("Failed to write results file", zap.Error(err))
+				}
 			}
+		}
 
-			if err := results.WriteToFile(filename); err != nil {
-				log.Warnw("Failed to write results file", zap.Error(err))
-			}
+		if err != nil {
+			log.Fatalw("Failed to execute tests", zap.Error(err))
+		}
+
+		if results.HasFailures() {
+			// Fatalw() because Fatal() trips up the linter because of the previous defer.
+			log.Fatalw("Not all tests have passed")
 		}
 	}
 
-	if err != nil {
-		log.Fatalw("Failed to execute tests", zap.Error(err))
-	}
-
-	if results.HasFailures() {
-		// Fatalw() because Fatal() trips up the linter because of the previous defer.
-		log.Fatalw("Not all tests have passed")
-	}
-
 	log.Infow("Test suite has completed successfully", "runtime", time.Since(start))
+}
+
+func interleaveScenarioSlices(input map[kubermaticv1.ProviderType][][]scenarios.Scenario) [][]scenarios.Scenario {
+	// Determine the max list length across all keys
+	maxLen := 0
+	for _, list := range input {
+		if len(list) > maxLen {
+			maxLen = len(list)
+		}
+	}
+
+	keys := make([]kubermaticv1.ProviderType, 0, len(input))
+	for k := range input {
+		keys = append(keys, k)
+	}
+
+	var result [][]scenarios.Scenario
+
+	// Interleave
+	for i := 0; i < maxLen; i++ {
+		var row []scenarios.Scenario
+		for _, k := range keys {
+			list := input[k]
+			if i < len(list) {
+				row = append(row, list[i]...)
+			}
+		}
+		result = append(result, row)
+	}
+
+	return result
 }
 
 func setupKubeClients(ctx context.Context, opts *types.Options) error {
@@ -314,31 +364,38 @@ func loadPreviousResults(opts *types.Options) (*runner.ResultsFile, error) {
 	return runner.LoadResultsFile(opts.ResultsFile)
 }
 
-func keepOnlyFailedScenarios(log *zap.SugaredLogger, allScenarios []scenarios.Scenario, previousResults *runner.ResultsFile, opts types.Options) []scenarios.Scenario {
+func keepOnlyFailedScenarios(log *zap.SugaredLogger, allScenarios map[kubermaticv1.ProviderType][][]scenarios.Scenario, previousResults *runner.ResultsFile, opts types.Options) map[kubermaticv1.ProviderType][][]scenarios.Scenario {
 	if optionsChanged(previousResults.Configuration, opts) {
 		log.Warn("Disregarding previous test results as current options do not match previous options.")
 		return allScenarios
 	}
+	filtered := map[kubermaticv1.ProviderType][][]scenarios.Scenario{}
+	for provider, scenarios := range allScenarios {
+		for i, scenarioSlice := range scenarios {
+			hasSuccess := false
 
-	filtered := []scenarios.Scenario{}
-	for i, scenario := range allScenarios {
-		hasSuccess := false
-
-		for _, previous := range previousResults.Results {
-			if previous.MatchesScenario(scenario) && previous.Status == runner.ScenarioPassed {
-				hasSuccess = true
-				break
+			for _, scenario := range scenarioSlice {
+				for _, previous := range previousResults.Results {
+					if previous.MatchesScenario(scenario) && previous.Status == runner.ScenarioPassed {
+						hasSuccess = true
+						break
+					}
+				}
+				if hasSuccess {
+					break
+				}
 			}
-		}
 
-		if hasSuccess {
-			scenario.Log(log).Info("Skipping because scenario succeeded in a previous run.")
-			continue
-		}
+			if hasSuccess {
+				for _, scenario := range scenarioSlice {
+					scenario.Log(log).Info("Skipping because scenario succeeded in a previous run.")
+				}
+				continue
+			}
 
-		filtered = append(filtered, allScenarios[i])
+			filtered[provider] = append(filtered[provider], scenarios[i])
+		}
 	}
-
 	return filtered
 }
 

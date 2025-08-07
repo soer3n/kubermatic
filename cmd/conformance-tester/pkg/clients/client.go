@@ -40,4 +40,6 @@ type Client interface {
 	CreateMachineDeployments(ctx context.Context, log *zap.SugaredLogger, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster) error
 	DeleteCluster(ctx context.Context, log *zap.SugaredLogger, cluster *kubermaticv1.Cluster, timeout time.Duration) error
 	DeleteProject(ctx context.Context, log *zap.SugaredLogger, id string, timeout time.Duration) error
+	GetSeed(ctx context.Context, log *zap.SugaredLogger, name string) (*kubermaticv1.Seed, error)
+	UpdateSeed(ctx context.Context, log *zap.SugaredLogger, obj *kubermaticv1.Seed) error
 }

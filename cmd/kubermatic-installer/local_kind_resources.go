@@ -173,6 +173,12 @@ var kindLocalSeed = kubermaticv1.Seed{
 					Kubevirt: &kubermaticv1.DatacenterSpecKubevirt{
 						EnableDefaultNetworkPolicies: ptr(false),
 						DNSPolicy:                    "ClusterFirst",
+						InfraStorageClasses: []kubermaticv1.KubeVirtInfraStorageClass{
+							{
+								IsDefaultClass: ptr(true),
+								Name:           kindStorageClass.Name,
+							},
+						},
 						Images: kubermaticv1.KubeVirtImageSources{
 							HTTP: &kubermaticv1.KubeVirtHTTPSource{
 								OperatingSystems: map[providerconfig.OperatingSystem]kubermaticv1.OSVersions{
