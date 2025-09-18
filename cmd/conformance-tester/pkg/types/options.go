@@ -71,9 +71,9 @@ type Options struct {
 	KonnectivityEnabled bool
 	ScenarioOptions     sets.Set[string]
 	TestClusterUpdate   bool
+	TestSettings        sets.Set[string]
 
 	// additional settings
-
 	ControlPlaneReadyWaitTimeout time.Duration
 	NodeReadyTimeout             time.Duration
 	CustomTestTimeout            time.Duration
@@ -114,6 +114,7 @@ func NewDefaultOptions() *Options {
 		EnableTests:                  sets.New[string](),
 		ExcludeTests:                 sets.New[string](),
 		Tests:                        sets.New[string](),
+		TestSettings:                 sets.New[string](),
 		KubermaticNamespace:          "kubermatic",
 		KubermaticSeedName:           "kubermatic",
 		ControlPlaneReadyWaitTimeout: 10 * time.Minute,
@@ -163,6 +164,7 @@ func (o *Options) AddFlags() {
 	flag.StringVar(&o.PushgatewayEndpoint, "pushgateway-endpoint", "", "host:port of a Prometheus Pushgateway to send runtime metrics to")
 	flag.StringVar(&o.ResultsFile, "results-file", "", "path to a JSON file where the test result will be written to / read from (when also using --retry)")
 	flag.BoolVar(&o.RetryFailedScenarios, "retry", false, "when using --results-file, will filter the given scenarios to only run those that previously failed")
+	flag.Var(flagopts.SetFlag(o.TestSettings), "test-settings", "Comma-separated list of test settings descriptions to run.")
 	o.Secrets.AddFlags()
 }
 

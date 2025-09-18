@@ -46,6 +46,12 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
+// TestSettings defines a struct for holding different configurations for a provider test.
+type TestSettings struct {
+	Description  string
+	ProviderSpec any
+}
+
 // Options represent combination of flags and ENV options.
 type Options struct {
 	Client     string `yaml:"client,omitempty"`
@@ -76,9 +82,9 @@ type Options struct {
 	KonnectivityEnabled bool     `yaml:"konnectivityEnabled,omitempty"`
 	ScenarioOptions     []string `yaml:"scenarioOptions,omitempty"`
 	TestClusterUpdate   bool     `yaml:"testClusterUpdate,omitempty"`
+	TestSettings        []string `yaml:"testSettings,omitempty"`
 
 	// additional settings
-
 	ControlPlaneReadyWaitTimeout time.Duration `yaml:"controlPlaneReadyWaitTimeout,omitempty"`
 	NodeReadyTimeout             time.Duration `yaml:"nodeReadyTimeout,omitempty"`
 	CustomTestTimeout            time.Duration `yaml:"customTestTimeout,omitempty"`
@@ -334,6 +340,8 @@ func mergeOptions(log *zap.SugaredLogger, yamlOpts *Options, flagOpts *legacytyp
 			merged.ResultsFile = flagOpts.ResultsFile
 		case "retry":
 			merged.RetryFailedScenarios = flagOpts.RetryFailedScenarios
+		case "test-settings":
+			merged.TestSettings = flagOpts.TestSettings
 		}
 	})
 
@@ -368,6 +376,7 @@ func toLegacyOptions(opts *Options, runtimeOpts *RuntimeOptions) *types.Options 
 		KonnectivityEnabled:          true,
 		ScenarioOptions:              sets.New[string](opts.ScenarioOptions...),
 		TestClusterUpdate:            opts.TestClusterUpdate,
+		TestSettings:                 sets.New[string](opts.TestSettings...),
 		ControlPlaneReadyWaitTimeout: opts.ControlPlaneReadyWaitTimeout,
 		NodeReadyTimeout:             opts.NodeReadyTimeout,
 		CustomTestTimeout:            opts.CustomTestTimeout,

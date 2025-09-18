@@ -84,7 +84,7 @@ func commonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 			}
 
 			return true
-		}, 5*time.Second, 10*time.Minute).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
+		}, legacyOpts.ControlPlaneReadyWaitTimeout, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
 
 		Eventually(func() bool {
 			newCluster := &kubermaticv1.Cluster{}
