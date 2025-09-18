@@ -56,9 +56,12 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalw("Failed to load options", zap.Error(err))
 	}
-	runtimeOpts, err = NewRuntimeOptions(rootCtx, log, opts)
-	if err != nil {
-		log.Fatalw("Failed to create runtime options", zap.Error(err))
+	configPath := os.Getenv("CONFORMANCE_TESTER_CONFIG_FILE")
+	if configPath != "" {
+		runtimeOpts, err = NewRuntimeOptions(rootCtx, log, opts)
+		if err != nil {
+			log.Fatalw("Failed to create runtime options", zap.Error(err))
+		}
 	}
 
 	// load cli-flags
@@ -67,7 +70,12 @@ func TestMain(m *testing.M) {
 
 	scenarioFailureMap = make(map[string][]Failure)
 	flag.Parse()
-
+	if configPath == "" {
+		runtimeOpts, _ = NewRuntimeOptions(rootCtx, log, &Options{
+			KubermaticNamespace: legacyOpts.KubermaticNamespace,
+			KubermaticSeedName:  legacyOpts.KubermaticSeedName,
+		})
+	}
 	// merge options by file and cli flags
 	legacyOpts = mergeOptions(log, opts, legacyOpts, runtimeOpts)
 
@@ -90,7 +98,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestScenarios(t *testing.T) {
-	RegisterFailHandler(CustomFailHandler)
+	RegisterFailHandler(Fail)
 
 	// To replicate the per-scenario JUnit reporting from the original implementation,
 	// we add our custom JUnit reporter. It writes one XML file per spec to the `reports`
@@ -105,19 +113,19 @@ func TestScenarios(t *testing.T) {
 	RunSpecs(t, "Conformance Tester Scenarios Suite", suiteConfig, reporterConfig)
 }
 
-func CustomFailHandler(message string, callerSkip ...int) {
-	skip := 0
-	if len(callerSkip) > 0 {
-		skip = callerSkip[0]
-	}
-	currentSpecReport := CurrentSpecReport()
-	scenarioFailureMapKey := currentSpecReport.ContainerHierarchyTexts[len(currentSpecReport.ContainerHierarchyTexts)-1]
-	scenarioFailureMap[scenarioFailureMapKey] = append(scenarioFailureMap[scenarioFailureMapKey], Failure{
-		Message: message,
-		Step:    currentSpecReport.SpecEvents[len(currentSpecReport.SpecEvents)-1].Message,
-	})
-	log.Infof("Skipping %d message %v", skip, message)
-}
+// func CustomFailHandler(message string, callerSkip ...int) {
+// 	skip := 0
+// 	if len(callerSkip) > 0 {
+// 		skip = callerSkip[0]
+// 	}
+// 	currentSpecReport := CurrentSpecReport()
+// 	scenarioFailureMapKey := currentSpecReport.ContainerHierarchyTexts[len(currentSpecReport.ContainerHierarchyTexts)-1]
+// 	scenarioFailureMap[scenarioFailureMapKey] = append(scenarioFailureMap[scenarioFailureMapKey], Failure{
+// 		Message: message,
+// 		Step:    currentSpecReport.SpecEvents[len(currentSpecReport.SpecEvents)-1].Message,
+// 	})
+// 	log.Infof("Skipping %d message %v", skip, message)
+// }
 
 func formatter(value any) (string, bool) {
 	// handle github.com/pkg/errors with a stack
@@ -145,15 +153,15 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	})
 
 	By(KKP("Ensuring a project exists"), func() {
-		if opts.KubermaticProject == "" {
+		if legacyOpts.KubermaticProject == "" {
 			projectName := "e2e-" + rand.String(5)
 			p, err := client.CreateProject(rootCtx, log, projectName)
 			Expect(err).NotTo(HaveOccurred())
 			projectName = p
-			opts.KubermaticProject = projectName
 			legacyOpts.KubermaticProject = projectName
+			opts.KubermaticProject = projectName
 		}
-		fmt.Fprintf(GinkgoWriter, "Using project %q\n", opts.KubermaticProject)
+		fmt.Fprintf(GinkgoWriter, "Using project %q\n", legacyOpts.KubermaticProject)
 	})
 
 	By(KKP("Ensuring SSH keys exist"), func() {
@@ -179,7 +187,7 @@ var _ = SynchronizedAfterSuite(func() {
 	// Here we could clean up resources created by each process.
 }, func() {
 	// This function runs once on a single process after all tests have finished.
-	if opts.KubermaticProject == "" {
+	if opts.KubermaticProject != "" {
 		By(KKP("Deleting the project"), func() {
 			deleteTimeout := 15 * time.Minute
 			Expect(client.DeleteProject(rootCtx, log, opts.KubermaticProject, deleteTimeout)).To(Succeed())
