@@ -173,7 +173,7 @@ func commonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clien
 
 func machineSetup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, legacyOpts *legacytypes.Options) {
 	By(KKP("Create MachineDeployments"), func() {
-		err := client.CreateMachineDeployments(rootCtx, log, scenario, userClusterClient, cluster)
+		err := client.MachineDeploymentsWithProviderSpec(rootCtx, log, scenario, userClusterClient, cluster)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to create machine deployments with error %v", err))
 	})
 	By(KKP("Wait for machines to get a node"), func() {

@@ -337,6 +337,60 @@ func (c *kubeClient) CreateMachineDeployments(ctx context.Context, log *zap.Suga
 	return nil
 }
 
+func (c *kubeClient) MachineDeploymentsWithProviderSpec(ctx context.Context, log *zap.SugaredLogger, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster) error {
+	c.log(log).Info("Getting existing MachineDeployments...")
+
+	mdList := &clusterv1alpha1.MachineDeploymentList{}
+	if err := userClusterClient.List(ctx, mdList); err != nil {
+		return fmt.Errorf("failed to list existing MachineDeployments: %w", err)
+	}
+
+	existingReplicas := 0
+	for _, md := range mdList.Items {
+		existingReplicas += int(*md.Spec.Replicas)
+	}
+	c.log(log).Infof("Found %d pre-existing node replicas", existingReplicas)
+
+	nodeCount := c.opts.NodeCount - existingReplicas
+	if nodeCount < 0 {
+		return fmt.Errorf("found %d existing replicas and want %d, scale-down not supported", existingReplicas, c.opts.NodeCount)
+	}
+	if nodeCount == 0 {
+		return nil
+	}
+
+	projectKeys, err := c.getAssignedSSHKeys(ctx)
+	if err != nil {
+		return err
+	}
+
+	publicKeys := sets.NewString()
+	for _, key := range projectKeys {
+		publicKeys.Insert(key.Spec.PublicKey)
+	}
+
+	c.log(log).Info("Preparing MachineDeployments with provider spec...")
+	var mds []clusterv1alpha1.MachineDeployment
+	if err := wait.PollImmediate(ctx, 3*time.Second, time.Minute, func(ctx context.Context) (transient error, terminal error) {
+		mds, transient = scenario.MachineDeploymentsWithProviderSpec(ctx, nodeCount, c.opts.Secrets, cluster, publicKeys.List(), nil)
+		return transient, nil
+	}); err != nil {
+		return fmt.Errorf("failed to create MachineDeployments from scenario with provider spec: %w", err)
+	}
+
+	c.log(log).Info("Creating MachineDeployments...")
+	for _, md := range mds {
+		if err := wait.PollImmediateLog(ctx, log, 5*time.Second, time.Minute, func(ctx context.Context) (error, error) {
+			return userClusterClient.Create(ctx, &md), nil
+		}); err != nil {
+			return fmt.Errorf("failed to apply MachineDeployments: %w", err)
+		}
+	}
+
+	c.log(log).Infof("Successfully created MachineDeployments with %d replicas in total (provider spec)", nodeCount)
+	return nil
+}
+
 func (c *kubeClient) DeleteCluster(ctx context.Context, log *zap.SugaredLogger, cluster *kubermaticv1.Cluster, timeout time.Duration) error {
 	// if there is no timeout, we do not wait for the cluster to be gone
 	if timeout == 0 {

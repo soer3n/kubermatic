@@ -82,3 +82,11 @@ func (s *alibabaScenario) MachineDeployments(_ context.Context, replicas int, se
 
 	return []clusterv1alpha1.MachineDeployment{md}, nil
 }
+
+func (s *alibabaScenario) MachineDeploymentsWithProviderSpec(ctx context.Context, replicas int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, replicas, providerSpec, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
+	return []clusterv1alpha1.MachineDeployment{md}, nil
+}

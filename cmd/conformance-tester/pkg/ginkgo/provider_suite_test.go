@@ -68,7 +68,7 @@ func TestMain(m *testing.M) {
 	legacyOpts = legacytypes.NewDefaultOptions()
 	legacyOpts.AddFlags()
 
-	scenarioFailureMap = make(map[string][]Failure)
+	// scenarioFailureMap = make(map[string][]Failure)
 	flag.Parse()
 	if configPath == "" {
 		runtimeOpts, _ = NewRuntimeOptions(rootCtx, log, &Options{

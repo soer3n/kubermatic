@@ -149,3 +149,11 @@ func (s *awsScenario) MachineDeployments(ctx context.Context, num int, secrets t
 
 	return result, nil
 }
+
+func (s *awsScenario) MachineDeploymentsWithProviderSpec(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, num, providerSpec, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
+	return []clusterv1alpha1.MachineDeployment{md}, nil
+}

@@ -96,3 +96,11 @@ func (s *nutanixScenario) MachineDeployments(_ context.Context, num int, secrets
 
 	return []clusterv1alpha1.MachineDeployment{md}, nil
 }
+
+func (s *nutanixScenario) MachineDeploymentsWithProviderSpec(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, num, providerSpec, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
+	return []clusterv1alpha1.MachineDeployment{md}, nil
+}

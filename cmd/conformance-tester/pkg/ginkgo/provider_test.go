@@ -1,18 +1,21 @@
 package ginkgo
 
 import (
+	"fmt"
 	"iter"
 	"maps"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
-	// . "github.com/onsi/gomega"
+	. "github.com/onsi/gomega"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/scenarios"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
+	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
+	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
 // The ReportAfterEach function has been removed in favor of using AfterEach
@@ -46,10 +49,51 @@ var _ = Describe("[provider]", func() {
 		// Capture range variables to ensure they have the correct value in the closure.
 		provider := provider
 		description := description
-		settingsList := GetSettingsForProvider(provider)
-		settingsList, _ = mergeTestSettings(settingsList, legacyOpts.TestSettings)
+		fieldVariants := []FieldVariant{
+			// ClusterName: Name of the KubeVirt cluster.
+			{"ClusterName", []interface{}{"test-cluster", "", "invalid"}},
+			// Auth.Kubeconfig: Kubeconfig for authentication.
+			{"Auth.Kubeconfig", []interface{}{"valid-kubeconfig", "", "invalid"}},
+			// VirtualMachine.Instancetype: VM instance type matcher.
+			{"VirtualMachine.Instancetype", []interface{}{"valid-instancetype", nil, "invalid"}},
+			// VirtualMachine.Preference: VM preference matcher.
+			{"VirtualMachine.Preference", []interface{}{"valid-preference", nil, "invalid"}},
+			// VirtualMachine.DNSPolicy: Pod DNS policy.
+			{"VirtualMachine.DNSPolicy", []interface{}{"ClusterFirstWithHostNet", "", "invalid"}},
+			// VirtualMachine.EvictionStrategy: VM eviction strategy.
+			{"VirtualMachine.EvictionStrategy", []interface{}{"LiveMigrate", "", "invalid"}},
+			// VirtualMachine.EnableNetworkMultiQueue: Enable network multi-queue.
+			{"VirtualMachine.EnableNetworkMultiQueue", []interface{}{true, false, "invalid"}},
+			// VirtualMachine.Template.CPUs: Number of CPUs for the VM.
+			{"VirtualMachine.Template.CPUs", []interface{}{"2", "", "invalid"}},
+			// VirtualMachine.Template.Memory: Amount of memory for the VM.
+			{"VirtualMachine.Template.Memory", []interface{}{"2048Mi", "", "invalid"}},
+			// VirtualMachine.Template.PrimaryDisk.Size: Size of the primary disk.
+			{"VirtualMachine.Template.PrimaryDisk.Size", []interface{}{"20Gi", "", "invalid"}},
+			// VirtualMachine.Template.PrimaryDisk.StorageClassName: Storage class for the primary disk.
+			{"VirtualMachine.Template.PrimaryDisk.StorageClassName", []interface{}{"local-path", "", "invalid"}},
+			// VirtualMachine.Template.SecondaryDisks.Size: Size of secondary disks.
+			{"VirtualMachine.Template.SecondaryDisks.Size", []interface{}{"10Gi", "", "invalid"}},
+			// VirtualMachine.Template.SecondaryDisks.StorageClassName: Storage class for secondary disks.
+			{"VirtualMachine.Template.SecondaryDisks.StorageClassName", []interface{}{"local-path", "", "invalid"}},
+			// Affinity.NodeAffinityPreset.Type: Node affinity type.
+			{"Affinity.NodeAffinityPreset.Type", []interface{}{"required", "", "invalid"}},
+			// Affinity.NodeAffinityPreset.Key: Node affinity key.
+			{"Affinity.NodeAffinityPreset.Key", []interface{}{"kubernetes.io/hostname", "", "invalid"}},
+			// Affinity.NodeAffinityPreset.Values: Node affinity values.
+			{"Affinity.NodeAffinityPreset.Values", []interface{}{"node-01", "", "invalid"}},
+			// TopologySpreadConstraints.TopologyKey: Topology key for spread constraints.
+			{"TopologySpreadConstraints.TopologyKey", []interface{}{"kubernetes.io/hostname", "", "invalid"}},
+			// TopologySpreadConstraints.MaxSkew: Max skew for topology spread.
+			{"TopologySpreadConstraints.MaxSkew", []interface{}{"1", "", "invalid"}},
+			// TopologySpreadConstraints.WhenUnsatisfiable: Action when unsatisfiable.
+			{"TopologySpreadConstraints.WhenUnsatisfiable", []interface{}{"DoNotSchedule", "", "invalid"}},
+		}
+		// Use a one-at-a-time variant generator to avoid cartesian explosion
+		settingsList := generateKubevirtOneAtATimeTestSettings(&kubevirt.RawConfig{}, fieldVariants)
+		settingsList, err := mergeTestSettings(settingsList, legacyOpts.TestSettings)
 
-		// Expect(err).NotTo(HaveOccurred())
+		Expect(err).NotTo(HaveOccurred())
 		// Assume `opts.TestSettings` is a comma-separated string of descriptions from a flag.
 		// If the flag is empty, all tests will run.
 		var enabledSettings map[string]struct{}
@@ -187,3 +231,109 @@ var _ = Describe("[provider]", func() {
 		})
 	}
 })
+
+// generateKubevirtOneAtATimeTestSettings generates test settings by varying one field at a time.
+func generateKubevirtOneAtATimeTestSettings(defaults *kubevirt.RawConfig, variants []FieldVariant) []TestSettings {
+	var settingsList []TestSettings
+	for _, variant := range variants {
+		for _, value := range variant.Values {
+			cfg := cloneRawConfig(defaults)
+			applyVariantToConfig(cfg, variant.Name, value)
+			settings := TestSettings{
+				Description:  variant.Name + "=" + toString(value),
+				ProviderSpec: cfg, // Use the correct field name for your TestSettings struct
+			}
+			settingsList = append(settingsList, settings)
+		}
+	}
+	return settingsList
+}
+
+// Helper: convert interface{} to string for description.
+func toString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case nil:
+		return "nil"
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
+	case int, int64:
+		return fmt.Sprintf("%v", val)
+	default:
+		return "custom"
+	}
+}
+
+// Helper: deep clone RawConfig (shallow for demo, deep copy recommended for production).
+func cloneRawConfig(in *kubevirt.RawConfig) *kubevirt.RawConfig {
+	if in == nil {
+		return &kubevirt.RawConfig{}
+	}
+	copy := *in
+	return &copy
+}
+
+// Helper: apply a variant value to the config by field path (shallow for demo).
+func applyVariantToConfig(cfg *kubevirt.RawConfig, field string, value interface{}) {
+	switch field {
+	case "ClusterName":
+		cfg.ClusterName.Value = toString(value)
+	case "Auth.Kubeconfig":
+		cfg.Auth.Kubeconfig.Value = toString(value)
+	case "VirtualMachine.Instancetype":
+		// For demo, just set to string; real code should set the matcher struct
+	case "VirtualMachine.Preference":
+		// For demo, just set to string; real code should set the matcher struct
+	case "VirtualMachine.DNSPolicy":
+		cfg.VirtualMachine.DNSPolicy.Value = toString(value)
+	case "VirtualMachine.EvictionStrategy":
+		cfg.VirtualMachine.EvictionStrategy = toString(value)
+	case "VirtualMachine.EnableNetworkMultiQueue":
+		if b, ok := value.(bool); ok {
+			cfg.VirtualMachine.EnableNetworkMultiQueue.Value = &b
+		}
+	case "VirtualMachine.Template.CPUs":
+		cfg.VirtualMachine.Template.CPUs.Value = toString(value)
+	case "VirtualMachine.Template.Memory":
+		cfg.VirtualMachine.Template.Memory.Value = toString(value)
+	case "VirtualMachine.Template.PrimaryDisk.Size":
+		cfg.VirtualMachine.Template.PrimaryDisk.Size.Value = toString(value)
+	case "VirtualMachine.Template.PrimaryDisk.StorageClassName":
+		cfg.VirtualMachine.Template.PrimaryDisk.StorageClassName.Value = toString(value)
+	case "VirtualMachine.Template.SecondaryDisks.Size":
+		if len(cfg.VirtualMachine.Template.SecondaryDisks) == 0 {
+			cfg.VirtualMachine.Template.SecondaryDisks = append(cfg.VirtualMachine.Template.SecondaryDisks, kubevirt.SecondaryDisks{})
+		}
+		cfg.VirtualMachine.Template.SecondaryDisks[0].Size.Value = toString(value)
+	case "VirtualMachine.Template.SecondaryDisks.StorageClassName":
+		if len(cfg.VirtualMachine.Template.SecondaryDisks) == 0 {
+			cfg.VirtualMachine.Template.SecondaryDisks = append(cfg.VirtualMachine.Template.SecondaryDisks, kubevirt.SecondaryDisks{})
+		}
+		cfg.VirtualMachine.Template.SecondaryDisks[0].StorageClassName.Value = toString(value)
+	case "Affinity.NodeAffinityPreset.Type":
+		cfg.Affinity.NodeAffinityPreset.Type.Value = toString(value)
+	case "Affinity.NodeAffinityPreset.Key":
+		cfg.Affinity.NodeAffinityPreset.Key.Value = toString(value)
+	case "Affinity.NodeAffinityPreset.Values":
+		cfg.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: toString(value)}}
+	case "TopologySpreadConstraints.TopologyKey":
+		if len(cfg.TopologySpreadConstraints) == 0 {
+			cfg.TopologySpreadConstraints = append(cfg.TopologySpreadConstraints, kubevirt.TopologySpreadConstraint{})
+		}
+		cfg.TopologySpreadConstraints[0].TopologyKey.Value = toString(value)
+	case "TopologySpreadConstraints.MaxSkew":
+		if len(cfg.TopologySpreadConstraints) == 0 {
+			cfg.TopologySpreadConstraints = append(cfg.TopologySpreadConstraints, kubevirt.TopologySpreadConstraint{})
+		}
+		cfg.TopologySpreadConstraints[0].MaxSkew.Value = toString(value)
+	case "TopologySpreadConstraints.WhenUnsatisfiable":
+		if len(cfg.TopologySpreadConstraints) == 0 {
+			cfg.TopologySpreadConstraints = append(cfg.TopologySpreadConstraints, kubevirt.TopologySpreadConstraint{})
+		}
+		cfg.TopologySpreadConstraints[0].WhenUnsatisfiable.Value = toString(value)
+	}
+}

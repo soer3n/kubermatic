@@ -24,6 +24,7 @@ import (
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	"k8c.io/kubermatic/v2/pkg/machine/provider"
 	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -51,16 +52,15 @@ func (s *KubevirtScenario) compatibleOperatingSystems() sets.Set[providerconfig.
 	)
 }
 
-func (s *KubevirtScenario) IsValid() error {
-	if err := s.IsValid(); err != nil {
-		return err
-	}
-
+func (s *KubevirtScenario) isValidKubevirt() error {
 	if compat := s.compatibleOperatingSystems(); !compat.Has(s.operatingSystem) {
 		return fmt.Errorf("provider supports only %v", sets.List(compat))
 	}
-
 	return nil
+}
+
+func (s *KubevirtScenario) IsValid() error {
+	return s.isValidKubevirt()
 }
 
 func (s *KubevirtScenario) Cluster(secrets types.Secrets) *kubermaticv1.ClusterSpec {
@@ -98,6 +98,31 @@ func (s *KubevirtScenario) MachineDeployments(_ context.Context, num int, secret
 		return nil, err
 	}
 
+	return []clusterv1alpha1.MachineDeployment{md}, nil
+}
+
+// MachineDeploymentsWithRawConfig creates a machine deployment using a custom RawConfig (from testSettings)
+func (s *KubevirtScenario) MachineDeploymentsWithRawConfig(
+	ctx context.Context,
+	num int,
+	secrets types.Secrets,
+	cluster *kubermaticv1.Cluster,
+	sshPubKeys []string,
+	rawConfig *kubevirt.RawConfig,
+) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, num, rawConfig, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
+	return []clusterv1alpha1.MachineDeployment{md}, nil
+}
+
+// MachineDeploymentsWithProviderSpec creates a machine deployment using a custom provider spec (for testSettings)
+func (s *KubevirtScenario) MachineDeploymentsWithProviderSpec(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, num, providerSpec, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
 	return []clusterv1alpha1.MachineDeployment{md}, nil
 }
 

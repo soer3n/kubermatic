@@ -48,6 +48,8 @@ type Scenario interface {
 
 	Cluster(secrets types.Secrets) *kubermaticv1.ClusterSpec
 	MachineDeployments(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string) ([]clusterv1alpha1.MachineDeployment, error)
+	// New: create machine deployments with a custom provider spec (e.g., from testSettings)
+	MachineDeploymentsWithProviderSpec(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error)
 }
 
 type BaseScenario struct {
@@ -171,6 +173,15 @@ func (s *BaseScenario) CreateMachineDeployment(cluster *kubermaticv1.Cluster, re
 			},
 		},
 	}, nil
+}
+
+// MachineDeploymentsWithProviderSpec creates a machine deployment using a custom provider spec (for testSettings)
+func (s *BaseScenario) MachineDeploymentsWithProviderSpec(ctx context.Context, num int, secrets types.Secrets, cluster *kubermaticv1.Cluster, sshPubKeys []string, providerSpec interface{}) ([]clusterv1alpha1.MachineDeployment, error) {
+	md, err := s.CreateMachineDeployment(cluster, num, providerSpec, sshPubKeys, secrets)
+	if err != nil {
+		return nil, err
+	}
+	return []clusterv1alpha1.MachineDeployment{md}, nil
 }
 
 func (s *BaseScenario) GetOperatingSystemSpec(secrets types.Secrets) (interface{}, error) {
