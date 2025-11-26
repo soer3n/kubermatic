@@ -1,24 +1,45 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getGCPTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderGoogle],
-		providerconfig.CloudProviderGoogle,
-		fd,
-		fd.getGCPSecretFields(),
-	)
+// getGCPTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getGCPTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderGoogle)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
-func (fd *FormData) getGCPSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("GCP KKPDatacenter").Value(&fd.Secrets.GCP.KKPDatacenter).Validate(fd.requiredIf(string(providerconfig.CloudProviderGoogle))),
-		huh.NewText().Title("GCP ServiceAccount (JSON)").Value(&fd.Secrets.GCP.ServiceAccount).CharLimit(10000).Validate(fd.requiredIf(string(providerconfig.CloudProviderGoogle))).
-			Placeholder("ServiceAccount is the plaintext Service account (as JSON) without any (base64) encoding"),
-		huh.NewInput().Title("GCP Network").Value(&fd.Secrets.GCP.Network).Validate(fd.requiredIf(string(providerconfig.CloudProviderGoogle))),
-		huh.NewInput().Title("GCP Subnetwork").Value(&fd.Secrets.GCP.Subnetwork).Validate(fd.requiredIf(string(providerconfig.CloudProviderGoogle))),
+
+// getGCPSecretFields returns the secret credential fields for GCP provider
+func (fd *FormData) getGCPSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "GCP KKPDatacenter",
+			Value:    &fd.Secrets.GCP.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "ServiceAccount",
+			Label:    "GCP ServiceAccount (JSON)",
+			Value:    &fd.Secrets.GCP.ServiceAccount,
+			Required: true,
+		},
+		{
+			Name:     "Network",
+			Label:    "GCP Network",
+			Value:    &fd.Secrets.GCP.Network,
+			Required: true,
+		},
+		{
+			Name:     "Subnetwork",
+			Label:    "GCP Subnetwork",
+			Value:    &fd.Secrets.GCP.Subnetwork,
+			Required: true,
+		},
 	}
 }

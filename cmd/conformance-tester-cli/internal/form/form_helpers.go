@@ -1,59 +1,27 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
-	"k8c.io/kubermatic/v2/cmd/conformance-tester-cli/internal/config"
 	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-// buildProviderFormGroups creates generic secret and scenario form groups for a provider.
-func buildProviderFormGroups(
-	providerName string,
-	providerCloudName providerconfig.CloudProvider,
-	fd *FormData,
-	secretFields []huh.Field,
-) []*huh.Group {
-	// Hide secrets when the provider is not selected OR when running against
-	// an existing KKP instance (we shouldn't ask for provider credentials).
-	secretsHide := func() bool {
-		return !config.Contains(fd.ProvidersSelected, string(providerCloudName)) || fd.EnvOpt == "KKP"
-	}
-
-	// Get test scenarios for this provider
-	testScenarios := ginkgoutils.GetSettingsForProvider(providerCloudName)
-
-	// Each provider needs its own scenario field function to bind to the correct FormData field.
-	scenarioFields := buildScenarioFields(testScenarios, getTestSettingsValue(providerCloudName, fd))
-
-	secretsGroup := huh.NewGroup(secretFields...).
-		WithHideFunc(secretsHide).
-		Title("Enter Credentials for " + providerName)
-
-	// Scenarios should still be shown when the provider is selected even if
-	// we're using an existing KKP instance — only secrets are skipped.
-	scenarioGroup := huh.NewGroup(scenarioFields...).
-		WithHideFunc(func() bool { return !config.Contains(fd.ProvidersSelected, string(providerCloudName)) }).
-		Title("Select Test Scenarios for " + providerName)
-
-	return []*huh.Group{secretsGroup, scenarioGroup}
+// ProviderSecrets represents credential fields for a provider
+type ProviderSecrets struct {
+	Label  string
+	Fields []SecretField
 }
 
-// buildScenarioFields creates a generic scenario multi-select field.
-func buildScenarioFields(
-	testScenarios []ginkgoutils.TestSettings,
-	value *[]string,
-) []huh.Field {
-	options := make([]huh.Option[string], 0, len(testScenarios))
-	for _, s := range testScenarios {
-		options = append(options, huh.NewOption(s.Description, s.Description))
-	}
+// SecretField represents a single secret credential field
+type SecretField struct {
+	Name     string
+	Label    string
+	Value    *string
+	Required bool
+}
 
-	return []huh.Field{
-		huh.NewMultiSelect[string]().
-			Options(options...).
-			Value(value),
-	}
+// GetTestSettingsForProvider returns the available test settings for a provider
+func GetTestSettingsForProvider(provider providerconfig.CloudProvider) []ginkgoutils.TestSettings {
+	return ginkgoutils.GetSettingsForProvider(provider)
 }
 
 // getTestSettingsValue returns a pointer to the correct TestSettings field in FormData.

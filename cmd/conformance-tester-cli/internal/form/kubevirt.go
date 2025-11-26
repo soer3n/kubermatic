@@ -1,23 +1,33 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getKubevirtTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderKubeVirt],
-		providerconfig.CloudProviderKubeVirt,
-		fd,
-		fd.getKubevirtSecretFields(),
-	)
+// getKubevirtTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getKubevirtTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderKubeVirt)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
 
-func (fd *FormData) getKubevirtSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("KubeVirt KKPDatacenter").Value(&fd.Secrets.Kubevirt.KKPDatacenter).Validate(fd.requiredIf(string(providerconfig.CloudProviderKubeVirt))),
-		huh.NewText().Title("KubeVirt Kubeconfig").Value(&fd.Secrets.Kubevirt.Kubeconfig).CharLimit(100000).Validate(fd.requiredIf(string(providerconfig.CloudProviderKubeVirt))).
-			Placeholder("Paste as plaintext kubeconfig without any (base64) encoding"),
+// getKubevirtSecretFields returns the secret credential fields for KubeVirt provider
+func (fd *FormData) getKubevirtSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "KubeVirt KKPDatacenter",
+			Value:    &fd.Secrets.Kubevirt.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "Kubeconfig",
+			Label:    "KubeVirt Kubeconfig",
+			Value:    &fd.Secrets.Kubevirt.Kubeconfig,
+			Required: true,
+		},
 	}
 }

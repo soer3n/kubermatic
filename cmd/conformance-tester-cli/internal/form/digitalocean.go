@@ -1,21 +1,33 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getDigitalOceanTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderDigitalocean],
-		providerconfig.CloudProviderDigitalocean,
-		fd,
-		fd.getDigitalOceanSecretFields(),
-	)
+// getDigitalOceanTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getDigitalOceanTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderDigitalocean)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
-func (fd *FormData) getDigitalOceanSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("DigitalOcean KKPDatacenter").Value(&fd.Secrets.Digitalocean.KKPDatacenter).Validate(fd.requiredIf("digitalocean")),
-		huh.NewInput().Title("DigitalOcean Token").Value(&fd.Secrets.Digitalocean.Token).Validate(fd.requiredIf("digitalocean")),
+
+// getDigitalOceanSecretFields returns the secret credential fields for DigitalOcean provider
+func (fd *FormData) getDigitalOceanSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "DigitalOcean KKPDatacenter",
+			Value:    &fd.Secrets.Digitalocean.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "Token",
+			Label:    "DigitalOcean Token",
+			Value:    &fd.Secrets.Digitalocean.Token,
+			Required: true,
+		},
 	}
 }

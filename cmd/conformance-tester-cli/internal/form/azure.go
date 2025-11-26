@@ -1,24 +1,51 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getAzureTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderAzure],
-		providerconfig.CloudProviderAzure,
-		fd,
-		fd.getAzureSecretFields(),
-	)
+// getAzureTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getAzureTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderAzure)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
-func (fd *FormData) getAzureSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("Azure KKPDatacenter").Value(&fd.Secrets.Azure.KKPDatacenter).Validate(fd.requiredIf(string(providerconfig.CloudProviderAzure))),
-		huh.NewInput().Title("Azure ClientID").Value(&fd.Secrets.Azure.ClientID).Validate(fd.requiredIf(string(providerconfig.CloudProviderAzure))),
-		huh.NewInput().Title("Azure ClientSecret").Value(&fd.Secrets.Azure.ClientSecret).Validate(fd.requiredIf(string(providerconfig.CloudProviderAzure))),
-		huh.NewInput().Title("Azure TenantID").Value(&fd.Secrets.Azure.TenantID).Validate(fd.requiredIf(string(providerconfig.CloudProviderAzure))),
-		huh.NewInput().Title("Azure SubscriptionID").Value(&fd.Secrets.Azure.SubscriptionID).Validate(fd.requiredIf(string(providerconfig.CloudProviderAzure))),
+
+// getAzureSecretFields returns the secret credential fields for Azure provider
+func (fd *FormData) getAzureSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "Azure KKPDatacenter",
+			Value:    &fd.Secrets.Azure.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "ClientID",
+			Label:    "Azure ClientID",
+			Value:    &fd.Secrets.Azure.ClientID,
+			Required: true,
+		},
+		{
+			Name:     "ClientSecret",
+			Label:    "Azure ClientSecret",
+			Value:    &fd.Secrets.Azure.ClientSecret,
+			Required: true,
+		},
+		{
+			Name:     "TenantID",
+			Label:    "Azure TenantID",
+			Value:    &fd.Secrets.Azure.TenantID,
+			Required: true,
+		},
+		{
+			Name:     "SubscriptionID",
+			Label:    "Azure SubscriptionID",
+			Value:    &fd.Secrets.Azure.SubscriptionID,
+			Required: true,
+		},
 	}
 }

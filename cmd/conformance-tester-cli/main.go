@@ -17,59 +17,37 @@ limitations under the License.
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester-cli/internal/form"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester-cli/internal/runner"
 )
 
-func displaySplashScreen() {
-	// Clear screen (works on Unix-like systems)
-	fmt.Print("\033[H\033[2J")
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("╔════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║                                                                ║")
-	fmt.Println("║                    CONFORMANCE TESTER                          ║")
-	fmt.Println("║                                                                ║")
-	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
-	fmt.Println()
-	fmt.Println()
-	fmt.Println("Press Enter to continue...")
-	reader := bufio.NewReader(os.Stdin)
-	_, err := reader.ReadString('\n')
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
 func main() {
-	// Display splash screen
-	displaySplashScreen()
+	// Create form model
+	formModel := form.NewFormModel()
 
-	// Create form data
-	formData := form.NewFormData()
-
-	// Build and run the form
-	formUI := formData.BuildForm()
-	if err := formUI.Run(); err != nil {
+	// Run the form using bubbletea
+	p := tea.NewProgram(formModel)
+	_, err := p.Run()
+	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Post-process the form data
-	if err := formData.PostProcess(); err != nil {
+	if err := formModel.FormData.PostProcess(); err != nil {
 		log.Fatal(err)
 	}
 
 	// Generate output configuration
-	out := formData.Config.ToOutputConfig(*formData.Secrets)
+	out := formModel.FormData.Config.ToOutputConfig(*formModel.FormData.Secrets)
 
 	// If the user opted to run the tests, execute them now.
-	if formData.RunTests {
+	if formModel.FormData.RunTests {
 		if err := runner.Run(out); err != nil {
 			log.Fatalf("Test execution failed: %v", err)
 		}

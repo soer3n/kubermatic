@@ -1,25 +1,57 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getOpenStackTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderOpenstack],
-		providerconfig.CloudProviderOpenstack,
-		fd,
-		fd.getOpenStackSecretFields(),
-	)
+// getOpenStackTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getOpenStackTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderOpenstack)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
-func (fd *FormData) getOpenStackSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("OpenStack KKPDatacenter").Value(&fd.Secrets.OpenStack.KKPDatacenter).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
-		huh.NewInput().Title("OpenStack Domain").Value(&fd.Secrets.OpenStack.Domain).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
-		huh.NewInput().Title("OpenStack Project").Value(&fd.Secrets.OpenStack.Project).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
-		huh.NewInput().Title("OpenStack ProjectID").Value(&fd.Secrets.OpenStack.ProjectID).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
-		huh.NewInput().Title("OpenStack Username").Value(&fd.Secrets.OpenStack.Username).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
-		huh.NewInput().Title("OpenStack Password").Value(&fd.Secrets.OpenStack.Password).Validate(fd.requiredIf(string(providerconfig.CloudProviderOpenstack))),
+
+// getOpenStackSecretFields returns the secret credential fields for OpenStack provider
+func (fd *FormData) getOpenStackSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "OpenStack KKPDatacenter",
+			Value:    &fd.Secrets.OpenStack.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "Domain",
+			Label:    "OpenStack Domain",
+			Value:    &fd.Secrets.OpenStack.Domain,
+			Required: true,
+		},
+		{
+			Name:     "Project",
+			Label:    "OpenStack Project",
+			Value:    &fd.Secrets.OpenStack.Project,
+			Required: true,
+		},
+		{
+			Name:     "ProjectID",
+			Label:    "OpenStack ProjectID",
+			Value:    &fd.Secrets.OpenStack.ProjectID,
+			Required: true,
+		},
+		{
+			Name:     "Username",
+			Label:    "OpenStack Username",
+			Value:    &fd.Secrets.OpenStack.Username,
+			Required: true,
+		},
+		{
+			Name:     "Password",
+			Label:    "OpenStack Password",
+			Value:    &fd.Secrets.OpenStack.Password,
+			Required: true,
+		},
 	}
 }

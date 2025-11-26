@@ -1,22 +1,39 @@
 package form
 
 import (
-	"github.com/charmbracelet/huh"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
-func (fd *FormData) getAlibabaTestSettings() []*huh.Group {
-	return buildProviderFormGroups(
-		providerDisplayMap[providerconfig.CloudProviderAlibaba],
-		providerconfig.CloudProviderAlibaba,
-		fd,
-		fd.getAlibabaSecretFields(),
-	)
+// getAlibabaTestSettings returns provider-specific test settings (placeholder for future use)
+func (fd *FormData) getAlibabaTestSettings() []string {
+	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderAlibaba)
+	var result []string
+	for _, ts := range testSettings {
+		result = append(result, ts.Description)
+	}
+	return result
 }
-func (fd *FormData) getAlibabaSecretFields() []huh.Field {
-	return []huh.Field{
-		huh.NewInput().Title("Alibaba KKPDatacenter").Value(&fd.Secrets.Alibaba.KKPDatacenter).Validate(fd.requiredIf(string(providerconfig.CloudProviderAlibaba))),
-		huh.NewInput().Title("Alibaba AccessKeyID").Value(&fd.Secrets.Alibaba.AccessKeyID).Validate(fd.requiredIf(string(providerconfig.CloudProviderAlibaba))),
-		huh.NewInput().Title("Alibaba AccessKeySecret").Value(&fd.Secrets.Alibaba.AccessKeySecret).Validate(fd.requiredIf(string(providerconfig.CloudProviderAlibaba))),
+
+// getAlibabaSecretFields returns the secret credential fields for Alibaba provider
+func (fd *FormData) getAlibabaSecretFields() []SecretField {
+	return []SecretField{
+		{
+			Name:     "KKPDatacenter",
+			Label:    "Alibaba KKPDatacenter",
+			Value:    &fd.Secrets.Alibaba.KKPDatacenter,
+			Required: true,
+		},
+		{
+			Name:     "AccessKeyID",
+			Label:    "Alibaba AccessKeyID",
+			Value:    &fd.Secrets.Alibaba.AccessKeyID,
+			Required: true,
+		},
+		{
+			Name:     "AccessKeySecret",
+			Label:    "Alibaba AccessKeySecret",
+			Value:    &fd.Secrets.Alibaba.AccessKeySecret,
+			Required: true,
+		},
 	}
 }
