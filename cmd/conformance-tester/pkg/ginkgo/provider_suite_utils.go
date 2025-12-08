@@ -53,7 +53,7 @@ func CloudProvider(msg string) string {
 	return fmt.Sprintf("[CloudProvider] %s", msg)
 }
 
-func commonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scenarios.Scenario, legacyOpts *legacytypes.Options) (*kubermaticv1.Cluster, ctrlruntimeclient.Client) {
+func CommonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scenarios.Scenario, legacyOpts *legacytypes.Options) (*kubermaticv1.Cluster, ctrlruntimeclient.Client) {
 	var userClusterClient ctrlruntimeclient.Client
 	var cluster *kubermaticv1.Cluster
 	var err error
@@ -159,7 +159,7 @@ func commonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 	return cluster, userClusterClient
 }
 
-func commonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster) {
+func CommonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster) {
 	// By(KKP("Removing machine deployment"))
 	err := client.DeleteMachineDeployments(rootCtx, log, scenario, userClusterClient, cluster)
 	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to delete machine deployments with error %v", err))
@@ -171,7 +171,7 @@ func commonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clien
 	log.Info("Ending scenario test")
 }
 
-func machineSetup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, legacyOpts *legacytypes.Options) {
+func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, legacyOpts *legacytypes.Options) {
 	By(KKP("Create MachineDeployments"), func() {
 		err := client.MachineDeploymentsWithProviderSpec(rootCtx, log, scenario, userClusterClient, cluster)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to create machine deployments with error %v", err))

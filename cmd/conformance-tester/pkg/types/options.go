@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"time"
 
+	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
@@ -71,7 +73,7 @@ type Options struct {
 	KonnectivityEnabled bool
 	ScenarioOptions     sets.Set[string]
 	TestClusterUpdate   bool
-	TestSettings        sets.Set[string]
+	TestSettings        []TestSettings
 
 	// additional settings
 	ControlPlaneReadyWaitTimeout time.Duration
@@ -114,7 +116,7 @@ func NewDefaultOptions() *Options {
 		EnableTests:                  sets.New[string](),
 		ExcludeTests:                 sets.New[string](),
 		Tests:                        sets.New[string](),
-		TestSettings:                 sets.New[string](),
+		TestSettings:                 []TestSettings{},
 		KubermaticNamespace:          "kubermatic",
 		KubermaticSeedName:           "kubermatic",
 		ControlPlaneReadyWaitTimeout: 10 * time.Minute,
@@ -164,8 +166,43 @@ func (o *Options) AddFlags() {
 	flag.StringVar(&o.PushgatewayEndpoint, "pushgateway-endpoint", "", "host:port of a Prometheus Pushgateway to send runtime metrics to")
 	flag.StringVar(&o.ResultsFile, "results-file", "", "path to a JSON file where the test result will be written to / read from (when also using --retry)")
 	flag.BoolVar(&o.RetryFailedScenarios, "retry", false, "when using --results-file, will filter the given scenarios to only run those that previously failed")
-	flag.Var(flagopts.SetFlag(o.TestSettings), "test-settings", "Comma-separated list of test settings descriptions to run.")
+	flag.Var(&TestSettingsFlag{Slice: &testSettings}, "test-settings", "Comma-separated list of test settings descriptions to run.")
 	o.Secrets.AddFlags()
+}
+
+var testSettings []TestSettings
+
+type TestSettingsFlag struct {
+	Slice *[]TestSettings
+}
+
+func (f *TestSettingsFlag) String() string {
+	var descs []string
+	for _, ts := range *f.Slice {
+		descs = append(descs, ts.Description)
+	}
+	return strings.Join(descs, ",")
+}
+
+func (f *TestSettingsFlag) Set(value string) error {
+	*f.Slice = nil // clear
+	if value != "" {
+		for _, v := range strings.Split(value, ",") {
+			v = strings.TrimSpace(v)
+			if v != "" {
+				*f.Slice = append(*f.Slice, TestSettings{Description: v})
+			}
+		}
+	}
+	return nil
+}
+
+func (f *TestSettingsFlag) Type() string {
+	return "testsettings"
+}
+
+func SetTestSettings(settings []TestSettings) pflag.Value {
+	return &TestSettingsFlag{Slice: &settings}
 }
 
 func (o *Options) ParseFlags(log *zap.SugaredLogger) error {
@@ -287,4 +324,15 @@ func CombineSets(include, exclude, all sets.Set[string], flagname string) (sets.
 	}
 
 	return chosen, nil
+}
+
+type TestSettings struct {
+	Description    string        `yaml:"name,omitempty"`
+	ProviderSpec   any           `yaml:"-"`
+	StringVariants []interface{} `yaml:"variants,omitempty"`
+}
+
+type FieldVariant struct {
+	Name   string
+	Values []interface{}
 }

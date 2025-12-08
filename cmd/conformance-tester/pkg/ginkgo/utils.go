@@ -6,12 +6,13 @@ import (
 	"strings"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // GetSettingsForProvider returns a list of test settings (user stories) for a given provider.
-func GetSettingsForProvider(provider providerconfig.CloudProvider) []TestSettings {
+func GetSettingsForProvider(provider providerconfig.CloudProvider) []types.TestSettings {
 	// User stories for the KubeVirt provider
 	switch provider {
 	case providerconfig.CloudProviderKubeVirt:
@@ -19,7 +20,7 @@ func GetSettingsForProvider(provider providerconfig.CloudProvider) []TestSetting
 	}
 
 	// Default user story for other providers
-	return []TestSettings{
+	return []types.TestSettings{
 		{Description: "with default settings"},
 	}
 }
@@ -58,7 +59,7 @@ func getAllProviders() map[string]providerconfig.CloudProvider {
 }
 
 // areCompatible checks if two TestSettings can be merged without conflicts.
-func areCompatible(s1, s2 TestSettings) bool {
+func areCompatible(s1, s2 types.TestSettings) bool {
 	if s1.ProviderSpec == nil || s2.ProviderSpec == nil {
 		return true // Both are compatible if one has no provider-specific settings
 	}
@@ -89,12 +90,12 @@ func areCompatible(s1, s2 TestSettings) bool {
 
 // mergeTestSettings takes a list of TestSettings and merges compatible ones.
 // The returned list will be of equal or smaller size.
-func mergeTestSettings(settings []TestSettings, enabledSettings sets.Set[string]) ([]TestSettings, error) {
+func mergeTestSettings(settings []types.TestSettings, enabledSettings sets.Set[string]) ([]types.TestSettings, error) {
 	if len(settings) == 0 {
 		return nil, nil
 	}
 
-	var mergedSettings []TestSettings
+	var mergedSettings []types.TestSettings
 	mergedIndices := make(map[int]bool)
 
 	for i := range settings {

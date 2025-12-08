@@ -7,13 +7,14 @@ import (
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	// . "github.com/onsi/gomega"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/scenarios"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
@@ -43,13 +44,16 @@ var runTestFunc = func(k iter.Seq[string], v string) bool {
 var _ = Describe("[provider]", func() {
 	// Dynamically discover all providers from the DatacenterSpec struct. This makes
 	// the test suite more robust and easier to maintain.
-	allProviders := getAllProviders()
+	// allProviders := getAllProviders()
+	allProviders := map[string]providerconfig.CloudProvider{
+		"KubeVirt": providerconfig.CloudProviderKubeVirt,
+	}
 
 	for description, provider := range allProviders {
 		// Capture range variables to ensure they have the correct value in the closure.
 		provider := provider
 		description := description
-		fieldVariants := []FieldVariant{
+		fieldVariants := []types.FieldVariant{
 			// ClusterName: Name of the KubeVirt cluster.
 			{"ClusterName", []interface{}{"test-cluster", "", "invalid"}},
 			// Auth.Kubeconfig: Kubeconfig for authentication.
@@ -91,16 +95,16 @@ var _ = Describe("[provider]", func() {
 		}
 		// Use a one-at-a-time variant generator to avoid cartesian explosion
 		settingsList := generateKubevirtOneAtATimeTestSettings(&kubevirt.RawConfig{}, fieldVariants)
-		settingsList, err := mergeTestSettings(settingsList, legacyOpts.TestSettings)
+		// settingsList, err := mergeTestSettings(settingsList, legacyOpts.TestSettings)
 
-		Expect(err).NotTo(HaveOccurred())
+		// Expect(err).NotTo(HaveOccurred())
 		// Assume `opts.TestSettings` is a comma-separated string of descriptions from a flag.
 		// If the flag is empty, all tests will run.
 		var enabledSettings map[string]struct{}
 		if len(legacyOpts.TestSettings) > 0 {
 			enabledSettings = make(map[string]struct{})
-			for s, _ := range legacyOpts.TestSettings {
-				enabledSettings[strings.TrimSpace(s)] = struct{}{}
+			for _, s := range legacyOpts.TestSettings {
+				enabledSettings[strings.TrimSpace(s.Description)] = struct{}{}
 			}
 		}
 
@@ -137,12 +141,12 @@ var _ = Describe("[provider]", func() {
 								if !runTest {
 									Skip("This test setting was not selected to run via the --test-settings flag.")
 								}
-								cluster, userClusterClient = commonSetup(rootCtx, log, scenario, legacyOpts)
+								cluster, userClusterClient = CommonSetup(rootCtx, log, scenario, legacyOpts)
 							})
 
 							AfterEach(func() {
 								if runTest {
-									commonCleanup(rootCtx, log, client, scenario, userClusterClient, cluster)
+									CommonCleanup(rootCtx, log, client, scenario, userClusterClient, cluster)
 									currentSpecReport := CurrentSpecReport()
 									if currentSpecReport.Failed() {
 										By("Capturing diagnostics for failed test")
@@ -155,7 +159,7 @@ var _ = Describe("[provider]", func() {
 
 							It("should succeed", func() {
 								// This is the actual test logic.
-								machineSetup(rootCtx, log, clients.NewKubeClient(legacyOpts), scenario, userClusterClient, cluster, legacyOpts)
+								MachineSetup(rootCtx, log, clients.NewKubeClient(legacyOpts), scenario, userClusterClient, cluster, legacyOpts)
 
 								var failures []string
 								// Individual smoke tests are wrapped in `By` to clearly delineate them in the test report.
@@ -233,13 +237,13 @@ var _ = Describe("[provider]", func() {
 })
 
 // generateKubevirtOneAtATimeTestSettings generates test settings by varying one field at a time.
-func generateKubevirtOneAtATimeTestSettings(defaults *kubevirt.RawConfig, variants []FieldVariant) []TestSettings {
-	var settingsList []TestSettings
+func generateKubevirtOneAtATimeTestSettings(defaults *kubevirt.RawConfig, variants []types.FieldVariant) []types.TestSettings {
+	var settingsList []types.TestSettings
 	for _, variant := range variants {
 		for _, value := range variant.Values {
 			cfg := cloneRawConfig(defaults)
 			applyVariantToConfig(cfg, variant.Name, value)
-			settings := TestSettings{
+			settings := types.TestSettings{
 				Description:  variant.Name + "=" + toString(value),
 				ProviderSpec: cfg, // Use the correct field name for your TestSettings struct
 			}

@@ -52,7 +52,7 @@ func TestMain(m *testing.M) {
 	rootCtx = signals.SetupSignalHandler()
 
 	// setup options
-	opts, err = newOptionsFromYAML(log)
+	opts, err = NewOptionsFromYAML(log)
 	if err != nil {
 		log.Fatalw("Failed to load options", zap.Error(err))
 	}
@@ -77,7 +77,7 @@ func TestMain(m *testing.M) {
 		})
 	}
 	// merge options by file and cli flags
-	legacyOpts = mergeOptions(log, opts, legacyOpts, runtimeOpts)
+	legacyOpts = MergeOptions(log, opts, legacyOpts, runtimeOpts)
 
 	// parse our CLI flags
 	if err := legacyOpts.ParseFlags(log); err != nil {

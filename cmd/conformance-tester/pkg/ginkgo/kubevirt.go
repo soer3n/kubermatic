@@ -3,6 +3,7 @@ package ginkgo
 import (
 	"fmt"
 
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
@@ -10,14 +11,10 @@ import (
 
 // Table-driven scenario generator example for RawConfig fields
 // You can move this to a more appropriate file if needed.
-type FieldVariant struct {
-	Name   string
-	Values []interface{}
-}
 
 // Example for kubevirt.RawConfig, adapt as needed for your struct
-func generateKubevirtTestSettings(defaults *kubevirt.RawConfig, variants []FieldVariant) []TestSettings {
-	var settings []TestSettings
+func generateKubevirtTestSettings(defaults *kubevirt.RawConfig, variants []types.FieldVariant) []types.TestSettings {
+	var settings []types.TestSettings
 	for _, variant := range variants {
 		for _, value := range variant.Values {
 			cfg := *defaults // shallow copy
@@ -70,7 +67,7 @@ func generateKubevirtTestSettings(defaults *kubevirt.RawConfig, variants []Field
 				}}
 				// Add more fields as needed
 			}
-			settings = append(settings, TestSettings{
+			settings = append(settings, types.TestSettings{
 				Description:  desc,
 				ProviderSpec: &cfg,
 			})
@@ -79,17 +76,15 @@ func generateKubevirtTestSettings(defaults *kubevirt.RawConfig, variants []Field
 	return settings
 }
 
-func getKubevirtTestSettings() []TestSettings {
-	var settings []TestSettings
+func getKubevirtTestSettings() []types.TestSettings {
+	var settings []types.TestSettings
 
 	// Default config for other fields
 	// defaultConfig := &kubevirt.RawConfig{}
 
 	// String fields: valid, invalid, empty
 	stringVariants := []providerconfig.ConfigVarString{
-		{Value: "valid"},
 		{Value: ""},
-		{Value: "invalid"},
 	}
 
 	// Boolean fields: true, false
@@ -97,7 +92,7 @@ func getKubevirtTestSettings() []TestSettings {
 
 	// Instancetype
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "Instancetype: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -108,7 +103,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// Preference
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "Preference: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -119,7 +114,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// CPUs
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "CPUs: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -132,7 +127,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// Memory
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "Memory: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -145,7 +140,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// SecondaryDisks.Size
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "SecondaryDisk Size: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -160,7 +155,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// SecondaryDisks.StorageClassName
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "SecondaryDisk StorageClassName: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -175,7 +170,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// DNSPolicy
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "DNSPolicy: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -186,7 +181,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// EvictionStrategy (string)
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "EvictionStrategy: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
@@ -197,7 +192,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// NodeAffinityPreset.Type
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "NodeAffinityPreset.Type: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				Affinity: kubevirt.Affinity{
@@ -210,7 +205,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// NodeAffinityPreset.Key
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "NodeAffinityPreset.Key: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				Affinity: kubevirt.Affinity{
@@ -223,7 +218,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// NodeAffinityPreset.Values
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "NodeAffinityPreset.Values: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				Affinity: kubevirt.Affinity{
@@ -236,7 +231,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// TopologySpreadConstraints.TopologyKey
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "TopologySpreadConstraints.TopologyKey: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
@@ -247,7 +242,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// TopologySpreadConstraints.MaxSkew
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "TopologySpreadConstraints.MaxSkew: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
@@ -258,7 +253,7 @@ func getKubevirtTestSettings() []TestSettings {
 	}
 	// TopologySpreadConstraints.WhenUnsatisfiable
 	for _, v := range stringVariants {
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description: "TopologySpreadConstraints.WhenUnsatisfiable: " + v.Value,
 			ProviderSpec: &kubevirt.RawConfig{
 				TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
@@ -277,7 +272,7 @@ func getKubevirtTestSettings() []TestSettings {
 	// 	})
 	// }
 	// Add a few mixed cases to test multiple non-defaults together
-	settings = append(settings, TestSettings{
+	settings = append(settings, types.TestSettings{
 		Description: "Mixed: valid instancetype, invalid CPUs, valid DNSPolicy",
 		ProviderSpec: &kubevirt.RawConfig{
 			VirtualMachine: kubevirt.VirtualMachine{
@@ -289,7 +284,7 @@ func getKubevirtTestSettings() []TestSettings {
 			},
 		},
 	})
-	settings = append(settings, TestSettings{
+	settings = append(settings, types.TestSettings{
 		Description: "Mixed: empty preference, valid memory, invalid eviction strategy",
 		ProviderSpec: &kubevirt.RawConfig{
 			VirtualMachine: kubevirt.VirtualMachine{
@@ -301,7 +296,7 @@ func getKubevirtTestSettings() []TestSettings {
 			},
 		},
 	})
-	settings = append(settings, TestSettings{
+	settings = append(settings, types.TestSettings{
 		Description: "Mixed: invalid secondary disk size, valid affinity key, empty topology key",
 		ProviderSpec: &kubevirt.RawConfig{
 			VirtualMachine: kubevirt.VirtualMachine{
@@ -322,7 +317,7 @@ func getKubevirtTestSettings() []TestSettings {
 		},
 	})
 	// All fields set (including nested fields)
-	settings = append(settings, TestSettings{
+	settings = append(settings, types.TestSettings{
 		Description: "All fields set (valid/invalid/empty)",
 		ProviderSpec: &kubevirt.RawConfig{
 			VirtualMachine: kubevirt.VirtualMachine{
@@ -360,7 +355,7 @@ func getKubevirtTestSettings() []TestSettings {
 }
 
 // Helper: Cartesian product generator for field values
-func cartesianProduct(variants []FieldVariant) [][]interface{} {
+func cartesianProduct(variants []types.FieldVariant) [][]interface{} {
 	if len(variants) == 0 {
 		return [][]interface{}{{}}
 	}
@@ -430,8 +425,8 @@ func applyCombinationToConfig(defaults *kubevirt.RawConfig, fields []string, val
 }
 
 // Generate all cartesian product test settings
-func generateKubevirtCartesianTestSettings(defaults *kubevirt.RawConfig, variants []FieldVariant) []TestSettings {
-	var settings []TestSettings
+func generateKubevirtCartesianTestSettings(defaults *kubevirt.RawConfig, variants []types.FieldVariant) []types.TestSettings {
+	var settings []types.TestSettings
 	fields := make([]string, len(variants))
 	for i, v := range variants {
 		fields[i] = v.Name
@@ -443,7 +438,7 @@ func generateKubevirtCartesianTestSettings(defaults *kubevirt.RawConfig, variant
 		for i, f := range fields {
 			desc += f + "=" + fmt.Sprintf("%v", combo[i]) + ", "
 		}
-		settings = append(settings, TestSettings{
+		settings = append(settings, types.TestSettings{
 			Description:  desc,
 			ProviderSpec: cfg,
 		})

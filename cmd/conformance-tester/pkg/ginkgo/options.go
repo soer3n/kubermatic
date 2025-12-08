@@ -46,12 +46,6 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
-// TestSettings defines a struct for holding different configurations for a provider test.
-type TestSettings struct {
-	Description  string
-	ProviderSpec any
-}
-
 // Options represent combination of flags and ENV options.
 type Options struct {
 	Client     string `yaml:"client,omitempty"`
@@ -78,11 +72,11 @@ type Options struct {
 
 	// additional settings identical for all scenarios
 
-	DualStackEnabled    bool     `yaml:"dualStackEnabled,omitempty"`
-	KonnectivityEnabled bool     `yaml:"konnectivityEnabled,omitempty"`
-	ScenarioOptions     []string `yaml:"scenarioOptions,omitempty"`
-	TestClusterUpdate   bool     `yaml:"testClusterUpdate,omitempty"`
-	TestSettings        []string `yaml:"testSettings,omitempty"`
+	DualStackEnabled    bool                 `yaml:"dualStackEnabled,omitempty"`
+	KonnectivityEnabled bool                 `yaml:"konnectivityEnabled,omitempty"`
+	ScenarioOptions     []string             `yaml:"scenarioOptions,omitempty"`
+	TestClusterUpdate   bool                 `yaml:"testClusterUpdate,omitempty"`
+	TestSettings        []types.TestSettings `yaml:"testSettings,omitempty"`
 
 	// additional settings
 	ControlPlaneReadyWaitTimeout time.Duration `yaml:"controlPlaneReadyWaitTimeout,omitempty"`
@@ -120,30 +114,30 @@ type RuntimeOptions struct {
 	KubermaticConfiguration *kubermaticv1.KubermaticConfiguration
 }
 
-func MergeOptions(base Options, override *types.Options) *types.Options {
-	return &types.Options{
-		Client:                       override.Client,
-		Providers:                    override.Providers,
-		Releases:                     override.Releases,
-		EnableDistributions:          override.EnableDistributions,
-		ExcludeDistributions:         override.ExcludeDistributions,
-		EnableTests:                  override.EnableTests,
-		ExcludeTests:                 override.ExcludeTests,
-		KubermaticNamespace:          override.KubermaticNamespace,
-		KubermaticSeedName:           override.KubermaticSeedName,
-		KonnectivityEnabled:          override.KonnectivityEnabled,
-		NodeCount:                    override.NodeCount,
-		ControlPlaneReadyWaitTimeout: override.ControlPlaneReadyWaitTimeout,
-		NodeReadyTimeout:             override.NodeReadyTimeout,
-		CustomTestTimeout:            override.CustomTestTimeout,
-		UserClusterPollInterval:      override.UserClusterPollInterval,
-		NamePrefix:                   override.NamePrefix,
-		Secrets:                      override.Secrets,
-		LogDirectory:                 override.LogDirectory,
-		ReportsRoot:                  override.ReportsRoot,
-		DeleteClusterAfterTests:      override.DeleteClusterAfterTests,
-	}
-}
+// func MergeOptions(base Options, override *types.Options) *types.Options {
+// 	return &types.Options{
+// 		Client:                       override.Client,
+// 		Providers:                    override.Providers,
+// 		Releases:                     override.Releases,
+// 		EnableDistributions:          override.EnableDistributions,
+// 		ExcludeDistributions:         override.ExcludeDistributions,
+// 		EnableTests:                  override.EnableTests,
+// 		ExcludeTests:                 override.ExcludeTests,
+// 		KubermaticNamespace:          override.KubermaticNamespace,
+// 		KubermaticSeedName:           override.KubermaticSeedName,
+// 		KonnectivityEnabled:          override.KonnectivityEnabled,
+// 		NodeCount:                    override.NodeCount,
+// 		ControlPlaneReadyWaitTimeout: override.ControlPlaneReadyWaitTimeout,
+// 		NodeReadyTimeout:             override.NodeReadyTimeout,
+// 		CustomTestTimeout:            override.CustomTestTimeout,
+// 		UserClusterPollInterval:      override.UserClusterPollInterval,
+// 		NamePrefix:                   override.NamePrefix,
+// 		Secrets:                      override.Secrets,
+// 		LogDirectory:                 override.LogDirectory,
+// 		ReportsRoot:                  override.ReportsRoot,
+// 		DeleteClusterAfterTests:      override.DeleteClusterAfterTests,
+// 	}
+// }
 
 func NewDefaultOptions() *Options {
 	return &Options{
@@ -180,7 +174,7 @@ func NewDefaultOptions() *Options {
 	}
 }
 
-func newOptionsFromYAML(log *zap.SugaredLogger) (*Options, error) {
+func NewOptionsFromYAML(log *zap.SugaredLogger) (*Options, error) {
 	// opts will be populated with defaults first, and then overwritten by the YAML inside UnmarshalYAML.
 	opts := &Options{}
 
@@ -268,7 +262,7 @@ func NewRuntimeOptions(ctx context.Context, log *zap.SugaredLogger, o *Options) 
 	return runtimeOpts, nil
 }
 
-func mergeOptions(log *zap.SugaredLogger, yamlOpts *Options, flagOpts *legacytypes.Options, runtimeOpts *RuntimeOptions) *legacytypes.Options {
+func MergeOptions(log *zap.SugaredLogger, yamlOpts *Options, flagOpts *legacytypes.Options, runtimeOpts *RuntimeOptions) *legacytypes.Options {
 	// Start with a base of legacy options derived from the YAML file.
 	merged := toLegacyOptions(yamlOpts, runtimeOpts)
 
@@ -376,7 +370,7 @@ func toLegacyOptions(opts *Options, runtimeOpts *RuntimeOptions) *types.Options 
 		KonnectivityEnabled:          true,
 		ScenarioOptions:              sets.New[string](opts.ScenarioOptions...),
 		TestClusterUpdate:            opts.TestClusterUpdate,
-		TestSettings:                 sets.New[string](opts.TestSettings...),
+		TestSettings:                 opts.TestSettings,
 		ControlPlaneReadyWaitTimeout: opts.ControlPlaneReadyWaitTimeout,
 		NodeReadyTimeout:             opts.NodeReadyTimeout,
 		CustomTestTimeout:            opts.CustomTestTimeout,
