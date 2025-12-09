@@ -13,18 +13,6 @@ import (
 	kubevirtcorev1 "kubevirt.io/api/core/v1"
 )
 
-type testCase struct {
-	os          string
-	description string
-	name        string
-	variants    []string
-}
-
-type FieldVariantEntry struct {
-	Description string
-	TestCase    testCase
-}
-
 var machineSettings = map[string]v1alpha1.MachineSpec{
 	"cluster name set to test-cluster": {
 		ProviderSpec: v1alpha1.ProviderSpec{
@@ -242,29 +230,6 @@ var machineSettings = map[string]v1alpha1.MachineSpec{
 			}),
 		},
 	},
-}
-
-var DefaultFieldVariantsTableEntries = []FieldVariantEntry{
-	{Description: "ClusterName=test-cluster", TestCase: testCase{os: "", description: "ClusterName", name: "test-cluster", variants: []string{"test-cluster"}}},
-	{Description: "Auth.Kubeconfig=valid-kubeconfig", TestCase: testCase{os: "", description: "Auth.Kubeconfig", name: "valid-kubeconfig", variants: []string{"valid-kubeconfig"}}},
-	{Description: "VirtualMachine.Instancetype=", TestCase: testCase{os: "", description: "VirtualMachine.Instancetype", name: "", variants: []string{""}}},
-	{Description: "VirtualMachine.Preference=", TestCase: testCase{os: "", description: "VirtualMachine.Preference", name: "", variants: []string{""}}},
-	{Description: "VirtualMachine.DNSPolicy=ClusterFirstWithHostNet", TestCase: testCase{os: "", description: "VirtualMachine.DNSPolicy", name: "ClusterFirstWithHostNet", variants: []string{"ClusterFirstWithHostNet"}}},
-	{Description: "VirtualMachine.EvictionStrategy=LiveMigrate", TestCase: testCase{os: "", description: "VirtualMachine.EvictionStrategy", name: "LiveMigrate", variants: []string{"LiveMigrate"}}},
-	{Description: "VirtualMachine.EnableNetworkMultiQueue=true", TestCase: testCase{os: "", description: "VirtualMachine.EnableNetworkMultiQueue", name: "true", variants: []string{"true"}}},
-	{Description: "VirtualMachine.EnableNetworkMultiQueue=false", TestCase: testCase{os: "", description: "VirtualMachine.EnableNetworkMultiQueue", name: "false", variants: []string{"false"}}},
-	{Description: "VirtualMachine.Template.CPUs=2", TestCase: testCase{os: "", description: "VirtualMachine.Template.CPUs", name: "2", variants: []string{"2"}}},
-	{Description: "VirtualMachine.Template.Memory=4096Mi", TestCase: testCase{os: "", description: "VirtualMachine.Template.Memory", name: "4096Mi", variants: []string{"4096Mi"}}},
-	{Description: "VirtualMachine.Template.PrimaryDisk.Size=20Gi", TestCase: testCase{os: "", description: "VirtualMachine.Template.PrimaryDisk.Size", name: "20Gi", variants: []string{"20Gi"}}},
-	{Description: "VirtualMachine.Template.PrimaryDisk.StorageClassName=local-path", TestCase: testCase{os: "", description: "VirtualMachine.Template.PrimaryDisk.StorageClassName", name: "local-path", variants: []string{"local-path"}}},
-	{Description: "VirtualMachine.Template.SecondaryDisks.Size=10Gi", TestCase: testCase{os: "", description: "VirtualMachine.Template.SecondaryDisks.Size", name: "10Gi", variants: []string{"10Gi"}}},
-	{Description: "VirtualMachine.Template.SecondaryDisks.StorageClassName=fast-storage", TestCase: testCase{os: "", description: "VirtualMachine.Template.SecondaryDisks.StorageClassName", name: "fast-storage", variants: []string{"fast-storage"}}},
-	{Description: "Affinity.NodeAffinityPreset.Type=", TestCase: testCase{os: "", description: "Affinity.NodeAffinityPreset.Type", name: "", variants: []string{""}}},
-	{Description: "Affinity.NodeAffinityPreset.Key=kubernetes.io/hostname", TestCase: testCase{os: "", description: "Affinity.NodeAffinityPreset.Key", name: "kubernetes.io/hostname", variants: []string{"kubernetes.io/hostname"}}},
-	{Description: "Affinity.NodeAffinityPreset.Values=node-01", TestCase: testCase{os: "", description: "Affinity.NodeAffinityPreset.Values", name: "node-01", variants: []string{"node-01"}}},
-	{Description: "TopologySpreadConstraints.TopologyKey=kubernetes.io/hostname", TestCase: testCase{os: "", description: "TopologySpreadConstraints.TopologyKey", name: "kubernetes.io/hostname", variants: []string{"kubernetes.io/hostname"}}},
-	{Description: "TopologySpreadConstraints.MaxSkew=1", TestCase: testCase{os: "", description: "TopologySpreadConstraints.MaxSkew", name: "1", variants: []string{"1"}}},
-	{Description: "TopologySpreadConstraints.WhenUnsatisfiable=DoNotSchedule", TestCase: testCase{os: "", description: "TopologySpreadConstraints.WhenUnsatisfiable", name: "DoNotSchedule", variants: []string{"DoNotSchedule"}}},
 }
 
 var defaultKubevirtConfig = kubevirt.RawConfig{

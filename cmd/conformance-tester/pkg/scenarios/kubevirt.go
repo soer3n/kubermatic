@@ -43,6 +43,11 @@ type KubevirtScenario struct {
 	BaseScenario
 }
 
+func (s *KubevirtScenario) WithDatacenter(dc *kubermaticv1.Datacenter) *KubevirtScenario {
+	s.datacenter = dc
+	return s
+}
+
 func (s *KubevirtScenario) compatibleOperatingSystems() sets.Set[providerconfig.OperatingSystem] {
 	return sets.New(
 		providerconfig.OperatingSystemUbuntu,

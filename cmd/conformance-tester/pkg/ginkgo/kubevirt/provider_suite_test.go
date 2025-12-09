@@ -50,17 +50,14 @@ var (
 )
 
 var (
-	myOpt        string
-	datacenters  string
-	kubeVersions string
-	// dcClusters used by provider_kubevirt.go
+	myOpt               string
+	datacenters         string
+	kubeVersions        string
 	dcClusters          = map[string]*kubermaticv1.Datacenter{}
 	skipClusterDeletion bool
 	skipClusterCreation bool
 	updateClusters      bool
 	clustersToDelete    []string
-	// Ensure defaultClusterSettings is a map
-	// defaultClusterSettings = map[string]kubermaticv1.ClusterSpec{}
 )
 
 func init() {
@@ -124,7 +121,6 @@ func GetMachineDescriptions() []string {
 
 func TestMain(m *testing.M) {
 	var err error
-	// setup context
 	rootCtx = signals.SetupSignalHandler()
 	opts, err = k8cginkgo.NewOptionsFromYAML(log)
 	if err != nil {
@@ -137,169 +133,30 @@ func TestMain(m *testing.M) {
 			log.Fatalw("Failed to create runtime options", zap.Error(err))
 		}
 	}
-
-	// load cli-flags
 	legacyOpts = legacytypes.NewDefaultOptions()
 	legacyOpts.AddFlags()
-
 	kkpConfig, err = loadKubermaticConfiguration()
 	if err != nil {
 		log.Fatalw("Failed to load KKP configuration", zap.Error(err))
 	}
-
 	file, err := os.Create("debug_output.txt")
 	if err != nil {
 		log.Fatalw("Failed to create debug output file", zap.Error(err))
 	}
 	defer file.Close()
-
-	fmt.Print("GetClusterVersions: ", GetClusterVersions(), "\n")
-	fmt.Print("GetDatacenterDescriptions: ", GetDatacenterDescriptions(), "\n")
-	fmt.Print("GetClusterDescriptions: ", GetClusterDescriptions(), "\n")
-	fmt.Print("GetMachineDescriptions: ", GetMachineDescriptions(), "\n")
-
-	defaultSeedSettings := map[string]kubermaticv1.Seed{}
-	for k, v := range datacenterSettings {
-		seed, err := defaulting.DefaultSeed(&kubermaticv1.Seed{
-			Spec: kubermaticv1.SeedSpec{
-				Datacenters: map[string]kubermaticv1.Datacenter{
-					k: v,
-				},
-			},
-		}, kkpConfig, log)
-		if err != nil {
-			log.Fatalw("Failed to default seed", zap.String("datacenter", k), zap.Error(err))
-		}
-		dst := seed.Spec.Datacenters[k]
-		err = mergo.Merge(&dst, defaultDatacenterSettings)
-		if err != nil {
-			log.Fatalw("Failed to merge seed", zap.String("datacenter", k), zap.Error(err))
-		}
-		seed.Spec.Datacenters[k] = dst
-		defaultSeedSettings[k] = *seed
-	}
-
+	defaultSeedSettings := buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings)
 	versionManager := version.NewFromConfiguration(kkpConfig)
 	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
 	if err != nil {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
-	var clustersMu sync.Mutex
-	var wgClusters sync.WaitGroup
-	maxConcurrentClusters := 20 // set your desired concurrency limit for clusters
-	semClusters := make(chan struct{}, maxConcurrentClusters)
-	newClusters = map[string]*kubermaticv1.ClusterSpec{}
-	for _, kubeVersion := range versions {
-		for k, v := range clusterSettings {
-			for dcKey, seed := range defaultSeedSettings {
-				wgClusters.Add(1)
-				semClusters <- struct{}{} // acquire a slot
-				go func(k string, v kubermaticv1.ClusterSpec, dcKey string, seed kubermaticv1.Seed, kubeVersion *version.Version) {
-					defer wgClusters.Done()
-					defer func() { <-semClusters }() // release the slot
-					v.Cloud.ProviderName = string(kubermaticv1.KubevirtCloudProvider)
-					v.Cloud.DatacenterName = dcKey
-					v.Cloud.Kubevirt = &kubermaticv1.KubevirtCloudSpec{
-						Kubeconfig: opts.Secrets.Kubevirt.Kubeconfig,
-					}
-					v.HumanReadableName = k
-					v.ContainerRuntime = "containerd"
-					v.Version = semver.Semver(kubeVersion.Version.String())
-					currentSeedDatacenter := seed.Spec.Datacenters[dcKey]
-					p, err := kubevirtprovider.NewCloudProvider(&currentSeedDatacenter, nil)
-					if err != nil {
-						log.Fatalw("Failed to create cloud provider", zap.String("datacenter", dcKey), zap.Error(err))
-					}
-					err = defaulting.DefaultClusterSpec(rootCtx, &v, nil, &seed, kkpConfig, p)
-					if err != nil {
-						log.Fatalw("Failed to default cluster", zap.String("cluster spec", k), zap.Error(err))
-					}
-					if err := validation.ValidateClusterSpec(&v, &currentSeedDatacenter, nil, versionManager, &v.Version, nil); len(err) != 0 {
-						log.Infof("Failed to validate cluster", zap.String("cluster spec", k), zap.Error(err.ToAggregate()))
-						return
-					}
-					clustersMu.Lock()
-					// defaultClusterSettings["with kube version "+kubeVersion.Version.String()+" "+dcKey+" "+k] = v
-					newClusters["with kube version "+kubeVersion.Version.String()+" "+dcKey+" "+k] = &v
-					clustersMu.Unlock()
-				}(k, v, dcKey, seed, kubeVersion)
-			}
-		}
-	}
-	wgClusters.Wait()
-
-	defaultMachineSettings := map[string]v1alpha1.MachineSpec{}
+	newClusters = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, opts, kkpConfig, log, versionManager)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
-	newScenarios = map[string]map[string]v1alpha1.MachineSpec{}
-	var machinesMu sync.Mutex
-	var wgMachines sync.WaitGroup
-	maxConcurrent := 40 // set your desired concurrency limit
-	sem := make(chan struct{}, maxConcurrent)
-	for machineKey, machine := range machineSettings {
-		for k := range newClusters {
-			wgMachines.Add(1)
-			sem <- struct{}{} // acquire a slot
-			go func(machineKey string, machine v1alpha1.MachineSpec, k string) {
-				defer wgMachines.Done()
-				defer func() { <-sem }() // release the slot
-				p := mckubevirtprovider.New(resolver)
-				var t kubevirt.RawConfig
-				if err := json.Unmarshal(machine.ProviderSpec.Value.Raw, &t); err != nil {
-					fmt.Println("Error unmarshalling JSON:", err)
-					return
-				}
-				t.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(opts.Secrets.Kubevirt.Kubeconfig))
-				err = mergo.Merge(&t, defaultKubevirtConfig)
-				if err != nil {
-					log.Fatalw("Failed to merge seed", zap.String("datacenter", k), zap.Error(err))
-				}
-				raw, err := EncodeRawSpec(t)
-				if err != nil {
-					log.Fatalw("Failed to encode raw spec", zap.String("machine", machineKey), zap.Error(err))
-				}
-				osspec, err := userdata.DefaultOperatingSystemSpec(providerconfig.OperatingSystemUbuntu, runtime.RawExtension{})
-				if err != nil {
-					log.Fatalw("Failed to get default OS spec", zap.String("machine", machineKey), zap.Error(err))
-				}
-				pc := providerconfig.Config{
-					CloudProviderSpec:   *raw,
-					OperatingSystemSpec: osspec,
-					OperatingSystem:     providerconfig.OperatingSystemUbuntu,
-				}
-				data, err := json.Marshal(pc)
-				if err != nil {
-					log.Fatalw("Failed to marshal config", zap.String("machine", machineKey), zap.Error(err))
-				}
-				machine.ProviderSpec.Value.Raw = data
-				if machine.ProviderSpec.Value != nil {
-					fmt.Fprintf(file, "[DEBUG] scenario %s and %s\n", k, machineKey)
-				}
-				machineSpec, err := p.AddDefaults(log, machine)
-				if err != nil {
-					log.Fatalw("Failed to add defaults to machine", zap.String("machine", machineKey), zap.Error(err))
-					return
-				}
-				if err := p.Validate(rootCtx, log, machineSpec); err != nil {
-					log.Infof("Failed to validate machine", zap.String("machine", machineKey), zap.Error(err))
-				}
-				machinesMu.Lock()
-				defaultMachineSettings[k+" "+machineKey] = machineSpec
-				if newScenarios[k] == nil {
-					newScenarios[k] = map[string]v1alpha1.MachineSpec{}
-				}
-				newScenarios[k][machineKey] = machineSpec
-				machinesMu.Unlock()
-			}(machineKey, machine, k)
-		}
-	}
-	wgMachines.Wait()
-
+	newScenarios = buildNewScenarios(machineSettings, newClusters, opts, log, defaultKubevirtConfig, resolver, file, rootCtx)
 	total := 0
 	for _, inner := range newScenarios {
 		total += len(inner)
 	}
-
-	// scenarioFailureMap = make(map[string][]Failure)
 	flag.Parse()
 	fmt.Fprintf(file, "new clusters: %v\nnew scenarios: %v\nKeys: %v\n", len(newClusters), total, maps.Keys(newScenarios))
 	if configPath == "" {
@@ -308,15 +165,10 @@ func TestMain(m *testing.M) {
 			KubermaticSeedName:  legacyOpts.KubermaticSeedName,
 		})
 	}
-
-	// merge options by file and cli flags
 	legacyOpts = k8cginkgo.MergeOptions(log, opts, legacyOpts, runtimeOpts)
-
-	// parse our CLI flags
 	if err := legacyOpts.ParseFlags(log); err != nil {
 		log.Warnf("Invalid flags", zap.Error(err))
 	}
-
 	os.Exit(m.Run())
 }
 
@@ -404,3 +256,136 @@ var _ = ReportBeforeSuite(func(r Report) {})
 var _ = ReportAfterSuite("ReportAfterSuite", func(r Report) {
 	By("Reporting test results")
 })
+
+func buildDefaultSeedSettings(datacenterSettings map[string]kubermaticv1.Datacenter, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings kubermaticv1.Datacenter) map[string]kubermaticv1.Seed {
+	defaultSeedSettings := map[string]kubermaticv1.Seed{}
+	for k, v := range datacenterSettings {
+		seed, err := defaulting.DefaultSeed(&kubermaticv1.Seed{
+			Spec: kubermaticv1.SeedSpec{
+				Datacenters: map[string]kubermaticv1.Datacenter{
+					k: v,
+				},
+			},
+		}, kkpConfig, log)
+		if err != nil {
+			log.Fatalw("Failed to default seed", zap.String("datacenter", k), zap.Error(err))
+		}
+		dst := seed.Spec.Datacenters[k]
+		if err := mergo.Merge(&dst, defaultDatacenterSettings); err != nil {
+			log.Fatalw("Failed to merge seed", zap.String("datacenter", k), zap.Error(err))
+		}
+		seed.Spec.Datacenters[k] = dst
+		defaultSeedSettings[k] = *seed
+	}
+	return defaultSeedSettings
+}
+
+func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterSettings map[string]kubermaticv1.ClusterSpec, defaultSeedSettings map[string]kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager) map[string]*kubermaticv1.ClusterSpec {
+	var clustersMu sync.Mutex
+	var wgClusters sync.WaitGroup
+	maxConcurrentClusters := 50
+	semClusters := make(chan struct{}, maxConcurrentClusters)
+	newClusters := map[string]*kubermaticv1.ClusterSpec{}
+	for _, kubeVersion := range versions {
+		for k, v := range clusterSettings {
+			for dcKey, seed := range defaultSeedSettings {
+				wgClusters.Add(1)
+				semClusters <- struct{}{}
+				go func(k string, v kubermaticv1.ClusterSpec, dcKey string, seed kubermaticv1.Seed, kubeVersion *version.Version) {
+					defer wgClusters.Done()
+					defer func() { <-semClusters }()
+					v.Cloud.ProviderName = string(kubermaticv1.KubevirtCloudProvider)
+					v.Cloud.DatacenterName = dcKey
+					v.Cloud.Kubevirt = &kubermaticv1.KubevirtCloudSpec{
+						Kubeconfig: opts.Secrets.Kubevirt.Kubeconfig,
+					}
+					v.HumanReadableName = k
+					v.ContainerRuntime = "containerd"
+					v.Version = semver.Semver(kubeVersion.Version.String())
+					currentSeedDatacenter := seed.Spec.Datacenters[dcKey]
+					p, err := kubevirtprovider.NewCloudProvider(&currentSeedDatacenter, nil)
+					if err != nil {
+						log.Fatalw("Failed to create cloud provider", zap.String("datacenter", dcKey), zap.Error(err))
+					}
+					if err := defaulting.DefaultClusterSpec(rootCtx, &v, nil, &seed, kkpConfig, p); err != nil {
+						log.Fatalw("Failed to default cluster", zap.String("cluster spec", k), zap.Error(err))
+					}
+					if valErrs := validation.ValidateClusterSpec(&v, &currentSeedDatacenter, nil, versionManager, &v.Version, nil); len(valErrs) != 0 {
+						log.Infof("Failed to validate cluster", zap.String("cluster spec", k), zap.Error(valErrs.ToAggregate()))
+						return
+					}
+					clustersMu.Lock()
+					newClusters["with kube version "+kubeVersion.Version.String()+" "+dcKey+" "+k] = &v
+					clustersMu.Unlock()
+				}(k, v, dcKey, seed, kubeVersion)
+			}
+		}
+	}
+	wgClusters.Wait()
+	return newClusters
+}
+
+func buildNewScenarios(machineSettings map[string]v1alpha1.MachineSpec, newClusters map[string]*kubermaticv1.ClusterSpec, opts *k8cginkgo.Options, log *zap.SugaredLogger, defaultKubevirtConfig kubevirt.RawConfig, resolver *configvar.Resolver, file *os.File, rootCtx context.Context) map[string]map[string]v1alpha1.MachineSpec {
+	newScenarios := map[string]map[string]v1alpha1.MachineSpec{}
+	var machinesMu sync.Mutex
+	var wgMachines sync.WaitGroup
+	maxConcurrent := 100
+	sem := make(chan struct{}, maxConcurrent)
+	for machineKey, machine := range machineSettings {
+		for k := range newClusters {
+			wgMachines.Add(1)
+			sem <- struct{}{}
+			go func(machineKey string, machine v1alpha1.MachineSpec, k string) {
+				defer wgMachines.Done()
+				defer func() { <-sem }()
+				p := mckubevirtprovider.New(resolver)
+				var t kubevirt.RawConfig
+				if err := json.Unmarshal(machine.ProviderSpec.Value.Raw, &t); err != nil {
+					fmt.Println("Error unmarshalling JSON:", err)
+					return
+				}
+				t.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(opts.Secrets.Kubevirt.Kubeconfig))
+				if err := mergo.Merge(&t, defaultKubevirtConfig); err != nil {
+					log.Fatalw("Failed to merge seed", zap.String("datacenter", k), zap.Error(err))
+				}
+				raw, err := EncodeRawSpec(t)
+				if err != nil {
+					log.Fatalw("Failed to encode raw spec", zap.String("machine", machineKey), zap.Error(err))
+				}
+				osspec, err := userdata.DefaultOperatingSystemSpec(providerconfig.OperatingSystemUbuntu, runtime.RawExtension{})
+				if err != nil {
+					log.Fatalw("Failed to get default OS spec", zap.String("machine", machineKey), zap.Error(err))
+				}
+				pc := providerconfig.Config{
+					CloudProviderSpec:   *raw,
+					OperatingSystemSpec: osspec,
+					OperatingSystem:     providerconfig.OperatingSystemUbuntu,
+				}
+				data, err := json.Marshal(pc)
+				if err != nil {
+					log.Fatalw("Failed to marshal config", zap.String("machine", machineKey), zap.Error(err))
+				}
+				machine.ProviderSpec.Value.Raw = data
+				if machine.ProviderSpec.Value != nil {
+					fmt.Fprintf(file, "[DEBUG] scenario %s and %s\n", k, machineKey)
+				}
+				machineSpec, err := p.AddDefaults(log, machine)
+				if err != nil {
+					log.Fatalw("Failed to add defaults to machine", zap.String("machine", machineKey), zap.Error(err))
+					return
+				}
+				if err := p.Validate(rootCtx, log, machineSpec); err != nil {
+					log.Infof("Failed to validate machine", zap.String("machine", machineKey), zap.Error(err))
+				}
+				machinesMu.Lock()
+				if newScenarios[k] == nil {
+					newScenarios[k] = map[string]v1alpha1.MachineSpec{}
+				}
+				newScenarios[k][machineKey] = machineSpec
+				machinesMu.Unlock()
+			}(machineKey, machine, k)
+		}
+	}
+	wgMachines.Wait()
+	return newScenarios
+}

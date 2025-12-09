@@ -17,7 +17,6 @@ import (
 	controllerutil "k8c.io/kubermatic/v2/pkg/controller/util"
 	"k8c.io/kubermatic/v2/pkg/version/kubermatic"
 	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
-	"k8c.io/machine-controller/sdk/providerconfig"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -25,25 +24,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
-
-func scenarioEntriesByProvider(s []scenarios.Scenario, p providerconfig.CloudProvider) []TableEntry {
-	var entries []TableEntry
-	for _, scenario := range s {
-		if scenario.CloudProvider() == kubermaticv1.ProviderType(p) {
-			entries = append(entries, Entry(scenario.Name(), scenario))
-		}
-	}
-	return entries
-}
-
-func scenarioEntries(s []scenarios.Scenario) []TableEntry {
-	var entries []TableEntry
-	for _, scenario := range s {
-		entries = append(entries, Entry(string(scenario.CloudProvider()), scenario))
-
-	}
-	return entries
-}
 
 func KKP(msg string) string {
 	return fmt.Sprintf("[KKP] %s", msg)

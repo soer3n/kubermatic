@@ -114,31 +114,6 @@ type RuntimeOptions struct {
 	KubermaticConfiguration *kubermaticv1.KubermaticConfiguration
 }
 
-// func MergeOptions(base Options, override *types.Options) *types.Options {
-// 	return &types.Options{
-// 		Client:                       override.Client,
-// 		Providers:                    override.Providers,
-// 		Releases:                     override.Releases,
-// 		EnableDistributions:          override.EnableDistributions,
-// 		ExcludeDistributions:         override.ExcludeDistributions,
-// 		EnableTests:                  override.EnableTests,
-// 		ExcludeTests:                 override.ExcludeTests,
-// 		KubermaticNamespace:          override.KubermaticNamespace,
-// 		KubermaticSeedName:           override.KubermaticSeedName,
-// 		KonnectivityEnabled:          override.KonnectivityEnabled,
-// 		NodeCount:                    override.NodeCount,
-// 		ControlPlaneReadyWaitTimeout: override.ControlPlaneReadyWaitTimeout,
-// 		NodeReadyTimeout:             override.NodeReadyTimeout,
-// 		CustomTestTimeout:            override.CustomTestTimeout,
-// 		UserClusterPollInterval:      override.UserClusterPollInterval,
-// 		NamePrefix:                   override.NamePrefix,
-// 		Secrets:                      override.Secrets,
-// 		LogDirectory:                 override.LogDirectory,
-// 		ReportsRoot:                  override.ReportsRoot,
-// 		DeleteClusterAfterTests:      override.DeleteClusterAfterTests,
-// 	}
-// }
-
 func NewDefaultOptions() *Options {
 	return &Options{
 		Client:                       "kube",

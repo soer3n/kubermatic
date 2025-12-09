@@ -90,7 +90,7 @@ func (g *Generator) Scenarios(ctx context.Context, opts *types.Options, log *zap
 			}
 
 			for _, operatingSystem := range sets.List(g.operatingSystems) {
-				scenario, err := providerScenario(opts, kubermaticv1.ProviderType(providerName), providerconfig.OperatingSystem(operatingSystem), *s, datacenter)
+				scenario, err := ProviderScenario(opts, kubermaticv1.ProviderType(providerName), providerconfig.OperatingSystem(operatingSystem), *s, datacenter)
 				if err != nil {
 					return nil, err
 				}
@@ -138,7 +138,7 @@ func (g *Generator) datacenter(ctx context.Context, client ctrlruntimeclient.Cli
 	return getDatacenter(ctx, client, datacenterName)
 }
 
-func providerScenario(
+func ProviderScenario(
 	opts *types.Options,
 	provider kubermaticv1.ProviderType,
 	os providerconfig.OperatingSystem,

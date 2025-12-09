@@ -30,22 +30,6 @@ import (
 // Declare clusterName here; it is assigned a value in SynchronizedBeforeSuite in the suite file.
 var clusterName string
 
-type scenario struct {
-	dc          string
-	kubeVersion string
-	clusterName string // e2e-<dc>-<kv>
-}
-
-func ScenarioTableEntries(_ map[string]*kubermaticv1.Datacenter) []scenario {
-	var scenarios []scenario
-	for name := range dcClusters { // use filtered dcs slice from suite
-		dc := strings.Split(name, "-")[1]
-		kv := strings.Split(name, "-")[2]
-		scenarios = append(scenarios, scenario{dc: dc, kubeVersion: kv, clusterName: name})
-	}
-	return scenarios
-}
-
 var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 	By("Report after smoke tests")
 })
@@ -79,8 +63,6 @@ func getTableEntries() []TableEntry {
 	return newEntries
 }
 
-// clusterName is defined in the suite file (provider_suite_test.go) and broadcast via SynchronizedBeforeSuite.
-// We only track whether creation happened in this process group.
 var _ = Describe("Scenarios", func() {
 	var disabledSettings map[string][]interface{}
 	if len(legacyOpts.TestSettings) > 0 {
