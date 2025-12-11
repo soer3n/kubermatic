@@ -15,8 +15,9 @@ import (
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"k8c.io/kubermatic/v2/pkg/version"
@@ -27,12 +28,14 @@ import (
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	kubermaticlog "k8c.io/kubermatic/v2/pkg/log"
 	kkpreconciling "k8c.io/kubermatic/v2/pkg/resources/reconciling"
+
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+
+	apitypes "k8s.io/apimachinery/pkg/types"
+
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
-	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type MachineScenario struct {
@@ -290,10 +293,10 @@ var _ = SynchronizedBeforeSuite(func() {
 		go func(dc string, spec *kubermaticv1.ClusterSpec) {
 			defer wg.Done()
 			if !skipClusterCreation {
-				ensureCluster(dc, spec)
+				// ensureCluster(dc, spec)
 			}
 			if skipClusterCreation && updateClusters {
-				updateCluster(dc, spec)
+				// updateCluster(dc, spec)
 			}
 		}(name, clusterSpec)
 	}
@@ -312,7 +315,7 @@ var _ = SynchronizedAfterSuite(func() {
 		if !skipClusterDeletion {
 			By("Deleting cluster for " + dc)
 			cluster := &kubermaticv1.Cluster{}
-			err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: dc}, cluster)
+			err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: dc}, cluster)
 			if err != nil {
 				log.Errorf("Failed to get cluster %s: %v", dc, err)
 				continue
