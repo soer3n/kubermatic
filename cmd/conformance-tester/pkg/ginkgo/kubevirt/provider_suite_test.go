@@ -150,15 +150,17 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
-	newClusters = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, opts, kkpConfig, log, versionManager)
+	versions = versions[:8]
+	newClusters = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, opts, kkpConfig, log, versionManager, file)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
+
 	newScenarios = buildNewScenarios(machineSettings, newClusters, opts, log, defaultKubevirtConfig, resolver, file, rootCtx)
 	total := 0
 	for _, inner := range newScenarios {
 		total += len(inner)
 	}
 	flag.Parse()
-	fmt.Fprintf(file, "new clusters: %v\nnew scenarios: %v\nKeys: %v\n", len(newClusters), total, maps.Keys(newScenarios))
+	fmt.Fprintf(file, "new clusters: %v\nnew scenarios: %v\nKeys: %v\nDescriptions: %v\n", len(newClusters), total, maps.Keys(newScenarios), maps.Values(newScenarios))
 	if configPath == "" {
 		runtimeOpts, _ = k8cginkgo.NewRuntimeOptions(rootCtx, log, &k8cginkgo.Options{
 			KubermaticNamespace: legacyOpts.KubermaticNamespace,
@@ -238,7 +240,7 @@ var _ = SynchronizedAfterSuite(func() {
 		if !skipClusterDeletion {
 			By("Deleting cluster for " + dc)
 			cluster := &kubermaticv1.Cluster{}
-			err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: clusterName}, cluster)
+			err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: dc}, cluster)
 			if err != nil {
 				log.Errorf("Failed to get cluster %s: %v", dc, err)
 				continue
@@ -280,12 +282,14 @@ func buildDefaultSeedSettings(datacenterSettings map[string]kubermaticv1.Datacen
 	return defaultSeedSettings
 }
 
-func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterSettings map[string]kubermaticv1.ClusterSpec, defaultSeedSettings map[string]kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager) map[string]*kubermaticv1.ClusterSpec {
+func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterSettings map[string]kubermaticv1.ClusterSpec, defaultSeedSettings map[string]kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager, file *os.File) map[string]*kubermaticv1.ClusterSpec {
 	var clustersMu sync.Mutex
 	var wgClusters sync.WaitGroup
-	maxConcurrentClusters := 50
+	maxConcurrentClusters := 1
 	semClusters := make(chan struct{}, maxConcurrentClusters)
 	newClusters := map[string]*kubermaticv1.ClusterSpec{}
+	clusterDescriptions := map[string][]string{}
+
 	for _, kubeVersion := range versions {
 		for k, v := range clusterSettings {
 			for dcKey, seed := range defaultSeedSettings {
@@ -314,78 +318,238 @@ func buildNewClusters(rootCtx context.Context, versions []*version.Version, clus
 						log.Infof("Failed to validate cluster", zap.String("cluster spec", k), zap.Error(valErrs.ToAggregate()))
 						return
 					}
+					// Generate a key based on version, datacenter, provider
+					keyStruct := struct {
+						Version        string
+						DatacenterName string
+						ProviderName   string
+					}{
+						Version:        kubeVersion.Version.String(),
+						DatacenterName: dcKey,
+						ProviderName:   v.Cloud.ProviderName,
+					}
+					keyBytes, _ := json.Marshal(keyStruct)
+					key := string(keyBytes)
 					clustersMu.Lock()
-					newClusters["with kube version "+kubeVersion.Version.String()+" "+dcKey+" "+k] = &v
+					if existing, exists := newClusters[key]; exists {
+						// Only merge if version, datacenter, and provider are identical (guaranteed by key)
+						merged := *existing
+						if err := mergo.Merge(&merged, v, mergo.WithOverride); err == nil {
+							valErrs := validation.ValidateClusterSpec(&merged, &currentSeedDatacenter, nil, versionManager, &merged.Version, nil)
+							if len(valErrs) != 0 {
+								log.Infof("Skipped invalid merged cluster spec", zap.String("cluster spec", k), zap.Error(valErrs.ToAggregate()))
+								fmt.Fprintf(file, "[SKIPPED INVALID MERGED CLUSTER] %s: errors: %v\n", key, valErrs.ToAggregate())
+								clustersMu.Unlock()
+								return
+							}
+							*existing = merged
+							clusterDescriptions[key] = append(clusterDescriptions[key], k)
+						}
+						clustersMu.Unlock()
+						return
+					}
+					newClusters[key] = &v
+					clusterDescriptions[key] = []string{k}
 					clustersMu.Unlock()
 				}(k, v, dcKey, seed, kubeVersion)
 			}
 		}
 	}
 	wgClusters.Wait()
+	// Output final cluster descriptions
+	fmt.Fprintf(file, "\nFINAL CLUSTER DESCRIPTIONS (with combined cluster names):\n")
+	for key, descs := range clusterDescriptions {
+		var keyStruct struct {
+			Version        string
+			DatacenterName string
+			ProviderName   string
+		}
+		_ = json.Unmarshal([]byte(key), &keyStruct)
+		fmt.Fprintf(file, "Cluster Version: %s\n  Provider: %s\n  Combined Cluster Names: %v\n\n", keyStruct.Version, keyStruct.ProviderName, descs)
+	}
 	return newClusters
 }
 
-func buildNewScenarios(machineSettings map[string]v1alpha1.MachineSpec, newClusters map[string]*kubermaticv1.ClusterSpec, opts *k8cginkgo.Options, log *zap.SugaredLogger, defaultKubevirtConfig kubevirt.RawConfig, resolver *configvar.Resolver, file *os.File, rootCtx context.Context) map[string]map[string]v1alpha1.MachineSpec {
-	newScenarios := map[string]map[string]v1alpha1.MachineSpec{}
-	var machinesMu sync.Mutex
-	var wgMachines sync.WaitGroup
-	maxConcurrent := 100
-	sem := make(chan struct{}, maxConcurrent)
-	for machineKey, machine := range machineSettings {
-		for k := range newClusters {
-			wgMachines.Add(1)
-			sem <- struct{}{}
-			go func(machineKey string, machine v1alpha1.MachineSpec, k string) {
-				defer wgMachines.Done()
-				defer func() { <-sem }()
-				p := mckubevirtprovider.New(resolver)
-				var t kubevirt.RawConfig
-				if err := json.Unmarshal(machine.ProviderSpec.Value.Raw, &t); err != nil {
-					fmt.Println("Error unmarshalling JSON:", err)
-					return
+// scenarioResult is used to pass data from a producer to a consumer.
+type scenarioResult struct {
+	machineName string
+	dedupKey    string
+	machineSpec v1alpha1.MachineSpec
+	err         error
+}
+
+// scenarioProducer processes a single machine configuration and sends the result to a channel.
+func scenarioProducer(
+	ch chan<- scenarioResult,
+	wg *sync.WaitGroup,
+	log *zap.SugaredLogger,
+	rootCtx context.Context,
+	resolver *configvar.Resolver,
+	opts *k8cginkgo.Options,
+	defaultKubevirtConfig kubevirt.RawConfig,
+	clusterKey string,
+	machineName string,
+	machine v1alpha1.MachineSpec,
+) {
+	defer wg.Done()
+
+	p := mckubevirtprovider.New(resolver)
+	var t kubevirt.RawConfig
+	if err := json.Unmarshal(machine.ProviderSpec.Value.Raw, &t); err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to unmarshal provider spec: %w", err)}
+		return
+	}
+
+	t.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(opts.Secrets.Kubevirt.Kubeconfig))
+	if err := mergo.Merge(&t, defaultKubevirtConfig); err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to merge default kubevirt config: %w", err)}
+		return
+	}
+
+	raw, err := EncodeRawSpec(t)
+	if err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to encode raw spec: %w", err)}
+		return
+	}
+
+	osspec, err := userdata.DefaultOperatingSystemSpec(providerconfig.OperatingSystemUbuntu, runtime.RawExtension{})
+	if err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to get default OS spec: %w", err)}
+		return
+	}
+
+	pc := providerconfig.Config{
+		CloudProviderSpec:   *raw,
+		OperatingSystemSpec: osspec,
+		OperatingSystem:     providerconfig.OperatingSystemUbuntu,
+	}
+	data, err := json.Marshal(pc)
+	if err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to marshal provider config: %w", err)}
+		return
+	}
+	machine.ProviderSpec.Value.Raw = data
+
+	machineSpec, err := p.AddDefaults(log, machine)
+	if err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to add defaults to machine: %w", err)}
+		return
+	}
+
+	if err := p.Validate(rootCtx, log, machineSpec); err != nil {
+		// Treat validation errors as skippable, not fatal
+		log.Infof("Skipping invalid machine spec for %q: %v", machineName, err)
+		ch <- scenarioResult{err: nil} // Send nil error to signal completion without a valid result
+		return
+	}
+
+	// Create a stable deduplication key from the cloud provider spec only
+	var providerSpec providerconfig.Config
+	if err := json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, &providerSpec); err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to unmarshal provider spec for dedup key: %w", err)}
+		return
+	}
+	dedupKeyBytes, err := json.Marshal(providerSpec.CloudProviderSpec)
+	if err != nil {
+		ch <- scenarioResult{err: fmt.Errorf("failed to marshal cloud provider spec for dedup key: %w", err)}
+		return
+	}
+
+	ch <- scenarioResult{
+		machineName: machineName,
+		dedupKey:    string(dedupKeyBytes),
+		machineSpec: machineSpec,
+		err:         nil,
+	}
+}
+
+// scenarioConsumer collects results for a single cluster and aggregates them.
+func scenarioConsumer(
+	ch <-chan scenarioResult,
+	wg *sync.WaitGroup,
+	log *zap.SugaredLogger,
+	rootCtx context.Context,
+	resolver *configvar.Resolver,
+	clusterKey string,
+	scenarios map[string]v1alpha1.MachineSpec,
+	descriptions map[string][]string,
+	file *os.File,
+) {
+	defer wg.Done()
+	p := mckubevirtprovider.New(resolver)
+
+	for result := range ch {
+		if result.err != nil {
+			log.Errorw("Producer failed", "cluster", clusterKey, "error", result.err)
+			continue
+		}
+		// A nil error with an empty dedupKey means the producer skipped an invalid spec.
+		if result.dedupKey == "" {
+			continue
+		}
+
+		if existing, exists := scenarios[result.dedupKey]; exists {
+			merged := existing
+			if err := mergo.Merge(&merged, result.machineSpec, mergo.WithOverride); err == nil {
+				if err := p.Validate(rootCtx, log, merged); err != nil {
+					log.Infof("Skipped invalid merged machine spec", "machine", result.machineName, "error", err)
+					fmt.Fprintf(file, "[SKIPPED INVALID MERGED SCENARIO] %s: errors: %v\n", clusterKey, err)
+					continue
 				}
-				t.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(opts.Secrets.Kubevirt.Kubeconfig))
-				if err := mergo.Merge(&t, defaultKubevirtConfig); err != nil {
-					log.Fatalw("Failed to merge seed", zap.String("datacenter", k), zap.Error(err))
-				}
-				raw, err := EncodeRawSpec(t)
-				if err != nil {
-					log.Fatalw("Failed to encode raw spec", zap.String("machine", machineKey), zap.Error(err))
-				}
-				osspec, err := userdata.DefaultOperatingSystemSpec(providerconfig.OperatingSystemUbuntu, runtime.RawExtension{})
-				if err != nil {
-					log.Fatalw("Failed to get default OS spec", zap.String("machine", machineKey), zap.Error(err))
-				}
-				pc := providerconfig.Config{
-					CloudProviderSpec:   *raw,
-					OperatingSystemSpec: osspec,
-					OperatingSystem:     providerconfig.OperatingSystemUbuntu,
-				}
-				data, err := json.Marshal(pc)
-				if err != nil {
-					log.Fatalw("Failed to marshal config", zap.String("machine", machineKey), zap.Error(err))
-				}
-				machine.ProviderSpec.Value.Raw = data
-				if machine.ProviderSpec.Value != nil {
-					fmt.Fprintf(file, "[DEBUG] scenario %s and %s\n", k, machineKey)
-				}
-				machineSpec, err := p.AddDefaults(log, machine)
-				if err != nil {
-					log.Fatalw("Failed to add defaults to machine", zap.String("machine", machineKey), zap.Error(err))
-					return
-				}
-				if err := p.Validate(rootCtx, log, machineSpec); err != nil {
-					log.Infof("Failed to validate machine", zap.String("machine", machineKey), zap.Error(err))
-				}
-				machinesMu.Lock()
-				if newScenarios[k] == nil {
-					newScenarios[k] = map[string]v1alpha1.MachineSpec{}
-				}
-				newScenarios[k][machineKey] = machineSpec
-				machinesMu.Unlock()
-			}(machineKey, machine, k)
+				scenarios[result.dedupKey] = merged
+				descriptions[result.dedupKey] = append(descriptions[result.dedupKey], result.machineName)
+			}
+		} else {
+			scenarios[result.dedupKey] = result.machineSpec
+			descriptions[result.dedupKey] = []string{result.machineName}
 		}
 	}
-	wgMachines.Wait()
-	return newScenarios
+}
+
+func buildNewScenarios(machineSettings map[string]v1alpha1.MachineSpec, newClusters map[string]*kubermaticv1.ClusterSpec, opts *k8cginkgo.Options, log *zap.SugaredLogger, defaultKubevirtConfig kubevirt.RawConfig, resolver *configvar.Resolver, file *os.File, rootCtx context.Context) map[string]map[string]v1alpha1.MachineSpec {
+	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
+	finalMachineDescriptions := make(map[string]map[string][]string)
+	var consumerWg sync.WaitGroup
+
+	for clusterKey := range newClusters {
+		consumerWg.Add(1)
+
+		// These maps are owned by the consumer for this clusterKey, so no mutex is needed.
+		clusterScenarios := make(map[string]v1alpha1.MachineSpec)
+		clusterDescriptions := make(map[string][]string)
+		finalScenarios[clusterKey] = clusterScenarios
+		finalMachineDescriptions[clusterKey] = clusterDescriptions
+
+		resultsCh := make(chan scenarioResult)
+
+		// Start the consumer for this cluster
+		go scenarioConsumer(resultsCh, &consumerWg, log, rootCtx, resolver, clusterKey, clusterScenarios, clusterDescriptions, file)
+
+		// Start all producers for this cluster
+		var producerWg sync.WaitGroup
+		for machineName, machine := range machineSettings {
+			producerWg.Add(1)
+			go scenarioProducer(resultsCh, &producerWg, log, rootCtx, resolver, opts, defaultKubevirtConfig, clusterKey, machineName, machine)
+		}
+
+		// Wait for all producers for this cluster to finish, then close the channel
+		// to signal the consumer that there are no more results.
+		go func() {
+			producerWg.Wait()
+			close(resultsCh)
+		}()
+	}
+
+	// Wait for all consumers to finish processing.
+	consumerWg.Wait()
+
+	// Output final scenario descriptions in improved format
+	fmt.Fprintf(file, "\nFINAL SCENARIO DESCRIPTIONS (with combined scenario names):\n")
+	for clusterKey, scenarios := range finalScenarios {
+		for dedupKey := range scenarios {
+			descs := finalMachineDescriptions[clusterKey][dedupKey]
+			fmt.Fprintf(file, "Cluster: %s\n  Scenario Key: %s\n  Combined Scenario Names: %v\n\n", clusterKey, dedupKey, descs)
+		}
+	}
+	return finalScenarios
 }

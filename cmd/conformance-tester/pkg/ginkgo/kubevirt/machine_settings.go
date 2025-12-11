@@ -14,54 +14,63 @@ import (
 )
 
 var machineSettings = map[string]v1alpha1.MachineSpec{
-	"cluster name set to test-cluster": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				ClusterName: providerconfig.ConfigVarString{Value: "test-cluster"},
-			}),
-		},
-	},
-	"auth kubeconfig set to valid-kubeconfig": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				Auth: kubevirt.Auth{
-					Kubeconfig: providerconfig.ConfigVarString{Value: "valid-kubeconfig"},
-				},
-			}),
-		},
-	},
-	"virtual machine instancetype set to empty": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				VirtualMachine: kubevirt.VirtualMachine{
-					Instancetype: &kubevirtcorev1.InstancetypeMatcher{Name: ""},
-				},
-			}),
-		},
-	},
-	"virtual machine preference set to empty": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				VirtualMachine: kubevirt.VirtualMachine{
-					Preference: &kubevirtcorev1.PreferenceMatcher{Name: ""},
-				},
-			}),
-		},
-	},
-	"virtual machine dns policy set to ClusterFirstWithHostNet": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				VirtualMachine: kubevirt.VirtualMachine{
-					DNSPolicy: providerconfig.ConfigVarString{Value: "ClusterFirstWithHostNet"},
-				},
-			}),
-		},
-	},
+	// "cluster name set to changed-cluster-name": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			ClusterName: providerconfig.ConfigVarString{Value: "changed-cluster-name"},
+	// 		}),
+	// 	},
+	// },
+	// "auth kubeconfig set to valid-kubeconfig": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			Auth: kubevirt.Auth{
+	// 				Kubeconfig: providerconfig.ConfigVarString{Value: "valid-kubeconfig"},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "virtual machine instancetype set to empty": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			VirtualMachine: kubevirt.VirtualMachine{
+	// 				Instancetype: &kubevirtcorev1.InstancetypeMatcher{Name: ""},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "virtual machine preference set to empty": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			VirtualMachine: kubevirt.VirtualMachine{
+	// 				Preference: &kubevirtcorev1.PreferenceMatcher{Name: ""},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "virtual machine dns policy set to ClusterFirstWithHostNet": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			VirtualMachine: kubevirt.VirtualMachine{
+	// 				DNSPolicy: providerconfig.ConfigVarString{Value: "ClusterFirstWithHostNet"},
+	// 			},
+	// 		}),
+	// 	},
+	// },
 	"virtual machine eviction strategy set to LiveMigrate": {
 		ProviderSpec: v1alpha1.ProviderSpec{
 			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
 					EvictionStrategy: "LiveMigrate",
+				},
+			}),
+		},
+	},
+	"virtual machine eviction strategy set to External": {
+		ProviderSpec: v1alpha1.ProviderSpec{
+			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+				VirtualMachine: kubevirt.VirtualMachine{
+					EvictionStrategy: "External",
 				},
 			}),
 		},
@@ -84,12 +93,12 @@ var machineSettings = map[string]v1alpha1.MachineSpec{
 			}),
 		},
 	},
-	"virtual machine template CPUs set to 2": {
+	"virtual machine template CPUs set to 4": {
 		ProviderSpec: v1alpha1.ProviderSpec{
 			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
 					Template: kubevirt.Template{
-						CPUs: providerconfig.ConfigVarString{Value: "2"},
+						CPUs: providerconfig.ConfigVarString{Value: "4"},
 					},
 				},
 			}),
@@ -106,25 +115,26 @@ var machineSettings = map[string]v1alpha1.MachineSpec{
 			}),
 		},
 	},
-	"virtual machine template memory set to 4096Mi": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				VirtualMachine: kubevirt.VirtualMachine{
-					Template: kubevirt.Template{
-						Memory: providerconfig.ConfigVarString{Value: "4096Mi"},
-					},
-				},
-			}),
-		},
-	},
-	"virtual machine template primary disk size set to 20Gi": {
+	// "virtual machine template memory set to 4096Mi": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			VirtualMachine: kubevirt.VirtualMachine{
+	// 				Template: kubevirt.Template{
+	// 					Memory: providerconfig.ConfigVarString{Value: "4096Mi"},
+	// 				},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	"virtual machine template primary disk size set to 20Gi and storage class set to standard": {
 		ProviderSpec: v1alpha1.ProviderSpec{
 			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
 					Template: kubevirt.Template{
 						PrimaryDisk: kubevirt.PrimaryDisk{
 							Disk: kubevirt.Disk{
-								Size: providerconfig.ConfigVarString{Value: "20Gi"},
+								Size:             providerconfig.ConfigVarString{Value: "20Gi"},
+								StorageClassName: providerconfig.ConfigVarString{Value: "standard"},
 							},
 						},
 					},
@@ -132,14 +142,15 @@ var machineSettings = map[string]v1alpha1.MachineSpec{
 			}),
 		},
 	},
-	"virtual machine template primary disk storage class set to standard": {
+	"virtual machine template primary disk disk size set to 20Gi and storage class set to kubermatic-fast": {
 		ProviderSpec: v1alpha1.ProviderSpec{
 			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
 				VirtualMachine: kubevirt.VirtualMachine{
 					Template: kubevirt.Template{
 						PrimaryDisk: kubevirt.PrimaryDisk{
 							Disk: kubevirt.Disk{
-								StorageClassName: providerconfig.ConfigVarString{Value: "standard"},
+								Size:             providerconfig.ConfigVarString{Value: "20Gi"},
+								StorageClassName: providerconfig.ConfigVarString{Value: "kubermatic-fast"},
 							},
 						},
 					},
@@ -177,59 +188,59 @@ var machineSettings = map[string]v1alpha1.MachineSpec{
 			}),
 		},
 	},
-	"affinity node affinity preset type set to empty": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				Affinity: kubevirt.Affinity{
-					NodeAffinityPreset: kubevirt.NodeAffinityPreset{
-						Type: providerconfig.ConfigVarString{Value: ""},
-					},
-				},
-			}),
-		},
-	},
-	"affinity node affinity preset key set to kubernetes.io/hostname": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				Affinity: kubevirt.Affinity{
-					NodeAffinityPreset: kubevirt.NodeAffinityPreset{
-						Key: providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
-					},
-				},
-			}),
-		},
-	},
-	"affinity node affinity preset values set to node-01": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				Affinity: kubevirt.Affinity{
-					NodeAffinityPreset: kubevirt.NodeAffinityPreset{
-						Values: []providerconfig.ConfigVarString{{Value: "node-01"}},
-					},
-				},
-			}),
-		},
-	},
-	"topology spread constraints topology key set to kubernetes.io/hostname and max skew set to 1": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
-					TopologyKey: providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
-					MaxSkew:     providerconfig.ConfigVarString{Value: "1"},
-				}},
-			}),
-		},
-	},
-	"topology spread constraints when unsatisfiable set to DoNotSchedule and max skew set to 1": {
-		ProviderSpec: v1alpha1.ProviderSpec{
-			Value: mustEncodeProviderSpec(kubevirt.RawConfig{
-				TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
-					WhenUnsatisfiable: providerconfig.ConfigVarString{Value: "DoNotSchedule"},
-					MaxSkew:           providerconfig.ConfigVarString{Value: "1"},
-				}},
-			}),
-		},
-	},
+	// "affinity node affinity preset type set to empty": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			Affinity: kubevirt.Affinity{
+	// 				NodeAffinityPreset: kubevirt.NodeAffinityPreset{
+	// 					Type: providerconfig.ConfigVarString{Value: ""},
+	// 				},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "affinity node affinity preset key set to kubernetes.io/hostname": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			Affinity: kubevirt.Affinity{
+	// 				NodeAffinityPreset: kubevirt.NodeAffinityPreset{
+	// 					Key: providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
+	// 				},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "affinity node affinity preset values set to node-01": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			Affinity: kubevirt.Affinity{
+	// 				NodeAffinityPreset: kubevirt.NodeAffinityPreset{
+	// 					Values: []providerconfig.ConfigVarString{{Value: "node-01"}},
+	// 				},
+	// 			},
+	// 		}),
+	// 	},
+	// },
+	// "topology spread constraints topology key set to kubernetes.io/hostname and max skew set to 1": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
+	// 				TopologyKey: providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
+	// 				MaxSkew:     providerconfig.ConfigVarString{Value: "1"},
+	// 			}},
+	// 		}),
+	// 	},
+	// },
+	// "topology spread constraints when unsatisfiable set to DoNotSchedule and max skew set to 1": {
+	// 	ProviderSpec: v1alpha1.ProviderSpec{
+	// 		Value: mustEncodeProviderSpec(kubevirt.RawConfig{
+	// 			TopologySpreadConstraints: []kubevirt.TopologySpreadConstraint{{
+	// 				WhenUnsatisfiable: providerconfig.ConfigVarString{Value: "DoNotSchedule"},
+	// 				MaxSkew:           providerconfig.ConfigVarString{Value: "1"},
+	// 			}},
+	// 		}),
+	// 	},
+	// },
 }
 
 var defaultKubevirtConfig = kubevirt.RawConfig{

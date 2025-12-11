@@ -27,9 +27,6 @@ import (
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// Declare clusterName here; it is assigned a value in SynchronizedBeforeSuite in the suite file.
-var clusterName string
-
 var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 	By("Report after smoke tests")
 })
@@ -77,9 +74,6 @@ var _ = Describe("Scenarios", func() {
 			runTest = runTestFunc(maps.Keys(disabledSettings), description)
 			log.Infof("Considering test setting %q for provider %q: runTest=%v", description, "kubevirt", runTest)
 			log.Infof("Datacenters: %v", dcClusters)
-		}
-		if description == "VirtualMachine.EvictionStrategy" {
-			log.Infof("Special case handling for VirtualMachine.EvictionStrategy")
 		}
 		if !runTest {
 			Skip("This test setting was not selected to run via the --test-settings flag.")
