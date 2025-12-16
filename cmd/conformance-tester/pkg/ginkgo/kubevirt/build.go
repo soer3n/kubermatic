@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -250,6 +251,7 @@ func buildNewClusters(rootCtx context.Context, versions []*version.Version, clus
 	for name := range groupedModifiers {
 		groupNames = append(groupNames, name)
 	}
+	sort.Strings(groupNames)
 
 	const numWorkers = 100
 	jobs := make(chan clusterJob)
@@ -517,6 +519,7 @@ func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[s
 	for name := range groupedModifiers {
 		groupNames = append(groupNames, name)
 	}
+	sort.Strings(groupNames)
 
 	log.Infof("Starting scenario generation...")
 
