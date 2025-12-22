@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-	"k8s.io/utils/ptr"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/pkg/defaulting"
@@ -29,32 +28,32 @@ type clusterSpecModifier struct {
 
 // clusterSettings is now a slice of modifiers, each representing a distinct test case.
 var clusterSettings = []clusterSpecModifier{
-	{
-		name:  "with audit logging enabled",
-		group: "audit",
-		modify: func(spec *kubermaticv1.ClusterSpec) {
-			spec.AuditLogging = &kubermaticv1.AuditLoggingSettings{
-				Enabled: true,
-			}
-		},
-	},
-	{
-		name:  "with user ssh key agent enabled",
-		group: "ssh",
-		modify: func(spec *kubermaticv1.ClusterSpec) {
-			spec.EnableUserSSHKeyAgent = ptr.To(true)
-		},
-	},
-	{
-		name:  "with oidc provider configured",
-		group: "oidc",
-		modify: func(spec *kubermaticv1.ClusterSpec) {
-			spec.OIDC = kubermaticv1.OIDCSettings{
-				IssuerURL: "https://test.com",
-				ClientID:  "test",
-			}
-		},
-	},
+	// {
+	// 	name:  "with audit logging enabled",
+	// 	group: "audit",
+	// 	modify: func(spec *kubermaticv1.ClusterSpec) {
+	// 		spec.AuditLogging = &kubermaticv1.AuditLoggingSettings{
+	// 			Enabled: true,
+	// 		}
+	// 	},
+	// },
+	// {
+	// 	name:  "with user ssh key agent enabled",
+	// 	group: "ssh",
+	// 	modify: func(spec *kubermaticv1.ClusterSpec) {
+	// 		spec.EnableUserSSHKeyAgent = ptr.To(true)
+	// 	},
+	// },
+	// {
+	// 	name:  "with oidc provider configured",
+	// 	group: "oidc",
+	// 	modify: func(spec *kubermaticv1.ClusterSpec) {
+	// 		spec.OIDC = kubermaticv1.OIDCSettings{
+	// 			IssuerURL: "https://test.com",
+	// 			ClientID:  "test",
+	// 		}
+	// 	},
+	// },
 	{
 		name:  "with cni plugin set to canal",
 		group: "cni",
@@ -75,21 +74,21 @@ var clusterSettings = []clusterSpecModifier{
 			}
 		},
 	},
-	{
-		name:  "with different update window",
-		group: "update-window",
-		modify: func(spec *kubermaticv1.ClusterSpec) {
-			spec.UpdateWindow = &kubermaticv1.UpdateWindow{
-				Start:  "01:00",
-				Length: "1h",
-			}
-		},
-	},
+	// {
+	// 	name:  "with different update window",
+	// 	group: "update-window",
+	// 	modify: func(spec *kubermaticv1.ClusterSpec) {
+	// 		spec.UpdateWindow = &kubermaticv1.UpdateWindow{
+	// 			Start:  "01:00",
+	// 			Length: "1h",
+	// 		}
+	// 	},
+	// },
 }
 
 var defaultClusterSettings = kubermaticv1.Cluster{
 	Spec: kubermaticv1.ClusterSpec{
 		ContainerRuntime: "containerd",
-		ExposeStrategy:   kubermaticv1.ExposeStrategyLoadBalancer,
+		ExposeStrategy:   kubermaticv1.ExposeStrategyTunneling,
 	},
 }

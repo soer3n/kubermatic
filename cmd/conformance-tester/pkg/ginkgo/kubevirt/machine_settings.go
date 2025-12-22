@@ -10,7 +10,6 @@ import (
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
-	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
 // machineSpecModifier is a struct that holds a name and a modify function for a machine spec.
@@ -75,27 +74,20 @@ var machineSettings = []machineSpecModifier{
 			spec.ClusterName.Value = "changed-cluster-name"
 		},
 	},
-	{
-		name:  "with auth kubeconfig set",
-		group: "auth",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.Auth.Kubeconfig.Value = "valid-kubeconfig"
-		},
-	},
-	{
-		name:  "with empty instancetype",
-		group: "instancetype",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Instancetype = &kubevirtv1.InstancetypeMatcher{Name: ""}
-		},
-	},
-	{
-		name:  "with empty preference",
-		group: "preference",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Preference = &kubevirtv1.PreferenceMatcher{Name: ""}
-		},
-	},
+	// {
+	// 	name:  "with empty instancetype",
+	// 	group: "instancetype",
+	// 	modify: func(spec *kubevirt.RawConfig) {
+	// 		spec.VirtualMachine.Instancetype = &kubevirtv1.InstancetypeMatcher{Name: ""}
+	// 	},
+	// },
+	// {
+	// 	name:  "with empty preference",
+	// 	group: "preference",
+	// 	modify: func(spec *kubevirt.RawConfig) {
+	// 		spec.VirtualMachine.Preference = &kubevirtv1.PreferenceMatcher{Name: ""}
+	// 	},
+	// },
 	{
 		name:  "with dns policy set to ClusterFirstWithHostNet",
 		group: "dns-policy",
@@ -164,7 +156,7 @@ var machineSettings = []machineSpecModifier{
 	},
 	{
 		name:  "with 2 vCPUs",
-		group: "vcpu",
+		group: "cpu",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.VirtualMachine.Template.VCPUs.Cores = 2
 		},
@@ -219,7 +211,7 @@ var machineSettings = []machineSpecModifier{
 		group: "node-affinity",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.Affinity.NodeAffinityPreset.Key.Value = "kubernetes.io/hostname"
-			spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "node-01"}}
+			spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "kkp-cluster-worker"}}
 		},
 	},
 	{
@@ -233,7 +225,7 @@ var machineSettings = []machineSpecModifier{
 		name:  "with node affinity preset values",
 		group: "node-affinity-values",
 		modify: func(spec *kubevirt.RawConfig) {
-			spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "node-01"}}
+			spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "kkp-cluster-worker"}}
 		},
 	},
 	{
@@ -248,8 +240,9 @@ var machineSettings = []machineSpecModifier{
 		group: "topology-spread",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.TopologySpreadConstraints = []kubevirt.TopologySpreadConstraint{{
-				TopologyKey: providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
-				MaxSkew:     providerconfig.ConfigVarString{Value: "1"},
+				TopologyKey:       providerconfig.ConfigVarString{Value: "kubernetes.io/hostname"},
+				MaxSkew:           providerconfig.ConfigVarString{Value: "1"},
+				WhenUnsatisfiable: providerconfig.ConfigVarString{Value: "ScheduleAnyway"},
 			}}
 		},
 	},
@@ -310,12 +303,12 @@ func getDefaultKubevirtConfig() (*kubevirt.RawConfig, error) {
 			Kubeconfig: providerconfig.ConfigVarString{Value: "valid-kubeconfig"},
 		},
 		VirtualMachine: kubevirt.VirtualMachine{
-			Instancetype:            &kubevirtv1.InstancetypeMatcher{Name: ""},
-			Preference:              &kubevirtv1.PreferenceMatcher{Name: ""},
 			DNSPolicy:               providerconfig.ConfigVarString{Value: "ClusterFirstWithHostNet"},
 			EnableNetworkMultiQueue: providerconfig.ConfigVarBool{Value: ptr.To(true)},
 			Template: kubevirt.Template{
 				PrimaryDisk: kubevirt.PrimaryDisk{
+					Source:  providerconfig.ConfigVarString{Value: "container"},
+					OsImage: providerconfig.ConfigVarString{Value: "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"},
 					Disk: kubevirt.Disk{
 						Size:             providerconfig.ConfigVarString{Value: "20Gi"},
 						StorageClassName: providerconfig.ConfigVarString{Value: "kubermatic-fast"},

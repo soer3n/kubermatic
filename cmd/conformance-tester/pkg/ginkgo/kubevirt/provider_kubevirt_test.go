@@ -8,7 +8,6 @@ import (
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
-	"k8c.io/kubermatic/sdk/v2/semver"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
@@ -17,6 +16,7 @@ import (
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/util"
 	"k8c.io/kubermatic/v2/pkg/version/kubermatic"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
@@ -24,6 +24,7 @@ import (
 	controllerutil "k8c.io/kubermatic/v2/pkg/controller/util"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -42,25 +43,32 @@ var runTestFunc = func(k iter.Seq[string], v string) bool {
 
 func getTableEntries() []TableEntry {
 	var newEntries []TableEntry
-	for clusterName, machines := range newScenarios {
-		clusterClient, ok := newClusterClients[clusterName]
-		if !ok {
-			continue
-		}
-		clusterSpec, ok := newClusters[clusterName]
-		if !ok {
-			continue
-		}
+	for seedKey, _ := range defaultSeedSettings {
+		for clusterName, machines := range newScenarios {
+			clusterSpec, ok := newClusters[clusterName]
+			if !ok {
+				continue
+			}
+			clusterDesc, ok := finalClusterDescriptions[clusterName]
+			if !ok {
+				continue
+			}
 
-		for scenario, machine := range machines {
-			newEntries = append(newEntries, Entry(fmt.Sprintf("%s and %s", clusterName, scenario), fmt.Sprintf("%s and %s", clusterName, scenario), clusterSpec.Cloud.DatacenterName, clusterName, clusterSpec.Version, &machine, clusterClient))
+			for scenario, machine := range machines {
+				desc, ok := finalMachineDescriptions[clusterName][scenario]
+				if !ok {
+					continue
+				}
+				title := fmt.Sprintf("%s and %s and %s", strings.Replace(seedKey, "-", " and ", -1), strings.Join(clusterDesc, " and "), strings.Join(desc, " and "))
+				newEntries = append(newEntries, Entry(title, title, clusterName, clusterSpec, &machine, scenario))
+			}
+			continue
 		}
-		continue
 	}
 	return newEntries
 }
 
-var _ = Describe("Scenarios", func() {
+var _ = Describe("Scenario", func() {
 	var disabledSettings map[string][]interface{}
 	if len(legacyOpts.TestSettings) > 0 {
 		disabledSettings = make(map[string][]interface{})
@@ -68,7 +76,7 @@ var _ = Describe("Scenarios", func() {
 			disabledSettings[strings.TrimSpace(s.Description)] = s.StringVariants
 		}
 	}
-	DescribeTable("KubeVirt", func(description string, clusterName string, datacenterName string, clusterVersion semver.Semver, machineSpec *v1alpha1.MachineSpec, clusterClient ctrlruntimeclient.Client) {
+	DescribeTable("KubeVirt", func(description string, clusterName string, clusterSpec *kubermaticv1.ClusterSpec, machineSpec *v1alpha1.MachineSpec, scenarioName string) {
 		runTest := true
 		if disabledSettings != nil {
 			runTest = runTestFunc(maps.Keys(disabledSettings), description)
@@ -78,28 +86,56 @@ var _ = Describe("Scenarios", func() {
 		if !runTest {
 			Skip("This test setting was not selected to run via the --test-settings flag.")
 		}
-		if _, ok := dcClusters[fmt.Sprintf("e2e-%s-%s", datacenterName, clusterVersion.String())]; !ok {
-			Skip(fmt.Sprintf("Datacenter %q with kubeVersion %q not selected to run via --datacenters or --kube-versions", datacenterName, clusterVersion.String()))
+
+		cluster := &kubermaticv1.Cluster{}
+		if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: clusterName}, cluster); err != nil {
+			log.Errorf("Failed to get cluster %s: %v", clusterName, err)
+			Fail(fmt.Sprintf("Failed to get cluster %s: %v", clusterName, err))
 		}
 
-		// runtimeOpts.ClusterClientProvider.GetClient()
+		userClusterClient, err := runtimeOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
+		if err != nil {
+			log.Errorf("Failed to get user cluster client for cluster %s: %v", clusterName, err)
+			Fail(fmt.Sprintf("Failed to get user cluster client for cluster %s: %v", clusterName, err))
+		}
 
-		By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", datacenterName, clusterVersion.String()))
-		By(fmt.Sprintf("Scenario with dc %q cluster %q", datacenterName, clusterName))
-		By(fmt.Sprintf("Setting up machine for %s %s", datacenterName, clusterName))
+		By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", clusterSpec.Cloud.DatacenterName, clusterSpec.Version.String()))
+		By(fmt.Sprintf("Scenario with dc %q cluster %q", clusterSpec.Cloud.DatacenterName, clusterName))
+		By(fmt.Sprintf("Setting up machine for %s %s", clusterSpec.Cloud.DatacenterName, clusterName), func() {
+			k8cginkgo.MachineSetup(rootCtx, log, userClusterClient, clusterName, scenarioName, machineSpec, legacyOpts)
+		})
+
 		By(fmt.Sprintf("Machine setup done %q", clusterName))
-		By(fmt.Sprintf("Running smoke tests %q", clusterName))
+		By(fmt.Sprintf("Running smoke tests %q", clusterName), func() {
+			n := 0
+			ExpectWithOffset(3, tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
+				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
+			}, userClusterClient, n+1), nil)
+			n = 0
+			ExpectWithOffset(3, tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
+				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
+			}, userClusterClient, n+1), nil)
+			ExpectWithOffset(3, tests.TestUserClusterMetrics(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
+			ExpectWithOffset(3, tests.TestUserclusterControllerRBAC(rootCtx, log, legacyOpts, cluster, userClusterClient, runtimeOpts.SeedClusterClient), nil)
+			ExpectWithOffset(3, tests.TestUserClusterNoK8sGcrImages(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
+			ExpectWithOffset(3, tests.TestUserClusterPodAndNodeMetrics(rootCtx, log, legacyOpts, cluster, map[string]string{
+				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
+			}, userClusterClient), nil)
+			ExpectWithOffset(3, tests.TestUserClusterSeccompProfiles(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
+		})
 		By(fmt.Sprintf("Smoke tests done %q", clusterName))
 		time.Sleep(500 * time.Millisecond)
 	}, getTableEntries())
 })
 
-func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
+func ensureCluster(name string, projectName string, spec *kubermaticv1.ClusterSpec) {
 	By(fmt.Sprintf("Ensuring cluster %s\n", name))
 	currentOpts := *legacyOpts // copy
-	currentOpts.Secrets.Kubevirt.KKPDatacenter = strings.Split(name, "-")[1]
-	var userClusterClient ctrlruntimeclient.Client
-	var cluster *kubermaticv1.Cluster
+	currentOpts.Secrets.Kubevirt.KKPDatacenter = name
+	cluster := &kubermaticv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{kubermaticv1.ProjectIDLabelKey: projectName}},
+		Spec:       *spec,
+	}
 	By(k8cginkgo.KKP("Create Cluster"), func() {
 		err := runtimeOpts.SeedClusterClient.Create(rootCtx, cluster)
 		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to create cluster %s: %v", name, err))
@@ -109,7 +145,7 @@ func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
 		log.Info("Waiting for cluster to be successfully reconciled...")
 
 		Eventually(func() bool {
-			if err := legacyOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
+			if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
 				return false
 			}
 
@@ -119,7 +155,7 @@ func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
 			}
 
 			return true
-		}, legacyOpts.ControlPlaneReadyWaitTimeout, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
+		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
 
 		Eventually(func() bool {
 			newCluster := &kubermaticv1.Cluster{}
@@ -157,7 +193,7 @@ func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
 			}
 
 			return false
-		}, legacyOpts.ControlPlaneReadyWaitTimeout, 5*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
+		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
 	})
 
 	By(k8cginkgo.KKP("Wait for control plane"), func() {
@@ -173,7 +209,7 @@ func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
 
 		Eventually(func() bool {
 			var err error
-			userClusterClient, err = legacyOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
+			_, err = legacyOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
 			return err == nil
 		}, 10*time.Minute, 5*time.Second).Should(BeTrue())
 	})
@@ -190,7 +226,7 @@ func ensureCluster(name string, spec *kubermaticv1.ClusterSpec) {
 			return legacyOpts.SeedClusterClient.Update(rootCtx, cluster)
 		})).NotTo(HaveOccurred(), "failed to add finalizers to the cluster")
 	})
-	newClusterClients[name] = userClusterClient
+	// newClusterClients[name] = userClusterClient
 	clustersToDelete = append(clustersToDelete, cluster.Name)
 }
 
@@ -200,6 +236,4 @@ func updateCluster(name string, spec *kubermaticv1.ClusterSpec) {
 	// simulate work
 	time.Sleep(2 * time.Second)
 	By(fmt.Sprintf("Cluster %s updated\n", name))
-	// AddReportEntry("cluster-ensure", fmt.Sprintf("cluster=%s created-now ready=%v", name, st.ready.Load()))
-
 }

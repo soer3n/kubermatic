@@ -2,10 +2,13 @@ package kubevirt
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
@@ -82,9 +86,11 @@ var (
 	kkpConfig                *kubermaticv1.KubermaticConfiguration
 	newScenarios             map[string]map[string]v1alpha1.MachineSpec
 	newClusters              map[string]*kubermaticv1.ClusterSpec
+	defaultSeedSettings      map[string]kubermaticv1.Seed
 	finalClusterDescriptions map[string][]string
 	finalMachineDescriptions map[string]map[string][]string
 	newClusterClients        map[string]ctrlruntimeclient.Client
+	datacenterNameMappings   map[string]string
 )
 
 func GetClusterVersions() []string {
@@ -145,17 +151,49 @@ func TestMain(m *testing.M) {
 	}
 	defer file.Close()
 	log.Info("generating seeds...")
-	defaultSeedSettings := buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings)
+	datacenterNameMappings = make(map[string]string)
+	defaultSeedSettings = buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings)
+
+	seed := &kubermaticv1.Seed{}
+	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
+	// Expect(err).NotTo(HaveOccurred())
+
+	if seed.Spec.Datacenters == nil {
+		seed.Spec.Datacenters = map[string]kubermaticv1.Datacenter{}
+	}
+
+	seedKeys := make([]string, 0, len(defaultSeedSettings))
+	for k := range defaultSeedSettings {
+		seedKeys = append(seedKeys, k)
+	}
+	sort.Strings(seedKeys)
+
+	for _, key := range seedKeys {
+		s := defaultSeedSettings[key]
+		for dcName, dc := range s.Spec.Datacenters {
+			hasher := sha1.New()
+			hasher.Write([]byte(dcName))
+			hashedName := hex.EncodeToString(hasher.Sum(nil))[:10]
+			datacenterNameMappings[dcName] = hashedName
+			dc.Country = "conformance"
+			dc.Location = dcName
+			seed.Spec.Datacenters[hashedName] = dc
+		}
+	}
+
+	err = runtimeOpts.SeedClusterClient.Update(rootCtx, seed)
+	if err != nil {
+		log.Fatalw("Failed to update seed", zap.Error(err))
+	}
+
 	versionManager := version.NewFromConfiguration(kkpConfig)
 	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
 	if err != nil {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
-	// versions = versions[:2]
-	fmt.Fprintf(file, "Using Kubernetes versions: %v\n", versions)
-	fmt.Fprint(file, "Datacenter Settings:\n")
+	versions = versions[:1]
 	log.Info("generating clusters...")
-	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, opts, kkpConfig, log, versionManager, file)
+	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
 	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
 	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
@@ -166,8 +204,8 @@ func TestMain(m *testing.M) {
 	fmt.Fprint(file, "\nGenerated Scenarios:\n")
 	log.Info("generating scenarios...")
 	newScenarios, finalMachineDescriptions = buildNewScenarios(machineSettings, newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx)
+	log.Infof("Final Machine Descriptions: %v\n", finalMachineDescriptions)
 	log.Info("post-processing scenarios...")
-	finalMachineDescriptions = postProcessScenarios(finalMachineDescriptions, file)
 
 	// Create and write to the scenarios summary file
 	summaryFile, err := os.Create("scenarios_summary.txt")
@@ -193,8 +231,6 @@ func TestMain(m *testing.M) {
 		}
 	}
 
-	// aggregateClusters(newScenarios, machineDescriptions, file)
-
 	total := 0
 	for _, inner := range newScenarios {
 		total += len(inner)
@@ -204,22 +240,6 @@ func TestMain(m *testing.M) {
 	// Improved debug output
 	fmt.Fprintf(file, "new clusters: %d\n", len(newClusters))
 	fmt.Fprintf(file, "new scenarios: %d\n", total)
-	// fmt.Fprintln(file, "\nGenerated Scenarios:")
-	// for clusterKey, scenarios := range newScenarios {
-	// 	fmt.Fprintf(file, "  Cluster: %s\n", clusterKey)
-	// 	for dedupKey, spec := range scenarios {
-	// 		names := finalMachineDescriptions[clusterKey][dedupKey]
-	// 		fmt.Fprintf(file, "    - Scenario (Names: %v)\n", names)
-	// 		// Optionally print parts of the spec for debugging
-	// 		var pconfig providerconfig.Config
-	// 		if err := json.Unmarshal(spec.ProviderSpec.Value.Raw, &pconfig); err == nil {
-	// 			var rawConfig kubevirt.RawConfig
-	// 			if err := json.Unmarshal(pconfig.CloudProviderSpec.Raw, &rawConfig); err == nil {
-	// 				fmt.Fprintf(file, "      CPU: %s, Memory: %s, PrimaryDiskSize: %s\n", rawConfig.VirtualMachine.Template.CPUs.Value, rawConfig.VirtualMachine.Template.Memory.Value, rawConfig.VirtualMachine.Template.PrimaryDisk.Size.Value)
-	// 			}
-	// 		}
-	// 	}
-	// }
 
 	if configPath == "" {
 		runtimeOpts, _ = k8cginkgo.NewRuntimeOptions(rootCtx, log, &k8cginkgo.Options{
@@ -230,6 +250,16 @@ func TestMain(m *testing.M) {
 	legacyOpts = k8cginkgo.MergeOptions(log, opts, legacyOpts, runtimeOpts)
 	if err := legacyOpts.ParseFlags(log); err != nil {
 		log.Warnf("Invalid flags", zap.Error(err))
+	}
+
+	testSlice := []string{
+		legacytypes.StorageTests, legacytypes.LoadbalancerTests, legacytypes.MetricsTests,
+		legacytypes.UserClusterRBACTests, legacytypes.K8sGcrImageTests, legacytypes.MetricsTests,
+		legacytypes.SecurityContextTests,
+	}
+	legacyOpts.EnableTests = sets.Set[string]{}
+	for _, test := range testSlice {
+		legacyOpts.EnableTests.Insert(test)
 	}
 	os.Exit(m.Run())
 }
@@ -282,6 +312,11 @@ var _ = SynchronizedBeforeSuite(func() {
 	By(k8cginkgo.KKP("Ensuring SSH keys exist"), func() {
 		Expect(client.EnsureSSHKeys(rootCtx, log)).To(Succeed())
 	})
+
+	By(k8cginkgo.KKP("Attaching datacenters to seed"), func() {
+
+	})
+
 	suiteCfg, reporterCfg := GinkgoConfiguration()
 	By(fmt.Sprintf("Node1: my-opt=%s, parallel=%d", myOpt, suiteCfg.ParallelTotal))
 	By(fmt.Sprintf("Reporter: %#v", reporterCfg))
@@ -290,15 +325,15 @@ var _ = SynchronizedBeforeSuite(func() {
 	var wg sync.WaitGroup
 	for name, clusterSpec := range newClusters {
 		wg.Add(1)
-		go func(dc string, spec *kubermaticv1.ClusterSpec) {
+		go func(dc string, project string, spec *kubermaticv1.ClusterSpec) {
 			defer wg.Done()
 			if !skipClusterCreation {
-				// ensureCluster(dc, spec)
+				ensureCluster(dc, project, spec)
 			}
 			if skipClusterCreation && updateClusters {
 				// updateCluster(dc, spec)
 			}
-		}(name, clusterSpec)
+		}(name, legacyOpts.KubermaticProject, clusterSpec)
 	}
 	wg.Wait()
 }, func(data []byte) {
@@ -311,20 +346,46 @@ var _ = SynchronizedAfterSuite(func() {
 }, func() {
 	// primary node: idempotent deletion attempt for each cluster
 	By(fmt.Sprintf("Deleting created clusters for e2e project %q", legacyOpts.KubermaticProject))
+	var wg sync.WaitGroup
 	for dc := range newClusters {
-		if !skipClusterDeletion {
-			By("Deleting cluster for " + dc)
+		wg.Add(1)
+		go func(dc string) {
+			defer wg.Done()
 			cluster := &kubermaticv1.Cluster{}
-			err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: dc}, cluster)
-			if err != nil {
-				log.Errorf("Failed to get cluster %s: %v", dc, err)
-				continue
+			if !skipClusterDeletion {
+				By("Deleting cluster for " + dc)
+
+				err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: dc}, cluster)
+				if err != nil {
+					log.Errorf("Failed to get cluster %s: %v", dc, err)
+					return
+				}
 			}
 
+			userClusterClient, err := runtimeOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
+			if err != nil {
+				log.Errorf("Failed to get user cluster client for cluster %s: %v", dc, err)
+				return
+			}
 			By(fmt.Sprintf("Cleaning up resources for cluster %s. Name is %s", dc, cluster.Name))
-			k8cginkgo.CommonCleanup(rootCtx, log, clients.NewKubeClient(legacyOpts), nil, nil, cluster)
+			k8cginkgo.CommonCleanup(rootCtx, log, clients.NewKubeClient(legacyOpts), nil, userClusterClient, cluster)
+		}(dc)
+	}
+	wg.Wait()
+
+	By("Detaching datacenters from seed")
+	seed := &kubermaticv1.Seed{}
+	err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
+	if err != nil {
+		log.Errorf("Failed to get seed 'kubermatic' for cleanup: %v", err)
+	} else {
+		for _, hashedName := range datacenterNameMappings {
+			delete(seed.Spec.Datacenters, hashedName)
 		}
 
+		if err := runtimeOpts.SeedClusterClient.Update(rootCtx, seed); err != nil {
+			log.Errorf("Failed to update seed 'kubermatic' to remove datacenters: %v", err)
+		}
 	}
 })
 

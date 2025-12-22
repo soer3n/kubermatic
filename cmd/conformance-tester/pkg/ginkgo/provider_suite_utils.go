@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aws/smithy-go/ptr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"go.uber.org/zap"
@@ -16,14 +17,18 @@ import (
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/util"
 	controllerutil "k8c.io/kubermatic/v2/pkg/controller/util"
 	"k8c.io/kubermatic/v2/pkg/version/kubermatic"
+	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+var MachineNameLabel = "cluster.k8s.io/machine-set-name"
 
 func KKP(msg string) string {
 	return fmt.Sprintf("[KKP] %s", msg)
@@ -151,10 +156,35 @@ func CommonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clien
 	log.Info("Ending scenario test")
 }
 
-func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, legacyOpts *legacytypes.Options) {
+func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterClient ctrlruntimeclient.Client, clusterName string, scenarioName string, machineSpec *v1alpha1.MachineSpec, legacyOpts *legacytypes.Options) {
 	By(KKP("Create MachineDeployments"), func() {
-		err := client.MachineDeploymentsWithProviderSpec(rootCtx, log, scenario, userClusterClient, cluster)
-		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to create machine deployments with error %v", err))
+		err := userClusterClient.Create(rootCtx, &clusterv1alpha1.MachineDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName)[:12],
+				Namespace: "kube-system",
+				Labels: map[string]string{
+					clusterv1alpha1.MachineClusterLabelName: clusterName,
+					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+				},
+			},
+			Spec: clusterv1alpha1.MachineDeploymentSpec{
+				Replicas: ptr.Int32(int32(legacyOpts.NodeCount)),
+				Selector: metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+					},
+				},
+				Template: clusterv1alpha1.MachineTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{
+						Labels: map[string]string{
+							MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+						},
+					},
+					Spec: *machineSpec},
+				Strategy: &clusterv1alpha1.MachineDeploymentStrategy{},
+			},
+		})
+		Expect(err).ShouldNot(HaveOccurred())
 	})
 	By(KKP("Wait for machines to get a node"), func() {
 		Eventually(func() bool {
@@ -221,7 +251,7 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, client client
 	By(KKP("Wait for addons"), func() {
 		Eventually(func() bool {
 			addons := kubermaticv1.AddonList{}
-			if err := legacyOpts.SeedClusterClient.List(rootCtx, &addons, ctrlruntimeclient.InNamespace(cluster.Status.NamespaceName)); err != nil {
+			if err := legacyOpts.SeedClusterClient.List(rootCtx, &addons, ctrlruntimeclient.InNamespace(fmt.Sprintf("cluster-%s", clusterName))); err != nil {
 				return false
 			}
 

@@ -6,7 +6,9 @@ import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -188,12 +190,21 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			}
 		}
 
+		dcName := "kubevirt"
+
+		for k, v := range job.seed.Spec.Datacenters {
+			if v.Location == job.dcKey {
+				dcName = k
+			}
+
+		}
+
 		// Now, continue with the full baseSpec for the actual cluster creation,
 		// but use the sanitizedSpec for generating the dedup key.
 		clusterSettingSpec := baseSpec
 
 		clusterSettingSpec.Cloud.ProviderName = string(kubermaticv1.KubevirtCloudProvider)
-		clusterSettingSpec.Cloud.DatacenterName = job.dcKey
+		clusterSettingSpec.Cloud.DatacenterName = dcName
 		clusterSettingSpec.Cloud.Kubevirt = &kubermaticv1.KubevirtCloudSpec{
 			Kubeconfig: job.opts.Secrets.Kubevirt.Kubeconfig,
 		}
@@ -201,10 +212,10 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		clusterSettingSpec.ContainerRuntime = "containerd"
 		clusterSettingSpec.Version = semver.Semver(job.kubeVersion.Version.String())
 
-		currentSeedDatacenter := job.seed.Spec.Datacenters[job.dcKey]
+		currentSeedDatacenter := job.seed.Spec.Datacenters[dcName]
 		p, err := kubevirtprovider.NewCloudProvider(&currentSeedDatacenter, nil)
 		if err != nil {
-			results <- clusterResult{err: fmt.Errorf("failed to create cloud provider for %s: %w", job.dcKey, err)}
+			results <- clusterResult{err: fmt.Errorf("failed to create cloud provider for %s: %w", dcName, err)}
 			continue
 		}
 
@@ -225,7 +236,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			results <- clusterResult{err: fmt.Errorf("failed to marshal spec for hashing: %w", err)}
 			continue
 		}
-		dedupKey := fmt.Sprintf("%x", sha256.Sum256(specBytes))
+		dedupKey := "ginkgo-" + fmt.Sprintf("%x", sha256.Sum256(specBytes))[:25]
 
 		results <- clusterResult{
 			clusterName: clusterName,
@@ -236,7 +247,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 	}
 }
 
-func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterModifiers []clusterSpecModifier, defaultSeedSettings map[string]kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager, file *os.File) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterModifiers []clusterSpecModifier, defaultSeedSettings map[string]kubermaticv1.Seed, seed *kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager, file *os.File) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 	finalClusters := make(map[string]*kubermaticv1.ClusterSpec)
 	finalClusterDescriptions := make(map[string][]string)
 	var finalMu sync.Mutex
@@ -253,6 +264,25 @@ func buildNewClusters(rootCtx context.Context, versions []*version.Version, clus
 	}
 	sort.Strings(groupNames)
 
+	var longestKey string
+	maxLen := 0
+	for k, s := range groupedModifiers {
+		if len(s) > maxLen {
+			maxLen = len(s)
+			longestKey = k
+		}
+	}
+	// longestKey is the key of the longest slice, maxLen is its length
+	// Combine modifiers and descriptions by index
+	combinedModifiers := make([][]clusterSpecModifier, len(groupedModifiers[longestKey]))
+	combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
+	for _, modifiers := range groupedModifiers {
+		for idx, modifier := range modifiers {
+			combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
+			combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+		}
+	}
+
 	const numWorkers = 100
 	jobs := make(chan clusterJob)
 	results := make(chan clusterResult)
@@ -265,52 +295,31 @@ func buildNewClusters(rootCtx context.Context, versions []*version.Version, clus
 	}
 
 	// Start a goroutine to generate combinations and send all jobs
-	go func() {
+	go func(seed *kubermaticv1.Seed) {
 		defer close(jobs)
 
-		var generateAndSendJobs func(int, []clusterSpecModifier)
-		generateAndSendJobs = func(groupIndex int, currentCombination []clusterSpecModifier) {
-			if groupIndex == len(groupNames) {
-				// Base case: we have a full combination.
-				// Create and send jobs for this single combination.
-				for _, kubeVersion := range versions {
-					for dcKey, seed := range defaultSeedSettings {
-						// Create a final copy for the job to ensure no data races.
-						jobCombination := make([]clusterSpecModifier, len(currentCombination))
-						copy(jobCombination, currentCombination)
-
-						jobs <- clusterJob{
-							combination:    jobCombination,
-							dcKey:          dcKey,
-							seed:           seed,
-							kubeVersion:    kubeVersion,
-							log:            log,
-							rootCtx:        rootCtx,
-							opts:           opts,
-							kkpConfig:      kkpConfig,
-							versionManager: versionManager,
-						}
+		// Generate jobs for each combined set of modifiers
+		for _, mods := range combinedModifiers {
+			for _, kubeVersion := range versions {
+				for dcKey := range defaultSeedSettings {
+					// Copy to ensure a fresh slice
+					jobCombination := make([]clusterSpecModifier, len(mods))
+					copy(jobCombination, mods)
+					jobs <- clusterJob{
+						combination:    jobCombination,
+						dcKey:          dcKey,
+						seed:           *seed,
+						kubeVersion:    kubeVersion,
+						log:            log,
+						rootCtx:        rootCtx,
+						opts:           opts,
+						kkpConfig:      kkpConfig,
+						versionManager: versionManager,
 					}
 				}
-				return
-			}
-
-			groupName := groupNames[groupIndex]
-			// Case 1: Recurse without any modifier from this group.
-			generateAndSendJobs(groupIndex+1, currentCombination)
-
-			// Case 2: Recurse with each modifier from this group.
-			for _, modifier := range groupedModifiers[groupName] {
-				// Create a new, clean slice for this specific recursive path to prevent slice corruption.
-				nextCombination := make([]clusterSpecModifier, len(currentCombination), len(currentCombination)+1)
-				copy(nextCombination, currentCombination)
-				nextCombination = append(nextCombination, modifier)
-				generateAndSendJobs(groupIndex+1, nextCombination)
 			}
 		}
-
-		generateAndSendJobs(0, []clusterSpecModifier{})
-	}()
+	}(seed)
 
 	// Start a goroutine to close the results channel when all workers are done
 	go func() {
@@ -396,6 +405,7 @@ type scenarioResult struct {
 type scenarioJob struct {
 	combination           []machineSpecModifier
 	clusterKey            string
+	version               semver.Semver
 	log                   *zap.SugaredLogger
 	rootCtx               context.Context
 	resolver              *configvar.Resolver
@@ -470,6 +480,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 			results <- scenarioResult{err: err}
 			continue
 		}
+		pconfig.CloudProvider = providerconfig.CloudProviderKubeVirt
 		pconfig.OperatingSystemSpec = osspec
 		pconfig.OperatingSystem = providerconfig.OperatingSystemUbuntu
 		reencodedPConfig, err := json.Marshal(pconfig)
@@ -480,7 +491,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 			continue
 		}
 		machine.ProviderSpec.Value.Raw = reencodedPConfig
-
+		machine.Versions.Kubelet = job.version.String()
 		p := mckubevirtprovider.New(job.resolver)
 		machineSpec, err := p.AddDefaults(job.log, *machine)
 		if err != nil {
@@ -521,6 +532,26 @@ func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[s
 	}
 	sort.Strings(groupNames)
 
+	var longestKey string
+	maxLen := 0
+	for k, s := range groupedModifiers {
+		if len(s) > maxLen {
+			maxLen = len(s)
+			longestKey = k
+		}
+	}
+	// longestKey is the key of the longest slice, maxLen is its length
+
+	// Combine modifiers and descriptions by index
+	combinedModifiers := make([][]machineSpecModifier, len(groupedModifiers[longestKey]))
+	combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
+	for _, modifiers := range groupedModifiers {
+		for idx, modifier := range modifiers {
+			combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
+			combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+		}
+	}
+
 	log.Infof("Starting scenario generation...")
 
 	const numWorkers = 100
@@ -537,34 +568,21 @@ func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[s
 	// Start a goroutine to generate combinations and send all jobs
 	go func() {
 		defer close(jobs)
-
-		// First, generate a "default" scenario with no modifiers for each cluster.
-		// This will be the base for combining other scenarios.
-		for clusterKey := range newClusters {
-			jobs <- scenarioJob{
-				combination:           []machineSpecModifier{}, // Empty combination
-				clusterKey:            clusterKey,
-				log:                   log,
-				rootCtx:               rootCtx,
-				resolver:              resolver,
-				opts:                  opts,
-				defaultKubevirtConfig: defaultKubevirtConfig,
-			}
-		}
-
-		// Generate one test for each modifier individually.
-		for _, groupName := range groupNames {
-			for _, modifier := range groupedModifiers[groupName] {
-				for clusterKey := range newClusters {
-					jobs <- scenarioJob{
-						combination:           []machineSpecModifier{modifier},
-						clusterKey:            clusterKey,
-						log:                   log,
-						rootCtx:               rootCtx,
-						resolver:              resolver,
-						opts:                  opts,
-						defaultKubevirtConfig: defaultKubevirtConfig,
-					}
+		// Generate jobs for each combined set of modifiers
+		for _, mods := range combinedModifiers {
+			for clusterKey, clusterSpec := range newClusters {
+				// Copy to ensure a fresh slice
+				jobCombination := make([]machineSpecModifier, len(mods))
+				copy(jobCombination, mods)
+				jobs <- scenarioJob{
+					combination:           jobCombination,
+					clusterKey:            clusterKey,
+					version:               clusterSpec.Version,
+					log:                   log,
+					rootCtx:               rootCtx,
+					resolver:              resolver,
+					opts:                  opts,
+					defaultKubevirtConfig: defaultKubevirtConfig,
 				}
 			}
 		}
@@ -581,19 +599,6 @@ func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[s
 	// Buffer for scenarios to be written to the file periodically.
 	scenarioBuffer := []scenarioResult{}
 	var bufferMu sync.Mutex
-
-	// flushBuffer := func() {
-	// 	bufferMu.Lock()
-	// 	defer bufferMu.Unlock()
-	// 	if len(scenarioBuffer) > 0 {
-	// 		fmt.Fprintf(file, "\n--- Batch of %d Scenarios ---\n", len(scenarioBuffer))
-	// 		for _, r := range scenarioBuffer {
-	// 			fmt.Fprintf(file, "Cluster: %s\n  Scenario: %s\n  Dedup Key: %s...\n\n", r.clusterKey, r.machineName, r.dedupKey[:min(12, len(r.dedupKey))])
-	// 		}
-	// 		// Clear the buffer
-	// 		scenarioBuffer = []scenarioResult{}
-	// 	}
-	// }
 
 	for result := range results {
 		processedCount++
@@ -643,25 +648,15 @@ func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[s
 		finalMu.Unlock()
 	}
 
-	// Flush any remaining scenarios in the buffer.
-	// flushBuffer()
-
 	log.Infof("Finished generating a total of %d scenarios.", processedCount)
-
-	// Output final scenario descriptions in improved format
-	// fmt.Fprintf(file, "\nFINAL SCENARIO DESCRIPTIONS (with combined scenario names):\n")
-	// for clusterKey, scenarios := range finalScenarios {
-	// 	for dedupKey := range scenarios {
-	// 		descs := finalMachineDescriptions[clusterKey][dedupKey]
-	// 		fmt.Fprintf(file, "Cluster: %s\n  Scenario Key: %s\n  Combined Scenario Names: %v\n\n", clusterKey, dedupKey, descs)
-	// 	}
-	// }
 	return finalScenarios, finalMachineDescriptions
 }
 
 func postProcessScenarios(
+	newScenarios map[string]map[string]v1alpha1.MachineSpec,
 	finalMachineDescriptions map[string]map[string][]string,
 	file *os.File,
+	log *zap.SugaredLogger,
 ) map[string]map[string][]string {
 	processedDescriptions := make(map[string]map[string][]string)
 	const maxCombinedScenarios = 3
@@ -671,6 +666,8 @@ func postProcessScenarios(
 	for clusterKey, scenarios := range finalMachineDescriptions {
 		var defaultKey string
 		otherKeys := []string{}
+		log.Infof("Generated Scenarios: %q\n", strings.Join(slices.Collect(maps.Keys(newScenarios[clusterKey])), ", "))
+		log.Infof("Scenario Descriptions: %q\n", strings.Join(slices.Collect(maps.Keys(scenarios)), ", "))
 		for key, descs := range scenarios {
 			if len(descs) == 1 && descs[0] == "default" {
 				defaultKey = key
