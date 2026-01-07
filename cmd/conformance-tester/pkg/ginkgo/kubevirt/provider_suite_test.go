@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -19,7 +20,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/kubectl/pkg/util/slice"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
@@ -156,7 +157,9 @@ func TestMain(m *testing.M) {
 
 	seed := &kubermaticv1.Seed{}
 	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
-	// Expect(err).NotTo(HaveOccurred())
+	if err != nil {
+		log.Fatalw("Failed to get seed", zap.Error(err))
+	}
 
 	if seed.Spec.Datacenters == nil {
 		seed.Spec.Datacenters = map[string]kubermaticv1.Datacenter{}
@@ -191,7 +194,6 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
-	versions = versions[:1]
 	log.Info("generating clusters...")
 	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
@@ -247,20 +249,21 @@ func TestMain(m *testing.M) {
 			KubermaticSeedName:  legacyOpts.KubermaticSeedName,
 		})
 	}
-	legacyOpts = k8cginkgo.MergeOptions(log, opts, legacyOpts, runtimeOpts)
-	if err := legacyOpts.ParseFlags(log); err != nil {
-		log.Warnf("Invalid flags", zap.Error(err))
-	}
-
 	testSlice := []string{
 		legacytypes.StorageTests, legacytypes.LoadbalancerTests, legacytypes.MetricsTests,
 		legacytypes.UserClusterRBACTests, legacytypes.K8sGcrImageTests, legacytypes.MetricsTests,
 		legacytypes.SecurityContextTests,
 	}
-	legacyOpts.EnableTests = sets.Set[string]{}
+	// enable all tests
+	opts.EnableTests = []string{}
 	for _, test := range testSlice {
-		legacyOpts.EnableTests.Insert(test)
+		opts.EnableTests = append(opts.EnableTests, test)
 	}
+	legacyOpts = k8cginkgo.MergeOptions(log, opts, legacyOpts, runtimeOpts)
+	if err := legacyOpts.ParseFlags(log); err != nil {
+		log.Warnf("Invalid flags", zap.Error(err))
+	}
+
 	os.Exit(m.Run())
 }
 
@@ -320,20 +323,33 @@ var _ = SynchronizedBeforeSuite(func() {
 	suiteCfg, reporterCfg := GinkgoConfiguration()
 	By(fmt.Sprintf("Node1: my-opt=%s, parallel=%d", myOpt, suiteCfg.ParallelTotal))
 	By(fmt.Sprintf("Reporter: %#v", reporterCfg))
-	By(fmt.Sprintf("Creating clusters for datacenters and kube versions: %v", dcClusters))
+	By(fmt.Sprintf("Creating clusters for datacenters and kube versions: %v", maps.Keys(newClusters)))
 
 	var wg sync.WaitGroup
-	for name, clusterSpec := range newClusters {
-		wg.Add(1)
-		go func(dc string, project string, spec *kubermaticv1.ClusterSpec) {
-			defer wg.Done()
-			if !skipClusterCreation {
-				ensureCluster(dc, project, spec)
+	maxConcurrent := 4 // Set your desired concurrency limit
+	sem := make(chan struct{}, maxConcurrent)
+	versionSlice := []string{}
+	for _, v := range opts.Releases {
+		versionSlice = append(versionSlice, v)
+	}
+	for seedKey := range defaultSeedSettings {
+		for name, clusterSpec := range newClusters {
+			if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
+				continue
 			}
-			if skipClusterCreation && updateClusters {
-				// updateCluster(dc, spec)
-			}
-		}(name, legacyOpts.KubermaticProject, clusterSpec)
+			sem <- struct{}{} // acquire a slot
+			wg.Add(1)
+			go func(name string, project string, spec *kubermaticv1.ClusterSpec) {
+				defer wg.Done()
+				defer func() { <-sem }() // release the slot
+				if !skipClusterCreation {
+					ensureCluster(name, datacenterNameMappings[seedKey], project, spec)
+				}
+				if skipClusterCreation && updateClusters {
+					// updateCluster(dc, spec)
+				}
+			}(name, legacyOpts.KubermaticProject, clusterSpec)
+		}
 	}
 	wg.Wait()
 }, func(data []byte) {
@@ -347,29 +363,39 @@ var _ = SynchronizedAfterSuite(func() {
 	// primary node: idempotent deletion attempt for each cluster
 	By(fmt.Sprintf("Deleting created clusters for e2e project %q", legacyOpts.KubermaticProject))
 	var wg sync.WaitGroup
-	for dc := range newClusters {
-		wg.Add(1)
-		go func(dc string) {
-			defer wg.Done()
-			cluster := &kubermaticv1.Cluster{}
-			if !skipClusterDeletion {
-				By("Deleting cluster for " + dc)
+	versionSlice := []string{}
+	for _, v := range opts.Releases {
+		versionSlice = append(versionSlice, v)
+	}
 
-				err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: dc}, cluster)
-				if err != nil {
-					log.Errorf("Failed to get cluster %s: %v", dc, err)
-					return
+	for seedKey := range defaultSeedSettings {
+		for dc := range newClusters {
+			wg.Add(1)
+			go func(dc string) {
+				defer wg.Done()
+				cluster := &kubermaticv1.Cluster{}
+				if !skipClusterDeletion {
+					if !slice.ContainsString(versionSlice, cluster.Spec.Version.String(), nil) {
+						return
+					}
+					err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: fmt.Sprintf("%s-%s", dc, seedKey)}, cluster)
+					if err != nil {
+						log.Errorf("Failed to get cluster %s: %v", dc, err)
+						return
+					}
+					By("Deleting cluster for " + dc)
+
+					userClusterClient, err := runtimeOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
+					if err != nil {
+						log.Errorf("Failed to get user cluster client for cluster %s: %v", dc, err)
+						return
+					}
+					By(fmt.Sprintf("Cleaning up resources for cluster %s. Name is %s", dc, cluster.Name))
+					k8cginkgo.CommonCleanup(rootCtx, log, clients.NewKubeClient(legacyOpts), nil, userClusterClient, cluster)
 				}
-			}
 
-			userClusterClient, err := runtimeOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
-			if err != nil {
-				log.Errorf("Failed to get user cluster client for cluster %s: %v", dc, err)
-				return
-			}
-			By(fmt.Sprintf("Cleaning up resources for cluster %s. Name is %s", dc, cluster.Name))
-			k8cginkgo.CommonCleanup(rootCtx, log, clients.NewKubeClient(legacyOpts), nil, userClusterClient, cluster)
-		}(dc)
+			}(dc)
+		}
 	}
 	wg.Wait()
 

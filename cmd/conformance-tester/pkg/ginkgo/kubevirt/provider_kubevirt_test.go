@@ -128,12 +128,13 @@ var _ = Describe("Scenario", func() {
 	}, getTableEntries())
 })
 
-func ensureCluster(name string, projectName string, spec *kubermaticv1.ClusterSpec) {
+func ensureCluster(name string, dcName string, projectName string, spec *kubermaticv1.ClusterSpec) {
 	By(fmt.Sprintf("Ensuring cluster %s\n", name))
 	currentOpts := *legacyOpts // copy
 	currentOpts.Secrets.Kubevirt.KKPDatacenter = name
+	spec.Cloud.DatacenterName = dcName
 	cluster := &kubermaticv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{kubermaticv1.ProjectIDLabelKey: projectName}},
+		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-%s", name, dcName[:8]), Labels: map[string]string{kubermaticv1.ProjectIDLabelKey: projectName}},
 		Spec:       *spec,
 	}
 	By(k8cginkgo.KKP("Create Cluster"), func() {

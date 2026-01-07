@@ -25,6 +25,7 @@ var machineSettings = []machineSpecModifier{
 		group: "os-image",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.VirtualMachine.Template.PrimaryDisk.Source.Value = "http"
+			spec.VirtualMachine.Template.PrimaryDisk.OsImage.Value = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
 			// This assumes some default URL is set elsewhere, as the model doesn't have a dedicated URL field anymore.
 		},
 	},
@@ -33,6 +34,7 @@ var machineSettings = []machineSpecModifier{
 		group: "os-image",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.VirtualMachine.Template.PrimaryDisk.OsImage.Value = "container"
+			spec.VirtualMachine.Template.PrimaryDisk.Source.Value = "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"
 			// This assumes some default image is set elsewhere.
 		},
 	},
@@ -162,10 +164,10 @@ var machineSettings = []machineSpecModifier{
 		},
 	},
 	{
-		name:  "with 4096Mi memory",
+		name:  "with 8192Mi memory",
 		group: "memory",
 		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Template.Memory.Value = "4096Mi"
+			spec.VirtualMachine.Template.Memory.Value = "8192Mi"
 		},
 	},
 	{
@@ -306,8 +308,9 @@ func getDefaultKubevirtConfig() (*kubevirt.RawConfig, error) {
 			DNSPolicy:               providerconfig.ConfigVarString{Value: "ClusterFirstWithHostNet"},
 			EnableNetworkMultiQueue: providerconfig.ConfigVarBool{Value: ptr.To(true)},
 			Template: kubevirt.Template{
+				CPUs:   providerconfig.ConfigVarString{Value: "2"},
+				Memory: providerconfig.ConfigVarString{Value: "4096Mi"},
 				PrimaryDisk: kubevirt.PrimaryDisk{
-					Source:  providerconfig.ConfigVarString{Value: "container"},
 					OsImage: providerconfig.ConfigVarString{Value: "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"},
 					Disk: kubevirt.Disk{
 						Size:             providerconfig.ConfigVarString{Value: "20Gi"},

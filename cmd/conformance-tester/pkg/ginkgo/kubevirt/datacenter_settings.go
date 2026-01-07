@@ -153,115 +153,115 @@ var datacenterSettings = []DatacenterSetting{
 	// 	},
 	// },
 
-	// {
-	// 	name:  "with match subnet and storage location enabled",
-	// 	group: "subnet",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.MatchSubnetAndStorageLocation = ptr.Bool(true)
-	// 	},
-	// },
+	{
+		name:  "with match subnet and storage location enabled",
+		group: "subnet",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.MatchSubnetAndStorageLocation = ptr.Bool(true)
+		},
+	},
 
-	// {
-	// 	name:  "with match subnet and storage location disabled",
-	// 	group: "subnet",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.MatchSubnetAndStorageLocation = ptr.Bool(false)
-	// 	},
-	// },
+	{
+		name:  "with match subnet and storage location disabled",
+		group: "subnet",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.MatchSubnetAndStorageLocation = ptr.Bool(false)
+		},
+	},
 
-	// {
-	// 	name:  "with default instance types enabled",
-	// 	group: "instancetypes",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.DisableDefaultInstanceTypes = false
-	// 	},
-	// },
+	{
+		name:  "with default instance types enabled",
+		group: "instancetypes",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.DisableDefaultInstanceTypes = false
+		},
+	},
 
-	// {
-	// 	name:  "with default instance types disabled",
-	// 	group: "instancetypes",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.DisableDefaultInstanceTypes = true
-	// 	},
-	// },
+	{
+		name:  "with default instance types disabled",
+		group: "instancetypes",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.DisableDefaultInstanceTypes = true
+		},
+	},
 
-	// {
-	// 	name:  "with default preferences types enabled",
-	// 	group: "preferences",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.DisableDefaultPreferences = false
-	// 	},
-	// },
+	{
+		name:  "with default preferences types enabled",
+		group: "preferences",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.DisableDefaultPreferences = false
+		},
+	},
 
-	// {
-	// 	name:  "with default preferences types disabled",
-	// 	group: "preferences",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.DisableDefaultPreferences = true
-	// 	},
-	// },
+	{
+		name:  "with default preferences types disabled",
+		group: "preferences",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.DisableDefaultPreferences = true
+		},
+	},
 
-	// {
-	// 	name:  "with ccm zone and region enabled",
-	// 	group: "ccm",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.CCMZoneAndRegionEnabled = ptr.Bool(true)
-	// 	},
-	// },
+	{
+		name:  "with ccm zone and region enabled",
+		group: "ccm",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.CCMZoneAndRegionEnabled = ptr.Bool(true)
+		},
+	},
 
-	// {
-	// 	name:  "with ccm zone and region disabled",
-	// 	group: "ccm",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.CCMZoneAndRegionEnabled = ptr.Bool(false)
-	// 	},
-	// },
+	{
+		name:  "with ccm zone and region disabled",
+		group: "ccm",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.CCMZoneAndRegionEnabled = ptr.Bool(false)
+		},
+	},
 
-	// {
-	// 	name:  "with ccm load balancer enabled",
-	// 	group: "ccm-lb",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.CCMLoadBalancerEnabled = ptr.Bool(true)
-	// 	},
-	// },
+	{
+		name:  "with ccm load balancer enabled",
+		group: "ccm-lb",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.CCMLoadBalancerEnabled = ptr.Bool(true)
+		},
+	},
 
-	// {
-	// 	name:  "with ccm load balancer disabled",
-	// 	group: "ccm-lb",
-	// 	modifier: func(dc *kubermaticv1.Datacenter) {
-	// 		if dc.Spec.Kubevirt == nil {
-	// 			dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-	// 		}
-	// 		dc.Spec.Kubevirt.CCMLoadBalancerEnabled = ptr.Bool(false)
-	// 	},
-	// },
+	{
+		name:  "with ccm load balancer disabled",
+		group: "ccm-lb",
+		modifier: func(dc *kubermaticv1.Datacenter) {
+			if dc.Spec.Kubevirt == nil {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+			}
+			dc.Spec.Kubevirt.CCMLoadBalancerEnabled = ptr.Bool(false)
+		},
+	},
 
 	// {
 	// 	name:  "with use pod resources cpu enabled",

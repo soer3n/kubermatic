@@ -164,20 +164,20 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 				Namespace: "kube-system",
 				Labels: map[string]string{
 					clusterv1alpha1.MachineClusterLabelName: clusterName,
-					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
 				},
 			},
 			Spec: clusterv1alpha1.MachineDeploymentSpec{
 				Replicas: ptr.Int32(int32(legacyOpts.NodeCount)),
 				Selector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+						MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
 					},
 				},
 				Template: clusterv1alpha1.MachineTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+							MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
 						},
 					},
 					Spec: *machineSpec},

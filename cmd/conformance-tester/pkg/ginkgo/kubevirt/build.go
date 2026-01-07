@@ -236,7 +236,8 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			results <- clusterResult{err: fmt.Errorf("failed to marshal spec for hashing: %w", err)}
 			continue
 		}
-		dedupKey := "ginkgo-" + fmt.Sprintf("%x", sha256.Sum256(specBytes))[:25]
+		f := fmt.Sprintf("%x", sha256.Sum256(specBytes))[:6]
+		dedupKey := fmt.Sprintf("k8c-%s-%s", f, strings.ReplaceAll(job.kubeVersion.Version.String(), ".", "-"))
 
 		results <- clusterResult{
 			clusterName: clusterName,
