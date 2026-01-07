@@ -48,7 +48,7 @@ func supportsLoadBalancer(cluster *kubermaticv1.Cluster) bool {
 		cluster.Spec.Cloud.Openstack != nil
 }
 
-func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, userClusterClient ctrlruntimeclient.Client, attempt int) error {
+func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, attempt int) error {
 	if !opts.Tests.Has(ctypes.LoadbalancerTests) {
 		log.Info("LoadBalancers tests disabled, skipping.")
 		return nil

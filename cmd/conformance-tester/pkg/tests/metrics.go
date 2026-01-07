@@ -118,7 +118,7 @@ func TestUserClusterMetrics(ctx context.Context, log *zap.SugaredLogger, opts *c
 	return nil
 }
 
-func TestUserClusterPodAndNodeMetrics(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, userClusterClient ctrlruntimeclient.Client) error {
+func TestUserClusterPodAndNodeMetrics(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client) error {
 	if !opts.Tests.Has(ctypes.MetricsTests) {
 		log.Info("Metrics tests disabled, skipping.")
 		return nil

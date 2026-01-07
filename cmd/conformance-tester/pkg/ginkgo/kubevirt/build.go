@@ -492,6 +492,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		}
 		machine.ProviderSpec.Value.Raw = reencodedPConfig
 		machine.Versions.Kubelet = job.version.String()
+
 		p := mckubevirtprovider.New(job.resolver)
 		machineSpec, err := p.AddDefaults(job.log, *machine)
 		if err != nil {

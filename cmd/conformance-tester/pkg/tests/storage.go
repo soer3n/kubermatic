@@ -51,7 +51,7 @@ func supportsStorage(cluster *kubermaticv1.Cluster) bool {
 		cluster.Spec.Cloud.Kubevirt != nil
 }
 
-func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, userClusterClient ctrlruntimeclient.Client, attempt int) error {
+func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, attempt int) error {
 	if !opts.Tests.Has(ctypes.StorageTests) {
 		log.Info("Storage tests disabled, skipping.")
 		return nil
