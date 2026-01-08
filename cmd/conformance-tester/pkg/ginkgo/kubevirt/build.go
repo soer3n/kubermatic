@@ -32,111 +32,130 @@ import (
 	mckubevirtprovider "k8c.io/machine-controller/pkg/cloudprovider/provider/kubevirt"
 )
 
-func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings DatacenterSetting) map[string]kubermaticv1.Seed {
+func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings DatacenterSetting, datacenterDescriptions []string) map[string]kubermaticv1.Seed {
 	seeds := make(map[string]kubermaticv1.Seed)
-	descriptions := make(map[string][]string)
-	const maxCombinedSettings = 4 // Limit how many settings to combine into one seed
+	const maxCombinedSettings = 4
 
-	// Create a base "default" seed
-	defaultDst := kubermaticv1.Datacenter{}
-	if defaultDatacenterSettings.modifier != nil {
-		defaultDatacenterSettings.modifier(&defaultDst)
+	// Build a set for fast lookup
+	descSet := make(map[string]struct{}, len(datacenterDescriptions))
+	for _, desc := range datacenterDescriptions {
+		descSet[desc] = struct{}{}
 	}
-	seeds["default"] = kubermaticv1.Seed{
-		Spec: kubermaticv1.SeedSpec{
-			Datacenters: map[string]kubermaticv1.Datacenter{"default": defaultDst},
-		},
-	}
-	descriptions["default"] = []string{"default"}
-	parentKeys := []string{"default"}
 
-	// Separate ungrouped and grouped settings
-	groupedSettings := make(map[string][]DatacenterSetting)
-	var ungroupedSettings []DatacenterSetting
+	// Separate settings into included and excluded
+	var included, excluded []DatacenterSetting
 	for _, setting := range datacenterSettings {
-		if setting.group != "" {
-			groupedSettings[setting.group] = append(groupedSettings[setting.group], setting)
-		} else if setting.name != "default" {
-			ungroupedSettings = append(ungroupedSettings, setting)
+		if _, ok := descSet[setting.name]; ok {
+			included = append(included, setting)
+		} else {
+			excluded = append(excluded, setting)
 		}
 	}
 
-	// Process individual settings (from groups and ungrouped)
-	allIndividualSettings := ungroupedSettings
-	for _, group := range groupedSettings {
-		allIndividualSettings = append(allIndividualSettings, group...)
-	}
-
-	for _, setting := range allIndividualSettings {
-		// Attempt to merge this setting into an existing parent seed
-		merged := false
-		for _, pKey := range parentKeys {
-			// Check if the parent already has a setting from the same group
-			canMerge := true
+	// Helper to group/combine a set of settings
+	combineSettings := func(settings []DatacenterSetting, groupLabel string) map[string]kubermaticv1.Seed {
+		groupedSettings := make(map[string][]DatacenterSetting)
+		var ungroupedSettings []DatacenterSetting
+		for _, setting := range settings {
 			if setting.group != "" {
-				for _, desc := range descriptions[pKey] {
-					for _, s := range datacenterSettings {
-						if s.name == desc && s.group == setting.group {
-							canMerge = false
+				groupedSettings[setting.group] = append(groupedSettings[setting.group], setting)
+			} else if setting.name != "default" {
+				ungroupedSettings = append(ungroupedSettings, setting)
+			}
+		}
+		// Process individual settings (from groups and ungrouped)
+		allIndividualSettings := ungroupedSettings
+		for _, group := range groupedSettings {
+			allIndividualSettings = append(allIndividualSettings, group...)
+		}
+		descriptions := make(map[string][]string)
+		parentKeys := []string{"default"}
+		seeds := make(map[string]kubermaticv1.Seed)
+		// Create a base "default" seed
+		defaultDst := kubermaticv1.Datacenter{}
+		if defaultDatacenterSettings.modifier != nil {
+			defaultDatacenterSettings.modifier(&defaultDst)
+		}
+		seeds["default"] = kubermaticv1.Seed{
+			Spec: kubermaticv1.SeedSpec{
+				Datacenters: map[string]kubermaticv1.Datacenter{"default": defaultDst},
+			},
+		}
+		descriptions["default"] = []string{"default"}
+		for _, setting := range allIndividualSettings {
+			merged := false
+			for _, pKey := range parentKeys {
+				canMerge := true
+				if setting.group != "" {
+					for _, desc := range descriptions[pKey] {
+						for _, s := range settings {
+							if s.name == desc && s.group == setting.group {
+								canMerge = false
+								break
+							}
+						}
+						if !canMerge {
 							break
 						}
 					}
-					if !canMerge {
-						break
+				}
+				if canMerge && len(descriptions[pKey]) < maxCombinedSettings {
+					seed := seeds[pKey]
+					dc := seed.Spec.Datacenters[pKey]
+					if setting.modifier != nil {
+						setting.modifier(&dc)
 					}
+					seed.Spec.Datacenters[pKey] = dc
+					seeds[pKey] = seed
+					descriptions[pKey] = append(descriptions[pKey], setting.name)
+					merged = true
+					break
 				}
 			}
-
-			if canMerge && len(descriptions[pKey]) < maxCombinedSettings {
-				// Merge into this parent
-				seed := seeds[pKey]
-				dc := seed.Spec.Datacenters[pKey]
+			if !merged {
+				newKey := groupLabel + "-" + setting.name
+				dst := kubermaticv1.Datacenter{}
+				if defaultDatacenterSettings.modifier != nil {
+					defaultDatacenterSettings.modifier(&dst)
+				}
 				if setting.modifier != nil {
-					setting.modifier(&dc)
+					setting.modifier(&dst)
 				}
-				seed.Spec.Datacenters[pKey] = dc
-				seeds[pKey] = seed
-
-				descriptions[pKey] = append(descriptions[pKey], setting.name)
-				merged = true
-				break
+				seeds[newKey] = kubermaticv1.Seed{
+					Spec: kubermaticv1.SeedSpec{
+						Datacenters: map[string]kubermaticv1.Datacenter{newKey: dst},
+					},
+				}
+				descriptions[newKey] = []string{setting.name}
+				parentKeys = append(parentKeys, newKey)
 			}
 		}
-
-		if !merged {
-			// Could not merge, create a new seed for this setting
-			newKey := setting.name
-			dst := kubermaticv1.Datacenter{}
-			if defaultDatacenterSettings.modifier != nil {
-				defaultDatacenterSettings.modifier(&dst)
+		// Rebuild the final map with combined names
+		finalSeeds := make(map[string]kubermaticv1.Seed)
+		for key, descs := range descriptions {
+			combinedName := strings.Join(descs, "-")
+			seed := seeds[key]
+			if dc, exists := seed.Spec.Datacenters[key]; exists {
+				delete(seed.Spec.Datacenters, key)
+				seed.Spec.Datacenters[combinedName] = dc
+				finalSeeds[combinedName] = seed
 			}
-			if setting.modifier != nil {
-				setting.modifier(&dst)
-			}
-			seeds[newKey] = kubermaticv1.Seed{
-				Spec: kubermaticv1.SeedSpec{
-					Datacenters: map[string]kubermaticv1.Datacenter{newKey: dst},
-				},
-			}
-			descriptions[newKey] = []string{setting.name}
-			parentKeys = append(parentKeys, newKey)
 		}
+		return finalSeeds
 	}
 
-	// Rebuild the final map with combined names
-	finalSeeds := make(map[string]kubermaticv1.Seed)
-	for key, descs := range descriptions {
-		combinedName := strings.Join(descs, "-")
-		seed := seeds[key]
-		// Update the inner datacenter key to the new combined name
-		if dc, exists := seed.Spec.Datacenters[key]; exists {
-			delete(seed.Spec.Datacenters, key)
-			seed.Spec.Datacenters[combinedName] = dc
-			finalSeeds[combinedName] = seed
-		}
+	includedSeeds := combineSettings(included, "included")
+	excludedSeeds := combineSettings(excluded, "excluded")
+
+	// Merge both maps
+	for k, v := range includedSeeds {
+		seeds[k] = v
+	}
+	for k, v := range excludedSeeds {
+		seeds[k] = v
 	}
 
-	return finalSeeds
+	return seeds
 }
 
 // clusterResult is used to pass data from a producer to a consumer.
@@ -248,141 +267,174 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 	}
 }
 
-func buildNewClusters(rootCtx context.Context, versions []*version.Version, clusterModifiers []clusterSpecModifier, defaultSeedSettings map[string]kubermaticv1.Seed, seed *kubermaticv1.Seed, opts *k8cginkgo.Options, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, versionManager *version.Manager, file *os.File) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+func buildNewClusters(
+	rootCtx context.Context,
+	versions []*version.Version,
+	clusterModifiers []clusterSpecModifier,
+	defaultSeedSettings map[string]kubermaticv1.Seed,
+	seed *kubermaticv1.Seed,
+	opts *k8cginkgo.Options,
+	kkpConfig *kubermaticv1.KubermaticConfiguration,
+	log *zap.SugaredLogger,
+	versionManager *version.Manager,
+	file *os.File,
+	clusterDescriptions []string, // NEW: descriptions to include
+) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 	finalClusters := make(map[string]*kubermaticv1.ClusterSpec)
 	finalClusterDescriptions := make(map[string][]string)
-	var finalMu sync.Mutex
 
-	// Group modifiers by their group name.
-	groupedModifiers := make(map[string][]clusterSpecModifier)
+	// Build a set for fast lookup
+	descSet := make(map[string]struct{}, len(clusterDescriptions))
+	for _, desc := range clusterDescriptions {
+		descSet[desc] = struct{}{}
+	}
+
+	// Separate modifiers into included and excluded
+	var included, excluded []clusterSpecModifier
 	for _, m := range clusterModifiers {
-		groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
-	}
-
-	var groupNames []string
-	for name := range groupedModifiers {
-		groupNames = append(groupNames, name)
-	}
-	sort.Strings(groupNames)
-
-	var longestKey string
-	maxLen := 0
-	for k, s := range groupedModifiers {
-		if len(s) > maxLen {
-			maxLen = len(s)
-			longestKey = k
-		}
-	}
-	// longestKey is the key of the longest slice, maxLen is its length
-	// Combine modifiers and descriptions by index
-	combinedModifiers := make([][]clusterSpecModifier, len(groupedModifiers[longestKey]))
-	combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
-	for _, modifiers := range groupedModifiers {
-		for idx, modifier := range modifiers {
-			combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
-			combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+		if _, ok := descSet[m.name]; ok {
+			included = append(included, m)
+		} else {
+			excluded = append(excluded, m)
 		}
 	}
 
-	const numWorkers = 100
-	jobs := make(chan clusterJob)
-	results := make(chan clusterResult)
+	// Helper to group/combine a set of modifiers
+	combineModifiers := func(modifiers []clusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+		// Group modifiers by their group name.
+		groupedModifiers := make(map[string][]clusterSpecModifier)
+		for _, m := range modifiers {
+			groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
+		}
 
-	// Start workers
-	var workerWg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		workerWg.Add(1)
-		go clusterWorker(jobs, results, &workerWg)
-	}
+		var groupNames []string
+		for name := range groupedModifiers {
+			groupNames = append(groupNames, name)
+		}
+		sort.Strings(groupNames)
 
-	// Start a goroutine to generate combinations and send all jobs
-	go func(seed *kubermaticv1.Seed) {
-		defer close(jobs)
+		var longestKey string
+		maxLen := 0
+		for k, s := range groupedModifiers {
+			if len(s) > maxLen {
+				maxLen = len(s)
+				longestKey = k
+			}
+		}
+		if maxLen == 0 {
+			return map[string]*kubermaticv1.ClusterSpec{}, map[string][]string{}
+		}
+		// Combine modifiers and descriptions by index
+		combinedModifiers := make([][]clusterSpecModifier, len(groupedModifiers[longestKey]))
+		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
+		for _, modifiers := range groupedModifiers {
+			for idx, modifier := range modifiers {
+				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
+				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+			}
+		}
 
-		// Generate jobs for each combined set of modifiers
-		for _, mods := range combinedModifiers {
-			for _, kubeVersion := range versions {
-				for dcKey := range defaultSeedSettings {
-					// Copy to ensure a fresh slice
-					jobCombination := make([]clusterSpecModifier, len(mods))
-					copy(jobCombination, mods)
-					jobs <- clusterJob{
-						combination:    jobCombination,
-						dcKey:          dcKey,
-						seed:           *seed,
-						kubeVersion:    kubeVersion,
-						log:            log,
-						rootCtx:        rootCtx,
-						opts:           opts,
-						kkpConfig:      kkpConfig,
-						versionManager: versionManager,
+		const numWorkers = 100
+		jobs := make(chan clusterJob)
+		results := make(chan clusterResult)
+
+		// Start workers
+		var workerWg sync.WaitGroup
+		for i := 0; i < numWorkers; i++ {
+			workerWg.Add(1)
+			go clusterWorker(jobs, results, &workerWg)
+		}
+
+		// Start a goroutine to generate combinations and send all jobs
+		go func(seed *kubermaticv1.Seed) {
+			defer close(jobs)
+			for _, mods := range combinedModifiers {
+				for _, kubeVersion := range versions {
+					for dcKey := range defaultSeedSettings {
+						jobCombination := make([]clusterSpecModifier, len(mods))
+						copy(jobCombination, mods)
+						jobs <- clusterJob{
+							combination:    jobCombination,
+							dcKey:          dcKey,
+							seed:           *seed,
+							kubeVersion:    kubeVersion,
+							log:            log,
+							rootCtx:        rootCtx,
+							opts:           opts,
+							kkpConfig:      kkpConfig,
+							versionManager: versionManager,
+						}
 					}
 				}
 			}
-		}
-	}(seed)
+		}(seed)
 
-	// Start a goroutine to close the results channel when all workers are done
-	go func() {
-		workerWg.Wait()
-		close(results)
-	}()
+		go func() {
+			workerWg.Wait()
+			close(results)
+		}()
 
-	// Collect results
-	for result := range results {
-		if result.err != nil {
-			log.Errorw("Cluster generation worker failed", "error", result.err)
-			continue
+		localClusters := make(map[string]*kubermaticv1.ClusterSpec)
+		localClusterDescriptions := make(map[string][]string)
+		for result := range results {
+			if result.err != nil {
+				log.Errorw("Cluster generation worker failed", "error", result.err)
+				continue
+			}
+			if result.clusterSpec == nil {
+				continue
+			}
+			if _, exists := localClusters[result.dedupKey]; exists {
+				isUnique := true
+				for _, name := range localClusterDescriptions[result.dedupKey] {
+					if name == result.clusterName {
+						isUnique = false
+						break
+					}
+				}
+				if isUnique {
+					localClusterDescriptions[result.dedupKey] = append(localClusterDescriptions[result.dedupKey], result.clusterName)
+				}
+			} else {
+				localClusters[result.dedupKey] = result.clusterSpec
+				localClusterDescriptions[result.dedupKey] = []string{result.clusterName}
+			}
 		}
-		if result.clusterSpec == nil {
-			continue // Worker skipped an invalid spec
-		}
-
-		// Use finalMu for safe concurrent access to the final maps
-		finalMu.Lock()
-		if _, exists := finalClusters[result.dedupKey]; exists {
-			// This spec is a duplicate of one we've already stored.
-			// Just add the descriptive name and discard the new spec object, saving memory.
-			// Check if we already have this description to avoid duplicates in the output.
-			isUnique := true
-			for _, name := range finalClusterDescriptions[result.dedupKey] {
-				if name == result.clusterName {
-					isUnique = false
-					break
+		// Post-process to remove duplicates from descriptions
+		for key, descs := range localClusterDescriptions {
+			allPartsStr := strings.Join(descs, " and ")
+			normalizedStr := strings.ReplaceAll(allPartsStr, " & ", " and ")
+			normalizedStr = strings.ReplaceAll(normalizedStr, ", ", " and ")
+			parts := strings.Split(normalizedStr, " and ")
+			uniqueParts := make(map[string]bool)
+			var finalParts []string
+			for _, part := range parts {
+				trimmedPart := strings.TrimSpace(part)
+				if trimmedPart != "" && !uniqueParts[trimmedPart] {
+					uniqueParts[trimmedPart] = true
+					finalParts = append(finalParts, trimmedPart)
 				}
 			}
-			if isUnique {
-				finalClusterDescriptions[result.dedupKey] = append(finalClusterDescriptions[result.dedupKey], result.clusterName)
-			}
-		} else {
-			// This is a new, unique spec. Store it.
-			finalClusters[result.dedupKey] = result.clusterSpec
-			finalClusterDescriptions[result.dedupKey] = []string{result.clusterName}
+			localClusterDescriptions[key] = finalParts
 		}
-		finalMu.Unlock()
+		return localClusters, localClusterDescriptions
 	}
 
-	// Post-process to remove duplicates from descriptions
-	for key, descs := range finalClusterDescriptions {
-		// Combine all parts into a single string, using a consistent separator.
-		allPartsStr := strings.Join(descs, " and ")
+	includedClusters, includedDescriptions := combineModifiers(included, "included")
+	excludedClusters, excludedDescriptions := combineModifiers(excluded, "excluded")
 
-		// Normalize separators (e.g., handle " & ", ", ") and split into individual components.
-		normalizedStr := strings.ReplaceAll(allPartsStr, " & ", " and ")
-		normalizedStr = strings.ReplaceAll(normalizedStr, ", ", " and ")
-		parts := strings.Split(normalizedStr, " and ")
-
-		// Filter for unique parts.
-		uniqueParts := make(map[string]bool)
-		var finalParts []string
-		for _, part := range parts {
-			trimmedPart := strings.TrimSpace(part)
-			if trimmedPart != "" && !uniqueParts[trimmedPart] {
-				uniqueParts[trimmedPart] = true
-				finalParts = append(finalParts, trimmedPart)
-			}
-		}
-		finalClusterDescriptions[key] = finalParts
+	// Merge both maps
+	for k, v := range includedClusters {
+		finalClusters[k] = v
+	}
+	for k, v := range excludedClusters {
+		finalClusters[k] = v
+	}
+	for k, v := range includedDescriptions {
+		finalClusterDescriptions[k] = v
+	}
+	for k, v := range excludedDescriptions {
+		finalClusterDescriptions[k] = v
 	}
 
 	// Output final cluster descriptions.
@@ -517,140 +569,174 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 	}
 }
 
-func buildNewScenarios(machineModifiers []machineSpecModifier, newClusters map[string]*kubermaticv1.ClusterSpec, opts *k8cginkgo.Options, log *zap.SugaredLogger, defaultKubevirtConfig kubevirt.RawConfig, resolver *configvar.Resolver, file *os.File, rootCtx context.Context) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
+func buildNewScenarios(
+	machineModifiers []machineSpecModifier,
+	newClusters map[string]*kubermaticv1.ClusterSpec,
+	opts *k8cginkgo.Options,
+	log *zap.SugaredLogger,
+	defaultKubevirtConfig kubevirt.RawConfig,
+	resolver *configvar.Resolver,
+	file *os.File,
+	rootCtx context.Context,
+	machineDescriptions []string, // NEW: descriptions to include
+) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
 	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 	finalMachineDescriptions := make(map[string]map[string][]string)
-	var finalMu sync.Mutex
 
-	// Group modifiers by their group name.
-	groupedModifiers := make(map[string][]machineSpecModifier)
+	// Build a set for fast lookup
+	descSet := make(map[string]struct{}, len(machineDescriptions))
+	for _, desc := range machineDescriptions {
+		descSet[desc] = struct{}{}
+	}
+
+	// Separate modifiers into included and excluded
+	var included, excluded []machineSpecModifier
 	for _, m := range machineModifiers {
-		groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
-	}
-
-	var groupNames []string
-	for name := range groupedModifiers {
-		groupNames = append(groupNames, name)
-	}
-	sort.Strings(groupNames)
-
-	var longestKey string
-	maxLen := 0
-	for k, s := range groupedModifiers {
-		if len(s) > maxLen {
-			maxLen = len(s)
-			longestKey = k
-		}
-	}
-	// longestKey is the key of the longest slice, maxLen is its length
-
-	// Combine modifiers and descriptions by index
-	combinedModifiers := make([][]machineSpecModifier, len(groupedModifiers[longestKey]))
-	combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
-	for _, modifiers := range groupedModifiers {
-		for idx, modifier := range modifiers {
-			combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
-			combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+		if _, ok := descSet[m.name]; ok {
+			included = append(included, m)
+		} else {
+			excluded = append(excluded, m)
 		}
 	}
 
-	log.Infof("Starting scenario generation...")
+	// Helper to group/combine a set of modifiers
+	combineModifiers := func(modifiers []machineSpecModifier, groupLabel string) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
+		localScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
+		localMachineDescriptions := make(map[string]map[string][]string)
+		// Group modifiers by their group name.
+		groupedModifiers := make(map[string][]machineSpecModifier)
+		for _, m := range modifiers {
+			groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
+		}
 
-	const numWorkers = 100
-	jobs := make(chan scenarioJob)
-	results := make(chan scenarioResult)
+		var groupNames []string
+		for name := range groupedModifiers {
+			groupNames = append(groupNames, name)
+		}
+		sort.Strings(groupNames)
 
-	// Start workers
-	var workerWg sync.WaitGroup
-	for i := 0; i < numWorkers; i++ {
-		workerWg.Add(1)
-		go scenarioWorker(jobs, results, &workerWg)
-	}
+		var longestKey string
+		maxLen := 0
+		for k, s := range groupedModifiers {
+			if len(s) > maxLen {
+				maxLen = len(s)
+				longestKey = k
+			}
+		}
+		if maxLen == 0 {
+			return map[string]map[string]v1alpha1.MachineSpec{}, map[string]map[string][]string{}
+		}
+		// Combine modifiers and descriptions by index
+		combinedModifiers := make([][]machineSpecModifier, len(groupedModifiers[longestKey]))
+		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
+		for _, modifiers := range groupedModifiers {
+			for idx, modifier := range modifiers {
+				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
+				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+			}
+		}
 
-	// Start a goroutine to generate combinations and send all jobs
-	go func() {
-		defer close(jobs)
-		// Generate jobs for each combined set of modifiers
-		for _, mods := range combinedModifiers {
-			for clusterKey, clusterSpec := range newClusters {
-				// Copy to ensure a fresh slice
-				jobCombination := make([]machineSpecModifier, len(mods))
-				copy(jobCombination, mods)
-				jobs <- scenarioJob{
-					combination:           jobCombination,
-					clusterKey:            clusterKey,
-					version:               clusterSpec.Version,
-					log:                   log,
-					rootCtx:               rootCtx,
-					resolver:              resolver,
-					opts:                  opts,
-					defaultKubevirtConfig: defaultKubevirtConfig,
+		const numWorkers = 100
+		jobs := make(chan scenarioJob)
+		results := make(chan scenarioResult)
+
+		// Start workers
+		var workerWg sync.WaitGroup
+		for i := 0; i < numWorkers; i++ {
+			workerWg.Add(1)
+			go scenarioWorker(jobs, results, &workerWg)
+		}
+
+		// Start a goroutine to generate combinations and send all jobs
+		go func() {
+			defer close(jobs)
+			for _, mods := range combinedModifiers {
+				for clusterKey, clusterSpec := range newClusters {
+					jobCombination := make([]machineSpecModifier, len(mods))
+					copy(jobCombination, mods)
+					jobs <- scenarioJob{
+						combination:           jobCombination,
+						clusterKey:            clusterKey,
+						version:               clusterSpec.Version,
+						log:                   log,
+						rootCtx:               rootCtx,
+						resolver:              resolver,
+						opts:                  opts,
+						defaultKubevirtConfig: defaultKubevirtConfig,
+					}
 				}
 			}
-		}
-	}()
+		}()
 
-	// Start a goroutine to close the results channel when all workers are done
-	go func() {
-		workerWg.Wait()
-		close(results)
-	}()
+		go func() {
+			workerWg.Wait()
+			close(results)
+		}()
 
-	// Collect results
-	processedCount := 0
-	// Buffer for scenarios to be written to the file periodically.
-	scenarioBuffer := []scenarioResult{}
-	var bufferMu sync.Mutex
-
-	for result := range results {
-		processedCount++
-		if processedCount%100 == 0 {
-			log.Infof("Generated %d scenarios...", processedCount)
-
-			finalMu.Lock()
-			uniqueCount := 0
-			for _, clusterScenarios := range finalScenarios {
-				uniqueCount += len(clusterScenarios)
+		for result := range results {
+			if result.err != nil {
+				log.Errorw("Scenario generation worker failed", "error", result.err)
+				continue
 			}
-			finalMu.Unlock()
-			log.Infof("Resulting in %d unique scenarios so far.", uniqueCount)
-
-			// flushBuffer()
-		}
-
-		if result.err != nil {
-			log.Errorw("Scenario generation worker failed", "error", result.err)
-			continue
-		}
-		if result.machineSpec.ProviderSpec.Value == nil {
-			continue // Worker skipped an invalid spec
-		}
-
-		bufferMu.Lock()
-		scenarioBuffer = append(scenarioBuffer, result)
-		bufferMu.Unlock()
-
-		finalMu.Lock()
-		// Ensure nested maps are initialized
-		if _, ok := finalScenarios[result.clusterKey]; !ok {
-			finalScenarios[result.clusterKey] = make(map[string]v1alpha1.MachineSpec)
-			finalMachineDescriptions[result.clusterKey] = make(map[string][]string)
-		}
-
-		if existing, exists := finalScenarios[result.clusterKey][result.dedupKey]; exists {
-			merged := existing
-			if err := mergo.Merge(&merged, result.machineSpec, mergo.WithOverride); err == nil {
-				finalScenarios[result.clusterKey][result.dedupKey] = merged
-				finalMachineDescriptions[result.clusterKey][result.dedupKey] = append(finalMachineDescriptions[result.clusterKey][result.dedupKey], result.machineName)
+			if result.machineSpec.ProviderSpec.Value == nil {
+				continue
 			}
-		} else {
-			finalScenarios[result.clusterKey][result.dedupKey] = result.machineSpec
-			finalMachineDescriptions[result.clusterKey][result.dedupKey] = []string{result.machineName}
+			if _, ok := localScenarios[result.clusterKey]; !ok {
+				localScenarios[result.clusterKey] = make(map[string]v1alpha1.MachineSpec)
+				localMachineDescriptions[result.clusterKey] = make(map[string][]string)
+			}
+			if existing, exists := localScenarios[result.clusterKey][result.dedupKey]; exists {
+				merged := existing
+				if err := mergo.Merge(&merged, result.machineSpec, mergo.WithOverride); err == nil {
+					localScenarios[result.clusterKey][result.dedupKey] = merged
+					localMachineDescriptions[result.clusterKey][result.dedupKey] = append(localMachineDescriptions[result.clusterKey][result.dedupKey], result.machineName)
+				}
+			} else {
+				localScenarios[result.clusterKey][result.dedupKey] = result.machineSpec
+				localMachineDescriptions[result.clusterKey][result.dedupKey] = []string{result.machineName}
+			}
 		}
-		finalMu.Unlock()
+		return localScenarios, localMachineDescriptions
 	}
 
-	log.Infof("Finished generating a total of %d scenarios.", processedCount)
+	includedScenarios, includedDescriptions := combineModifiers(included, "included")
+	excludedScenarios, excludedDescriptions := combineModifiers(excluded, "excluded")
+
+	// Merge both maps
+	for clusterKey, deduped := range includedScenarios {
+		if _, ok := finalScenarios[clusterKey]; !ok {
+			finalScenarios[clusterKey] = make(map[string]v1alpha1.MachineSpec)
+		}
+		for dedupKey, spec := range deduped {
+			finalScenarios[clusterKey][dedupKey] = spec
+		}
+	}
+	for clusterKey, deduped := range excludedScenarios {
+		if _, ok := finalScenarios[clusterKey]; !ok {
+			finalScenarios[clusterKey] = make(map[string]v1alpha1.MachineSpec)
+		}
+		for dedupKey, spec := range deduped {
+			finalScenarios[clusterKey][dedupKey] = spec
+		}
+	}
+	for clusterKey, descMap := range includedDescriptions {
+		if _, ok := finalMachineDescriptions[clusterKey]; !ok {
+			finalMachineDescriptions[clusterKey] = make(map[string][]string)
+		}
+		for dedupKey, descs := range descMap {
+			finalMachineDescriptions[clusterKey][dedupKey] = descs
+		}
+	}
+	for clusterKey, descMap := range excludedDescriptions {
+		if _, ok := finalMachineDescriptions[clusterKey]; !ok {
+			finalMachineDescriptions[clusterKey] = make(map[string][]string)
+		}
+		for dedupKey, descs := range descMap {
+			finalMachineDescriptions[clusterKey][dedupKey] = descs
+		}
+	}
+
+	log.Infof("Finished generating scenarios with included/excluded grouping.")
 	return finalScenarios, finalMachineDescriptions
 }
 

@@ -156,6 +156,7 @@ func TestUserClusterPodAndNodeMetrics(ctx context.Context, log *zap.SugaredLogge
 			Namespace: "default",
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: nodeSelector,
 			Containers: []corev1.Container{
 				{
 					Name:  "hello-kubernetes",

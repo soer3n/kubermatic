@@ -153,7 +153,7 @@ func TestMain(m *testing.M) {
 	defer file.Close()
 	log.Info("generating seeds...")
 	datacenterNameMappings = make(map[string]string)
-	defaultSeedSettings = buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings)
+	defaultSeedSettings = buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings, opts.DatacenterDescriptions)
 
 	seed := &kubermaticv1.Seed{}
 	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
@@ -195,7 +195,7 @@ func TestMain(m *testing.M) {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
 	log.Info("generating clusters...")
-	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file)
+	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.ClusterDescriptions)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
 	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
 	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
@@ -205,43 +205,43 @@ func TestMain(m *testing.M) {
 	fmt.Fprintf(file, "Default KubeVirt Config: %+v\n", defaultKubevirtConfig)
 	fmt.Fprint(file, "\nGenerated Scenarios:\n")
 	log.Info("generating scenarios...")
-	newScenarios, finalMachineDescriptions = buildNewScenarios(machineSettings, newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx)
-	log.Infof("Final Machine Descriptions: %v\n", finalMachineDescriptions)
-	log.Info("post-processing scenarios...")
+	newScenarios, finalMachineDescriptions = buildNewScenarios(machineSettings, newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.MachineDescriptions)
+	// log.Infof("Final Machine Descriptions: %v\n", finalMachineDescriptions)
+	// log.Info("post-processing scenarios...")
 
-	// Create and write to the scenarios summary file
-	summaryFile, err := os.Create("scenarios_summary.txt")
-	if err != nil {
-		log.Fatalw("Failed to create scenarios summary file", zap.Error(err))
-	}
-	defer summaryFile.Close()
+	// // Create and write to the scenarios summary file
+	// summaryFile, err := os.Create("scenarios_summary.txt")
+	// if err != nil {
+	// 	log.Fatalw("Failed to create scenarios summary file", zap.Error(err))
+	// }
+	// defer summaryFile.Close()
 
-	fmt.Fprintln(summaryFile, "--- FINAL SCENARIOS SUMMARY ---")
-	for seedSettings := range defaultSeedSettings {
-		for _, kubeVersion := range versions {
-			for clusterKey, scenarios := range finalMachineDescriptions {
-				clusterDesc := "default"
-				if descs, ok := finalClusterDescriptions[clusterKey]; ok {
-					clusterDesc = strings.Join(descs, ", ")
-				}
+	// fmt.Fprintln(summaryFile, "--- FINAL SCENARIOS SUMMARY ---")
+	// for seedSettings := range defaultSeedSettings {
+	// 	for _, kubeVersion := range versions {
+	// 		for clusterKey, scenarios := range finalMachineDescriptions {
+	// 			clusterDesc := "default"
+	// 			if descs, ok := finalClusterDescriptions[clusterKey]; ok {
+	// 				clusterDesc = strings.Join(descs, ", ")
+	// 			}
 
-				for _, names := range scenarios {
-					machineDesc := strings.Join(names, ", ")
-					fmt.Fprintf(summaryFile, "A cluster with seed settings %s and kubernetes version %s and %s with a machine %s\n", strings.Replace(seedSettings, "-", " & ", -1), kubeVersion.Version.String(), clusterDesc, machineDesc)
-				}
-			}
-		}
-	}
+	// 			for _, names := range scenarios {
+	// 				machineDesc := strings.Join(names, ", ")
+	// 				fmt.Fprintf(summaryFile, "A cluster with seed settings %s and kubernetes version %s and %s with a machine %s\n", strings.Replace(seedSettings, "-", " & ", -1), kubeVersion.Version.String(), clusterDesc, machineDesc)
+	// 			}
+	// 		}
+	// 	}
+	// }
 
-	total := 0
-	for _, inner := range newScenarios {
-		total += len(inner)
-	}
+	// total := 0
+	// for _, inner := range newScenarios {
+	// 	total += len(inner)
+	// }
 	flag.Parse()
 
 	// Improved debug output
-	fmt.Fprintf(file, "new clusters: %d\n", len(newClusters))
-	fmt.Fprintf(file, "new scenarios: %d\n", total)
+	// fmt.Fprintf(file, "new clusters: %d\n", len(newClusters))
+	// fmt.Fprintf(file, "new scenarios: %d\n", total)
 
 	if configPath == "" {
 		runtimeOpts, _ = k8cginkgo.NewRuntimeOptions(rootCtx, log, &k8cginkgo.Options{
@@ -332,11 +332,42 @@ var _ = SynchronizedBeforeSuite(func() {
 	for _, v := range opts.Releases {
 		versionSlice = append(versionSlice, v)
 	}
+	for i, _ := range defaultSeedSettings {
+		log.Infof("defaultSeedSettings[%d]: %+v", i, datacenterNameMappings[i])
+	}
+	for i, _ := range newClusters {
+		log.Infof("newClusters[%d]: %+v", i, finalClusterDescriptions[i])
+	}
 	for seedKey := range defaultSeedSettings {
+		exclude := false
+		for _, excluded := range opts.DatacenterDescriptions {
+			if strings.Contains(seedKey, excluded) {
+				exclude = true
+				break
+			}
+		}
+		if exclude {
+			continue
+		}
 		for name, clusterSpec := range newClusters {
 			if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
 				continue
 			}
+			clusterDesc, ok := finalClusterDescriptions[name]
+			if !ok {
+				continue
+			}
+			exclude = false
+			for _, excluded := range opts.ClusterDescriptions {
+				if slice.ContainsString(clusterDesc, excluded, nil) {
+					exclude = true
+					break
+				}
+			}
+			if exclude {
+				continue
+			}
+			log.Infof("Preparing creation of cluster %s for datacenter %s", name, clusterSpec.Cloud.DatacenterName)
 			sem <- struct{}{} // acquire a slot
 			wg.Add(1)
 			go func(name string, project string, spec *kubermaticv1.ClusterSpec) {

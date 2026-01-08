@@ -1,16 +1,5 @@
-namePrefix: "ginkgo-test"
+namePrefix: "ginkgo"
 client: "kube"
-
-# A list of Kubernetes releases to test.
-releases:
-- "1.32.1"
-- "1.33.2"
-- "1.34.0"
-
-# A list of enabled operating system distributions.
-enableDistributions:
-- ubuntu
-# - rockylinux
 
 # The file to write the test results to.
 resultsFile: "results.json"
@@ -18,12 +7,12 @@ resultsFile: "results.json"
 # If set, only scenarios that failed in a previous run will be executed.
 retryFailedScenarios: false
 
-# If set, the tests will be run in a dual-stack environment.
-dualStackEnabled: false
+# # If set, the tests will be run in a dual-stack environment.
+# dualStackEnabled: false
 
-# If set, the tests will be run with Konnectivity enabled.
-# TODO: is this the only supported option?
-konnectivityEnabled: true
+# # If set, the tests will be run with Konnectivity enabled.
+# # TODO: is this the only supported option?
+# konnectivityEnabled: true
 
 # If set, the tests will include a cluster update.
 testClusterUpdate: false
@@ -47,9 +36,42 @@ secrets:
     kkpDatacenter: "kubevirt"
     kubeconfigFile: "/home/soer3n/vscode/mybackup/kubermatic-work/local-kkp"
 
+# A list of Kubernetes releases to test.
+releases:
+# - "1.32.1"
+- "1.33.2"
+# - "1.34.1"
+
+# A list of enabled operating system distributions.
+enableDistributions:
+- ubuntu
+# - rockylinux
+
 datacenterDescriptions:
-- "with default netpols disabled"
+- "with match subnet and storage location enabled"
+- "with match subnet and storage location disabled"
+- "with default instance types enabled"
+- "with default instance types disabled"
+- "with default preferences types enabled"
+- "with default preferences types disabled"
+- "with ccm zone and region enabled"
+- "with ccm zone and region disabled"
+- "with ccm load balancer enabled"
+- "with ccm load balancer disabled"
+
 clusterDescriptions:
-- "with image pull secret"
+- "with different update window"
+
 machineDescriptions:
-- "with custom CPU and memory requests"
+- "with 8192Mi memory"
+- "with 4 CPUs"
+- "with primary disk OS image from an HTTP source"
+- "with primary disk OS image from a container"
+- "with custom cpu and memory"
+- "with a secondary disk"
+- "with topology spread constraint set to DoNotSchedule"
+- "with topology spread constraint on hostname"
+- "with empty node affinity preset type"
+- "with node affinity preset values"
+- "with node affinity preset key"
+- "with node affinity for hostname node-01"

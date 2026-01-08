@@ -160,7 +160,7 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 	By(KKP("Create MachineDeployments"), func() {
 		err := userClusterClient.Create(rootCtx, &clusterv1alpha1.MachineDeployment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName)[:12],
+				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
 				Namespace: "kube-system",
 				Labels: map[string]string{
 					clusterv1alpha1.MachineClusterLabelName: clusterName,

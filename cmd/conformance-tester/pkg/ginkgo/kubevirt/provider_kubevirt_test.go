@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/kubectl/pkg/util/slice"
 
 	. "github.com/onsi/gomega"
 
@@ -43,6 +44,10 @@ var runTestFunc = func(k iter.Seq[string], v string) bool {
 
 func getTableEntries() []TableEntry {
 	var newEntries []TableEntry
+	versionSlice := []string{}
+	for _, v := range opts.Releases {
+		versionSlice = append(versionSlice, v)
+	}
 	for seedKey, _ := range defaultSeedSettings {
 		for clusterName, machines := range newScenarios {
 			clusterSpec, ok := newClusters[clusterName]
@@ -60,7 +65,31 @@ func getTableEntries() []TableEntry {
 					continue
 				}
 				title := fmt.Sprintf("%s and %s and %s", strings.Replace(seedKey, "-", " and ", -1), strings.Join(clusterDesc, " and "), strings.Join(desc, " and "))
-				newEntries = append(newEntries, Entry(title, title, clusterName, clusterSpec, &machine, scenario))
+				entry := Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("kubevirt"))
+				if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
+					entry = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
+				}
+
+				exclude := false
+				for _, excluded := range opts.DatacenterDescriptions {
+					if strings.Contains(title, excluded) {
+						exclude = true
+						break
+					}
+				}
+
+				for _, excluded := range opts.ClusterDescriptions {
+					if strings.Contains(title, excluded) {
+						exclude = true
+						break
+					}
+				}
+
+				if exclude {
+					entry = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
+				}
+
+				newEntries = append(newEntries, entry)
 			}
 			continue
 		}
@@ -76,6 +105,10 @@ var _ = Describe("Scenario", func() {
 			disabledSettings[strings.TrimSpace(s.Description)] = s.StringVariants
 		}
 	}
+	versionSlice := []string{}
+	for _, v := range opts.Releases {
+		versionSlice = append(versionSlice, v)
+	}
 	DescribeTable("KubeVirt", func(description string, clusterName string, clusterSpec *kubermaticv1.ClusterSpec, machineSpec *v1alpha1.MachineSpec, scenarioName string) {
 		runTest := true
 		if disabledSettings != nil {
@@ -87,8 +120,20 @@ var _ = Describe("Scenario", func() {
 			Skip("This test setting was not selected to run via the --test-settings flag.")
 		}
 
+		exclude := false
+		for _, excluded := range opts.DatacenterDescriptions {
+			if strings.Contains(description, excluded) {
+				exclude = true
+				break
+			}
+		}
+
+		if exclude {
+			Skip(fmt.Sprintf("Excluding test setting %q via the --exclude-machine-descriptions flag.", description))
+		}
+
 		cluster := &kubermaticv1.Cluster{}
-		if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: clusterName}, cluster); err != nil {
+		if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", clusterName, clusterSpec.Cloud.DatacenterName[:8])}, cluster); err != nil {
 			log.Errorf("Failed to get cluster %s: %v", clusterName, err)
 			Fail(fmt.Sprintf("Failed to get cluster %s: %v", clusterName, err))
 		}
