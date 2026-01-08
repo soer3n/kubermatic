@@ -54,14 +54,11 @@ var (
 )
 
 var (
-	myOpt               string
 	datacenters         string
 	kubeVersions        string
-	dcClusters          = map[string]*kubermaticv1.Datacenter{}
 	skipClusterDeletion bool
 	skipClusterCreation bool
 	updateClusters      bool
-	clustersToDelete    []string
 )
 
 func init() {
@@ -153,7 +150,7 @@ func TestMain(m *testing.M) {
 	defer file.Close()
 	log.Info("generating seeds...")
 	datacenterNameMappings = make(map[string]string)
-	defaultSeedSettings = buildDefaultSeedSettings(datacenterSettings, kkpConfig, log, defaultDatacenterSettings, opts.DatacenterDescriptions)
+	defaultSeedSettings = buildDefaultSeedSettings(DatacenterSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions)
 
 	seed := &kubermaticv1.Seed{}
 	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
@@ -195,7 +192,7 @@ func TestMain(m *testing.M) {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
 	log.Info("generating clusters...")
-	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.ClusterDescriptions)
+	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
 	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
 	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
@@ -205,43 +202,9 @@ func TestMain(m *testing.M) {
 	fmt.Fprintf(file, "Default KubeVirt Config: %+v\n", defaultKubevirtConfig)
 	fmt.Fprint(file, "\nGenerated Scenarios:\n")
 	log.Info("generating scenarios...")
-	newScenarios, finalMachineDescriptions = buildNewScenarios(machineSettings, newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.MachineDescriptions)
-	// log.Infof("Final Machine Descriptions: %v\n", finalMachineDescriptions)
-	// log.Info("post-processing scenarios...")
+	newScenarios, finalMachineDescriptions = buildNewScenarios(MachineSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.Excluded.MachineDescriptions)
 
-	// // Create and write to the scenarios summary file
-	// summaryFile, err := os.Create("scenarios_summary.txt")
-	// if err != nil {
-	// 	log.Fatalw("Failed to create scenarios summary file", zap.Error(err))
-	// }
-	// defer summaryFile.Close()
-
-	// fmt.Fprintln(summaryFile, "--- FINAL SCENARIOS SUMMARY ---")
-	// for seedSettings := range defaultSeedSettings {
-	// 	for _, kubeVersion := range versions {
-	// 		for clusterKey, scenarios := range finalMachineDescriptions {
-	// 			clusterDesc := "default"
-	// 			if descs, ok := finalClusterDescriptions[clusterKey]; ok {
-	// 				clusterDesc = strings.Join(descs, ", ")
-	// 			}
-
-	// 			for _, names := range scenarios {
-	// 				machineDesc := strings.Join(names, ", ")
-	// 				fmt.Fprintf(summaryFile, "A cluster with seed settings %s and kubernetes version %s and %s with a machine %s\n", strings.Replace(seedSettings, "-", " & ", -1), kubeVersion.Version.String(), clusterDesc, machineDesc)
-	// 			}
-	// 		}
-	// 	}
-	// }
-
-	// total := 0
-	// for _, inner := range newScenarios {
-	// 	total += len(inner)
-	// }
 	flag.Parse()
-
-	// Improved debug output
-	// fmt.Fprintf(file, "new clusters: %d\n", len(newClusters))
-	// fmt.Fprintf(file, "new scenarios: %d\n", total)
 
 	if configPath == "" {
 		runtimeOpts, _ = k8cginkgo.NewRuntimeOptions(rootCtx, log, &k8cginkgo.Options{
@@ -321,7 +284,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	})
 
 	suiteCfg, reporterCfg := GinkgoConfiguration()
-	By(fmt.Sprintf("Node1: my-opt=%s, parallel=%d", myOpt, suiteCfg.ParallelTotal))
+	By(fmt.Sprintf("parallel=%d", suiteCfg.ParallelTotal))
 	By(fmt.Sprintf("Reporter: %#v", reporterCfg))
 	By(fmt.Sprintf("Creating clusters for datacenters and kube versions: %v", maps.Keys(newClusters)))
 
@@ -340,7 +303,7 @@ var _ = SynchronizedBeforeSuite(func() {
 	}
 	for seedKey := range defaultSeedSettings {
 		exclude := false
-		for _, excluded := range opts.DatacenterDescriptions {
+		for _, excluded := range opts.Excluded.DatacenterDescriptions {
 			if strings.Contains(seedKey, excluded) {
 				exclude = true
 				break
@@ -358,7 +321,7 @@ var _ = SynchronizedBeforeSuite(func() {
 				continue
 			}
 			exclude = false
-			for _, excluded := range opts.ClusterDescriptions {
+			for _, excluded := range opts.Excluded.ClusterDescriptions {
 				if slice.ContainsString(clusterDesc, excluded, nil) {
 					exclude = true
 					break

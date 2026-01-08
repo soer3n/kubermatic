@@ -71,14 +71,14 @@ func getTableEntries() []TableEntry {
 				}
 
 				exclude := false
-				for _, excluded := range opts.DatacenterDescriptions {
+				for _, excluded := range opts.Excluded.DatacenterDescriptions {
 					if strings.Contains(title, excluded) {
 						exclude = true
 						break
 					}
 				}
 
-				for _, excluded := range opts.ClusterDescriptions {
+				for _, excluded := range opts.Excluded.ClusterDescriptions {
 					if strings.Contains(title, excluded) {
 						exclude = true
 						break
@@ -114,14 +114,13 @@ var _ = Describe("Scenario", func() {
 		if disabledSettings != nil {
 			runTest = runTestFunc(maps.Keys(disabledSettings), description)
 			log.Infof("Considering test setting %q for provider %q: runTest=%v", description, "kubevirt", runTest)
-			log.Infof("Datacenters: %v", dcClusters)
 		}
 		if !runTest {
 			Skip("This test setting was not selected to run via the --test-settings flag.")
 		}
 
 		exclude := false
-		for _, excluded := range opts.DatacenterDescriptions {
+		for _, excluded := range opts.Excluded.DatacenterDescriptions {
 			if strings.Contains(description, excluded) {
 				exclude = true
 				break
@@ -272,8 +271,6 @@ func ensureCluster(name string, dcName string, projectName string, spec *kuberma
 			return legacyOpts.SeedClusterClient.Update(rootCtx, cluster)
 		})).NotTo(HaveOccurred(), "failed to add finalizers to the cluster")
 	})
-	// newClusterClients[name] = userClusterClient
-	clustersToDelete = append(clustersToDelete, cluster.Name)
 }
 
 func updateCluster(name string, spec *kubermaticv1.ClusterSpec) {

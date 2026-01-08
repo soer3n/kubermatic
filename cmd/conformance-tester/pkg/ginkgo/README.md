@@ -47,17 +47,32 @@ The `ginkgo` CLI is the recommended way to run tests, as it provides more contro
 
 ```bash
 # Run all tests verbosely
-ginkgo -v ./pkg/ginkgo/...
+ginkgo -v ./...
 
 # Run tests in parallel to speed up execution
-ginkgo -p -v ./pkg/ginkgo/...
+ginkgo -p -v ./...
 
 # Focus on a specific provider (e.g., KubeVirt)
-ginkgo -v --focus="KubeVirt" ./pkg/ginkgo/...
+ginkgo -v --focus="KubeVirt" ./...
 
 # Focus on a specific user story
-ginkgo -v --focus="with a secondary disk" ./pkg/ginkgo/...
+ginkgo -v --focus="with a secondary disk" ./...
 ```
+
+### Using the `ginkgo` CLI (KubeVirt Provider Example)
+
+The `ginkgo` CLI is the recommended way to run tests, as it provides more control. For the KubeVirt provider, use the following command:
+
+```bash
+CONFORMANCE_TESTER_CONFIG_FILE=/home/soer3n/vscode/mybackup/kubermatic-work/kubermatic/cmd/conformance-tester/config.yaml ginkgo -v --procs=1 --nodes=1 --focus="KubeVirt"  --label-filter='!skip' ./...
+```
+
+- `--procs=1` and `--nodes=1` ensure tests run serially.
+- `--focus='KubeVirt'` includes only kubevirt provider tests
+- `--label-filter='!skip'` excludes tests labeled as `skip`.
+- Adjust the config file path as needed for your environment.
+
+You can still use the generic commands for other providers or test suites:
 
 ## Configuration
 
@@ -66,26 +81,8 @@ The tests are configured using a YAML file specified by the `CONFORMANCE_TESTER_
 ### Example Configuration
 
 ```yaml
-# A prefix for all created resources.
-namePrefix: "ginkgo-test"
-
-# A list of providers to test.
-providers:
-- KubeVirt
-
-# A list of Kubernetes releases to test.
-releases:
-- "1.25"
-
-# A list of enabled operating system distributions.
-enableDistributions:
-- ubuntu
-
-# A list of specific test settings (user stories) to run. If empty or omitted,
-# all tests for the selected providers are run. The descriptions must match exactly.
-testSettings:
-  - "with a specific instancetype"
-  - "with a secondary disk"
+namePrefix: "ginkgo"
+client: "kube"
 
 # The file to write the test results to.
 resultsFile: "results.json"
@@ -94,8 +91,8 @@ resultsFile: "results.json"
 retryFailedScenarios: false
 
 # Cluster settings
-deleteClusterAfterTests: true
-nodeCount: 1
+keepFailedClustersAfterTests: true
+nodeCount: 2
 
 # Paths
 reportsRoot: "_reports"
@@ -104,12 +101,62 @@ logDirectory: "_logs"
 # Kubermatic settings
 kubermaticNamespace: "kubermatic"
 kubermaticSeedName: "kubermatic"
+kubermaticProject: "" # will be created if empty
 
-# Secrets for the providers
 secrets:
   kubevirt:
-    kubeconfig: "/path/to/your/kubevirt-kubeconfig"
-    kkpDatacenter: "kubevirt-dc"
+    kkpDatacenter: "kubevirt"
+    kubeconfigFile: "/home/soer3n/vscode/mybackup/kubermatic-work/local-kkp"
+
+# A list of Kubernetes releases to test.
+releases:
+- "1.33.2"
+
+# A list of enabled operating system distributions.
+enableDistributions:
+- ubuntu
+
+excluded:
+  datacenterDescriptions:
+    - "with match subnet and storage location enabled"
+    - "with match subnet and storage location disabled"
+    - "with default instance types enabled"
+    - "with default instance types disabled"
+    - "with default preferences types enabled"
+    - "with default preferences types disabled"
+    - "with ccm zone and region enabled"
+    - "with ccm zone and region disabled"
+    - "with ccm load balancer enabled"
+    - "with ccm load balancer disabled"
+    - "with use pod resources cpu enabled"
+    - "with use pod resources cpu disabled"
+    - "with dns policy set to Default"
+    - "with dns policy set to None"
+    - "with dns policy set to ClusterFirstWithHostNet"
+    - "with images from container disk"
+    - "with default preferences types disabled"
+    - "with default preferences types enabled"
+    - "with default instance types disabled"
+    - "with default instance types enabled"
+    - "with eviction strategy set to live-migrate"
+    - "with eviction strategy set to external"
+  clusterDescriptions:
+    - "with different update window"
+    - "with user ssh key agent enabled"
+    - "with audit logging enabled"
+  machineDescriptions:
+    - "with 8192Mi memory"
+    - "with 4 CPUs"
+    - "with primary disk OS image from an HTTP source"
+    - "with primary disk OS image from a container"
+    - "with custom cpu and memory"
+    - "with a secondary disk"
+    - "with topology spread constraint set to DoNotSchedule"
+    - "with topology spread constraint on hostname"
+    - "with empty node affinity preset type"
+    - "with node affinity preset values"
+    - "with node affinity preset key"
+    - "with node affinity for hostname node-01"
 ```
 
 ## Secrets Management

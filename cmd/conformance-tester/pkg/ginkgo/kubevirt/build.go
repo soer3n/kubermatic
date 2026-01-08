@@ -6,9 +6,7 @@ import (
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -738,102 +736,4 @@ func buildNewScenarios(
 
 	log.Infof("Finished generating scenarios with included/excluded grouping.")
 	return finalScenarios, finalMachineDescriptions
-}
-
-func postProcessScenarios(
-	newScenarios map[string]map[string]v1alpha1.MachineSpec,
-	finalMachineDescriptions map[string]map[string][]string,
-	file *os.File,
-	log *zap.SugaredLogger,
-) map[string]map[string][]string {
-	processedDescriptions := make(map[string]map[string][]string)
-	const maxCombinedScenarios = 3
-
-	fmt.Fprintf(file, "\n--- POST-PROCESSED SCENARIO DESCRIPTIONS ---\n")
-
-	for clusterKey, scenarios := range finalMachineDescriptions {
-		var defaultKey string
-		otherKeys := []string{}
-		log.Infof("Generated Scenarios: %q\n", strings.Join(slices.Collect(maps.Keys(newScenarios[clusterKey])), ", "))
-		log.Infof("Scenario Descriptions: %q\n", strings.Join(slices.Collect(maps.Keys(scenarios)), ", "))
-		for key, descs := range scenarios {
-			if len(descs) == 1 && descs[0] == "default" {
-				defaultKey = key
-			} else {
-				otherKeys = append(otherKeys, key)
-			}
-		}
-
-		if defaultKey == "" {
-			processedDescriptions[clusterKey] = scenarios
-			fmt.Fprintf(file, "Cluster: %s (no default scenario found, skipping post-processing)\n", clusterKey)
-			for key, descs := range scenarios {
-				fmt.Fprintf(file, "  Scenario Key: %s\n    Combined Scenario Names: %v\n\n", key, descs)
-			}
-			continue
-		}
-
-		// Initialize the processed map with the default scenario.
-		processedScenarios := make(map[string][]string)
-		processedScenarios[defaultKey] = scenarios[defaultKey]
-		parents := []string{defaultKey}
-
-		// Keep track of which keys have been merged away.
-		mergedKeys := make(map[string]bool)
-
-		for _, childKey := range otherKeys {
-			wasMerged := false
-			for _, parentKey := range parents {
-				if len(processedScenarios[parentKey]) < maxCombinedScenarios {
-					processedScenarios[parentKey] = append(processedScenarios[parentKey], scenarios[childKey]...)
-					mergedKeys[childKey] = true
-					wasMerged = true
-					break
-				}
-			}
-
-			// If it couldn't be merged, it becomes a new parent, if it's not already merged.
-			if !wasMerged && !mergedKeys[childKey] {
-				parents = append(parents, childKey)
-				processedScenarios[childKey] = scenarios[childKey]
-			}
-		}
-
-		// Final map should only contain the parents (which now contain the children).
-		finalProcessedScenarios := make(map[string][]string)
-		for _, parentKey := range parents {
-			finalProcessedScenarios[parentKey] = processedScenarios[parentKey]
-		}
-
-		processedDescriptions[clusterKey] = finalProcessedScenarios
-
-		fmt.Fprintf(file, "Cluster: %s\n", clusterKey)
-		for key, descs := range finalProcessedScenarios {
-			// Combine all parts into a single string, using a consistent separator.
-			allPartsStr := strings.Join(descs, " and ")
-
-			// Normalize separators (e.g., handle " & ", ", ") and split into individual components.
-			normalizedStr := strings.ReplaceAll(allPartsStr, " & ", " and ")
-			normalizedStr = strings.ReplaceAll(normalizedStr, ", ", " and ")
-			parts := strings.Split(normalizedStr, " and ")
-
-			// Filter for unique parts.
-			uniqueParts := make(map[string]bool)
-			var finalParts []string
-			for _, part := range parts {
-				trimmedPart := strings.TrimSpace(part)
-				if trimmedPart != "" && !uniqueParts[trimmedPart] {
-					uniqueParts[trimmedPart] = true
-					finalParts = append(finalParts, trimmedPart)
-				}
-			}
-
-			// Update the descriptions in the map with the cleaned-up version.
-			finalProcessedScenarios[key] = finalParts
-
-			fmt.Fprintf(file, "  Scenario Key: %s\n    Combined Scenario Names: %v\n\n", key, finalParts)
-		}
-	}
-
-	return processedDescriptions
 }
