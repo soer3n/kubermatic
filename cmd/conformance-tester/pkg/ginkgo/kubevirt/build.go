@@ -30,23 +30,36 @@ import (
 	mckubevirtprovider "k8c.io/machine-controller/pkg/cloudprovider/provider/kubevirt"
 )
 
-func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings DatacenterSetting, datacenterDescriptions []string) map[string]kubermaticv1.Seed {
+func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings DatacenterSetting, excludedDatacenterDescriptions, includedDatacenterDescriptions []string) map[string]kubermaticv1.Seed {
 	seeds := make(map[string]kubermaticv1.Seed)
-	const maxCombinedSettings = 4
+	const maxCombinedSettings = 6
 
 	// Build a set for fast lookup
-	descSet := make(map[string]struct{}, len(datacenterDescriptions))
-	for _, desc := range datacenterDescriptions {
-		descSet[desc] = struct{}{}
+	excludedDescSet := make(map[string]struct{}, len(excludedDatacenterDescriptions))
+	for _, desc := range excludedDatacenterDescriptions {
+		excludedDescSet[desc] = struct{}{}
+	}
+
+	includedDescSet := make(map[string]struct{}, len(includedDatacenterDescriptions))
+	for _, desc := range includedDatacenterDescriptions {
+		includedDescSet[desc] = struct{}{}
 	}
 
 	// Separate settings into included and excluded
 	var included, excluded []DatacenterSetting
 	for _, setting := range datacenterSettings {
-		if _, ok := descSet[setting.name]; ok {
-			included = append(included, setting)
+		if len(includedDescSet) > 0 {
+			if _, ok := includedDescSet[setting.name]; ok {
+				included = append(included, setting)
+			} else {
+				excluded = append(excluded, setting)
+			}
 		} else {
-			excluded = append(excluded, setting)
+			if _, ok := excludedDescSet[setting.name]; !ok {
+				included = append(included, setting)
+			} else {
+				excluded = append(excluded, setting)
+			}
 		}
 	}
 
@@ -131,7 +144,7 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 		// Rebuild the final map with combined names
 		finalSeeds := make(map[string]kubermaticv1.Seed)
 		for key, descs := range descriptions {
-			combinedName := strings.Join(descs, "-")
+			combinedName := strings.Join(descs, " and ")
 			seed := seeds[key]
 			if dc, exists := seed.Spec.Datacenters[key]; exists {
 				delete(seed.Spec.Datacenters, key)
@@ -277,6 +290,7 @@ func buildNewClusters(
 	versionManager *version.Manager,
 	file *os.File,
 	clusterDescriptions []string, // NEW: descriptions to include
+	includedDescriptions []string, // NEW: descriptions to include
 ) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 	finalClusters := make(map[string]*kubermaticv1.ClusterSpec)
 	finalClusterDescriptions := make(map[string][]string)
@@ -287,13 +301,27 @@ func buildNewClusters(
 		descSet[desc] = struct{}{}
 	}
 
+	// Build a set for fast lookup
+	includedDescSet := make(map[string]struct{}, len(includedDescriptions))
+	for _, desc := range includedDescriptions {
+		includedDescSet[desc] = struct{}{}
+	}
+
 	// Separate modifiers into included and excluded
 	var included, excluded []clusterSpecModifier
 	for _, m := range clusterModifiers {
-		if _, ok := descSet[m.name]; ok {
-			included = append(included, m)
+		if len(includedDescSet) > 0 {
+			if _, ok := includedDescSet[m.name]; ok {
+				included = append(included, m)
+			} else {
+				excluded = append(excluded, m)
+			}
 		} else {
-			excluded = append(excluded, m)
+			if _, ok := descSet[m.name]; !ok {
+				included = append(included, m)
+			} else {
+				excluded = append(excluded, m)
+			}
 		}
 	}
 
@@ -418,7 +446,7 @@ func buildNewClusters(
 		return localClusters, localClusterDescriptions
 	}
 
-	includedClusters, includedDescriptions := combineModifiers(included, "included")
+	includedClusters, combinedIncludedDescriptions := combineModifiers(included, "included")
 	excludedClusters, excludedDescriptions := combineModifiers(excluded, "excluded")
 
 	// Merge both maps
@@ -428,7 +456,7 @@ func buildNewClusters(
 	for k, v := range excludedClusters {
 		finalClusters[k] = v
 	}
-	for k, v := range includedDescriptions {
+	for k, v := range combinedIncludedDescriptions {
 		finalClusterDescriptions[k] = v
 	}
 	for k, v := range excludedDescriptions {
@@ -576,7 +604,9 @@ func buildNewScenarios(
 	resolver *configvar.Resolver,
 	file *os.File,
 	rootCtx context.Context,
-	machineDescriptions []string, // NEW: descriptions to include
+	machineDescriptions []string, // NEW: descriptions to exlclude
+	includedMachineDescription []string, // NEW: descriptions to include
+
 ) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
 	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 	finalMachineDescriptions := make(map[string]map[string][]string)
@@ -587,13 +617,27 @@ func buildNewScenarios(
 		descSet[desc] = struct{}{}
 	}
 
+	// Build a set for fast lookup
+	includedDescSet := make(map[string]struct{}, len(includedMachineDescription))
+	for _, desc := range includedMachineDescription {
+		includedDescSet[desc] = struct{}{}
+	}
+
 	// Separate modifiers into included and excluded
 	var included, excluded []machineSpecModifier
 	for _, m := range machineModifiers {
-		if _, ok := descSet[m.name]; ok {
-			included = append(included, m)
+		if len(includedDescSet) > 0 {
+			if _, ok := includedDescSet[m.name]; ok {
+				included = append(included, m)
+			} else {
+				excluded = append(excluded, m)
+			}
 		} else {
-			excluded = append(excluded, m)
+			if _, ok := descSet[m.name]; !ok {
+				included = append(included, m)
+			} else {
+				excluded = append(excluded, m)
+			}
 		}
 	}
 

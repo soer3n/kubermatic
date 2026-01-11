@@ -28,6 +28,8 @@ replace go.etcd.io/etcd/tests/v3 => go.etcd.io/etcd/tests/v3 v3.5.21
 
 replace go.etcd.io/etcd/v3 => go.etcd.io/etcd/v3 v3.5.21
 
+replace kubevirt.io/api => kubevirt.io/api v1.6.2
+
 require (
 	dario.cat/mergo v1.0.1
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.17.1
@@ -76,7 +78,7 @@ require (
 	github.com/nutanix-cloud-native/prism-go-client v0.5.1
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.38.1
+	github.com/onsi/gomega v1.38.2
 	github.com/open-policy-agent/frameworks/constraint v0.0.0-20240802234259-aa99306df54e // Gatekeeper's desired version
 	github.com/open-policy-agent/gatekeeper/v3 v3.17.0
 	github.com/phayes/freeport v0.0.0-20220201140144-74d24b5ae9f5
@@ -128,10 +130,10 @@ require (
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-aggregator v0.32.2
 	k8s.io/kubectl v0.32.2
-	k8s.io/metrics v0.32.2
+	k8s.io/metrics v0.34.0
 	k8s.io/test-infra v0.0.0-20250329100633-7758a586d30c
 	k8s.io/utils v0.0.0-20250820121507-0af2bda4dd1d
-	kubevirt.io/api v1.3.1
+	kubevirt.io/api v1.6.2
 	kubevirt.io/containerized-data-importer-api v1.60.3
 	sigs.k8s.io/controller-runtime v0.22.0
 	sigs.k8s.io/controller-tools v0.19.0
@@ -142,7 +144,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.5
-	github.com/onsi/ginkgo/v2 v2.25.1
+	github.com/onsi/ginkgo/v2 v2.26.0
 	github.com/opencontainers/image-spec v1.1.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8c.io/machine-controller v1.61.1-0.20250520212857-7a93ac526de3

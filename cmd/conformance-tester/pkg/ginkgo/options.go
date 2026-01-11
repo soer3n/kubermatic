@@ -66,6 +66,7 @@ type Options struct {
 	Tests                []string                   `yaml:"-"` // populated based on enable/exclude tests
 
 	Excluded Settings `yaml:"excluded,omitempty"`
+	Included Settings `yaml:"included,omitempty"`
 
 	// The tester can export the result status for all executed scenarios
 	// into a JSON file and then re-read that to retry failed runs.

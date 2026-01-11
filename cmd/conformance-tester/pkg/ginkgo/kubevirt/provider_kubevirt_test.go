@@ -45,8 +45,14 @@ var runTestFunc = func(k iter.Seq[string], v string) bool {
 func getTableEntries() []TableEntry {
 	var newEntries []TableEntry
 	versionSlice := []string{}
-	for _, v := range opts.Releases {
-		versionSlice = append(versionSlice, v)
+	if len(opts.Releases) > 0 {
+		for _, v := range opts.Releases {
+			versionSlice = append(versionSlice, v)
+		}
+	} else {
+		for _, scenario := range kkpConfig.Spec.Versions.Versions {
+			versionSlice = append(versionSlice, scenario.String())
+		}
 	}
 	for seedKey, _ := range defaultSeedSettings {
 		for clusterName, machines := range newScenarios {
@@ -64,24 +70,69 @@ func getTableEntries() []TableEntry {
 				if !ok {
 					continue
 				}
-				title := fmt.Sprintf("%s and %s and %s", strings.Replace(seedKey, "-", " and ", -1), strings.Join(clusterDesc, " and "), strings.Join(desc, " and "))
+				title := fmt.Sprintf("kubernetes version %s and %s and %s and %s", clusterSpec.Version.String(), seedKey, strings.Join(clusterDesc, " and "), strings.Join(desc, " and "))
 				entry := Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("kubevirt"))
 				if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
 					entry = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
+					newEntries = append(newEntries, entry)
+					continue
+				}
+
+				if slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) && strings.Contains(title, "with match subnet and storage location enabled") && strings.Contains(title, "with user ssh key agent enabled") {
+					log.Infof("Skipping scenario %q due to known issue with match subnet and user ssh key agent", title)
+					_ = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
 				}
 
 				exclude := false
-				for _, excluded := range opts.Excluded.DatacenterDescriptions {
-					if strings.Contains(title, excluded) {
-						exclude = true
-						break
+				if len(opts.Included.DatacenterDescriptions) > 0 {
+					for _, included := range opts.Included.DatacenterDescriptions {
+						if !strings.Contains(title, included) {
+							exclude = true
+							break
+						}
+					}
+				} else {
+					for _, excluded := range opts.Excluded.DatacenterDescriptions {
+						if strings.Contains(title, excluded) {
+							exclude = true
+							break
+						}
 					}
 				}
 
-				for _, excluded := range opts.Excluded.ClusterDescriptions {
-					if strings.Contains(title, excluded) {
-						exclude = true
-						break
+				if !exclude {
+					if len(opts.Included.ClusterDescriptions) > 0 {
+						for _, included := range opts.Included.ClusterDescriptions {
+							if !strings.Contains(title, included) {
+								exclude = true
+								break
+							}
+						}
+					} else {
+						for _, excluded := range opts.Excluded.ClusterDescriptions {
+							if strings.Contains(title, excluded) {
+								exclude = true
+								break
+							}
+						}
+					}
+				}
+
+				if !exclude {
+					if len(opts.Included.MachineDescriptions) > 0 {
+						for _, included := range opts.Included.MachineDescriptions {
+							if !strings.Contains(title, included) {
+								exclude = true
+								break
+							}
+						}
+					} else {
+						for _, excluded := range opts.Excluded.MachineDescriptions {
+							if strings.Contains(title, excluded) {
+								exclude = true
+								break
+							}
+						}
 					}
 				}
 

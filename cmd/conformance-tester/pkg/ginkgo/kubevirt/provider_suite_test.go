@@ -150,7 +150,7 @@ func TestMain(m *testing.M) {
 	defer file.Close()
 	log.Info("generating seeds...")
 	datacenterNameMappings = make(map[string]string)
-	defaultSeedSettings = buildDefaultSeedSettings(DatacenterSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions)
+	defaultSeedSettings = buildDefaultSeedSettings(DatacenterSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions, opts.Included.DatacenterDescriptions)
 
 	seed := &kubermaticv1.Seed{}
 	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
@@ -192,7 +192,7 @@ func TestMain(m *testing.M) {
 		log.Fatalw("Failed to get versions for provider", zap.Error(err))
 	}
 	log.Info("generating clusters...")
-	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions)
+	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
 	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
 	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
@@ -202,7 +202,7 @@ func TestMain(m *testing.M) {
 	fmt.Fprintf(file, "Default KubeVirt Config: %+v\n", defaultKubevirtConfig)
 	fmt.Fprint(file, "\nGenerated Scenarios:\n")
 	log.Info("generating scenarios...")
-	newScenarios, finalMachineDescriptions = buildNewScenarios(MachineSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.Excluded.MachineDescriptions)
+	newScenarios, finalMachineDescriptions = buildNewScenarios(MachineSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.Excluded.MachineDescriptions, opts.Included.MachineDescriptions)
 
 	flag.Parse()
 
@@ -226,6 +226,82 @@ func TestMain(m *testing.M) {
 	if err := legacyOpts.ParseFlags(log); err != nil {
 		log.Warnf("Invalid flags", zap.Error(err))
 	}
+
+	log.Infof("Included datacenter descriptions: %v", opts.Included.DatacenterDescriptions)
+	log.Infof("Excluded datacenter descriptions: %v", opts.Excluded.DatacenterDescriptions)
+	log.Infof("Included cluster descriptions: %v", opts.Included.ClusterDescriptions)
+	log.Infof("Excluded cluster descriptions: %v", opts.Excluded.ClusterDescriptions)
+	log.Infof("Included machine descriptions: %v", opts.Included.MachineDescriptions)
+	log.Infof("Excluded machine descriptions: %v", opts.Excluded.MachineDescriptions)
+
+	log.Infof("Final datacenter name mappings: %v", datacenterNameMappings)
+	log.Infof("Final cluster descriptions:")
+	for k, v := range finalClusterDescriptions {
+		log.Infof("  Cluster %q: %v", k, v)
+	}
+	log.Infof("Final machine descriptions:")
+	for clusterKey, descMap := range finalMachineDescriptions {
+		log.Infof("  Cluster %q:", clusterKey)
+		for dedupKey, descs := range descMap {
+			log.Infof("    Machine %q: %v", dedupKey, descs)
+		}
+	}
+
+	// Log what was actually included and excluded after generation
+	includedDatacenters := make(map[string]bool)
+	for dc := range datacenterNameMappings {
+		includedDatacenters[dc] = true
+	}
+	excludedDatacenters := []string{}
+	for _, dc := range opts.Excluded.DatacenterDescriptions {
+		if !includedDatacenters[dc] {
+			excludedDatacenters = append(excludedDatacenters, dc)
+		}
+	}
+	log.Infof("Actually included datacenters: %q", datacenterNameMappings)
+	log.Infof("Actually excluded datacenters: %v", excludedDatacenters)
+
+	includedClusters := make(map[string]bool)
+	for c := range finalClusterDescriptions {
+		includedClusters[c] = true
+	}
+	excludedClusters := []string{}
+	for _, c := range opts.Excluded.ClusterDescriptions {
+		found := false
+		for _, descs := range finalClusterDescriptions {
+			for _, desc := range descs {
+				if desc == c {
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			excludedClusters = append(excludedClusters, c)
+		}
+	}
+	log.Infof("Actually included clusters: %q", finalClusterDescriptions)
+	log.Infof("Actually excluded clusters: %v", excludedClusters)
+
+	includedMachines := make(map[string]bool)
+	for _, descMap := range finalMachineDescriptions {
+		for _, descs := range descMap {
+			for _, desc := range descs {
+				includedMachines[desc] = true
+			}
+		}
+	}
+	excludedMachines := []string{}
+	for _, m := range opts.Excluded.MachineDescriptions {
+		if !includedMachines[m] {
+			excludedMachines = append(excludedMachines, m)
+		}
+	}
+	log.Infof("Actually included machines: %q", includedMachines)
+	log.Infof("Actually excluded machines: %v", excludedMachines)
 
 	os.Exit(m.Run())
 }
@@ -292,8 +368,14 @@ var _ = SynchronizedBeforeSuite(func() {
 	maxConcurrent := 4 // Set your desired concurrency limit
 	sem := make(chan struct{}, maxConcurrent)
 	versionSlice := []string{}
-	for _, v := range opts.Releases {
-		versionSlice = append(versionSlice, v)
+	if len(opts.Releases) > 0 {
+		for _, v := range opts.Releases {
+			versionSlice = append(versionSlice, v)
+		}
+	} else {
+		for _, scenario := range kkpConfig.Spec.Versions.Versions {
+			versionSlice = append(versionSlice, scenario.String())
+		}
 	}
 	for i, _ := range defaultSeedSettings {
 		log.Infof("defaultSeedSettings[%d]: %+v", i, datacenterNameMappings[i])
@@ -303,10 +385,20 @@ var _ = SynchronizedBeforeSuite(func() {
 	}
 	for seedKey := range defaultSeedSettings {
 		exclude := false
-		for _, excluded := range opts.Excluded.DatacenterDescriptions {
-			if strings.Contains(seedKey, excluded) {
-				exclude = true
-				break
+		if len(opts.Included.DatacenterDescriptions) > 0 {
+			exclude = true
+			for _, included := range opts.Included.DatacenterDescriptions {
+				if strings.Contains(seedKey, included) {
+					exclude = false
+					break
+				}
+			}
+		} else {
+			for _, excluded := range opts.Excluded.DatacenterDescriptions {
+				if strings.Contains(seedKey, excluded) {
+					exclude = true
+					break
+				}
 			}
 		}
 		if exclude {
@@ -321,10 +413,20 @@ var _ = SynchronizedBeforeSuite(func() {
 				continue
 			}
 			exclude = false
-			for _, excluded := range opts.Excluded.ClusterDescriptions {
-				if slice.ContainsString(clusterDesc, excluded, nil) {
-					exclude = true
-					break
+			if len(opts.Included.ClusterDescriptions) > 0 {
+				exclude = true
+				for _, included := range opts.Included.ClusterDescriptions {
+					if slice.ContainsString(clusterDesc, included, nil) {
+						exclude = false
+						break
+					}
+				}
+			} else {
+				for _, excluded := range opts.Excluded.ClusterDescriptions {
+					if slice.ContainsString(clusterDesc, excluded, nil) {
+						exclude = true
+						break
+					}
 				}
 			}
 			if exclude {
@@ -358,8 +460,14 @@ var _ = SynchronizedAfterSuite(func() {
 	By(fmt.Sprintf("Deleting created clusters for e2e project %q", legacyOpts.KubermaticProject))
 	var wg sync.WaitGroup
 	versionSlice := []string{}
-	for _, v := range opts.Releases {
-		versionSlice = append(versionSlice, v)
+	if len(opts.Releases) > 0 {
+		for _, v := range opts.Releases {
+			versionSlice = append(versionSlice, v)
+		}
+	} else {
+		for _, scenario := range kkpConfig.Spec.Versions.Versions {
+			versionSlice = append(versionSlice, scenario.String())
+		}
 	}
 
 	for seedKey := range defaultSeedSettings {
