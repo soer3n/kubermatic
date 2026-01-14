@@ -32,6 +32,7 @@ import (
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	kubermativsemver "k8c.io/kubermatic/sdk/v2/semver"
 	clusterclient "k8c.io/kubermatic/v2/pkg/cluster/client"
+	"k8c.io/kubermatic/v2/pkg/defaulting"
 	kubernetesprovider "k8c.io/kubermatic/v2/pkg/provider/kubernetes"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -67,6 +68,8 @@ type Options struct {
 
 	Excluded Settings `yaml:"excluded,omitempty"`
 	Included Settings `yaml:"included,omitempty"`
+
+	Resources ResourceSettings `yaml:"resources,omitempty"`
 
 	// The tester can export the result status for all executed scenarios
 	// into a JSON file and then re-read that to retry failed runs.
@@ -111,6 +114,12 @@ type Settings struct {
 	DatacenterDescriptions []string `yaml:"datacenterDescriptions,omitempty"`
 	ClusterDescriptions    []string `yaml:"clusterDescriptions,omitempty"`
 	MachineDescriptions    []string `yaml:"machineDescriptions,omitempty"`
+}
+
+type ResourceSettings struct {
+	Cpu      []int    `yaml:"cpu,omitempty"`
+	Memory   []string `yaml:"memory,omitempty"`
+	DiskSize []string `yaml:"diskSize,omitempty"`
 }
 
 // RuntimeOptions holds runtime-specific objects that are not serializable.
@@ -244,6 +253,16 @@ func NewRuntimeOptions(ctx context.Context, log *zap.SugaredLogger, o *Options) 
 	runtimeOpts.ClusterClientProvider = clusterClientProvider
 
 	return runtimeOpts, nil
+}
+
+func LoadKubermaticConfiguration() (*kubermaticv1.KubermaticConfiguration, error) {
+	config := &kubermaticv1.KubermaticConfiguration{}
+	defaulted, err := defaulting.DefaultConfiguration(config, zap.NewNop().Sugar())
+	if err != nil {
+		return nil, fmt.Errorf("failed to process: %w", err)
+	}
+
+	return defaulted, nil
 }
 
 func MergeOptions(log *zap.SugaredLogger, yamlOpts *Options, flagOpts *legacytypes.Options, runtimeOpts *RuntimeOptions) *legacytypes.Options {

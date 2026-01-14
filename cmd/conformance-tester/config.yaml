@@ -39,73 +39,89 @@ secrets:
 # A list of Kubernetes releases to test.
 releases:
 # - "1.32.1"
-- "1.33.2"
-# - "1.34.1"
+# - "1.33.2"
+- "1.34.1"
 
 # A list of enabled operating system distributions.
 enableDistributions:
 - ubuntu
 # - rockylinux
 
-excluded:
-  datacenterDescriptions:
-  - "with match subnet and storage location enabled"
-  - "with match subnet and storage location disabled"
-  - "with default instance types enabled"
-  - "with default instance types disabled"
-  - "with default preferences types enabled"
-  - "with default preferences types disabled"
-  - "with ccm zone and region enabled"
-  - "with ccm zone and region disabled"
-  - "with ccm load balancer enabled"
-  - "with ccm load balancer disabled"
-  - "with use pod resources cpu enabled"
-  - "with use pod resources cpu disabled"
-  - "with dns policy set to Default"
-  - "with dns policy set to None"
-  - "with dns policy set to ClusterFirstWithHostNet"
-  - "with images from container disk"
-  - "with default preferences types disabled"
-  - "with default preferences types enabled"
-  - "with default instance types disabled"
-  - "with default instance types enabled"
-  - "with eviction strategy set to live-migrate"
-  - "with eviction strategy set to external"
+# Machine resources variants to test.
+resources:
+  cpu:
+  - 4
+  memory:
+  - "8192Mi"
+  diskSize:
+  - "20Gi"
 
-  clusterDescriptions:
-  - "with different update window"
-  - "with user ssh key agent enabled"
-  - "with audit logging enabled"
+# with match subnet and storage location enabled/disabled
 
-  machineDescriptions:
-  - "with 8192Mi memory"
-  - "with 4 CPUs"
-  - "with primary disk OS image from an HTTP source"
-  - "with primary disk OS image from a container"
-  - "with custom cpu and memory"
-  - "with a secondary disk"
-  - "with topology spread constraint set to DoNotSchedule"
-  - "with topology spread constraint on hostname"
-  - "with empty node affinity preset type"
-  - "with node affinity preset values"
-  - "with node affinity preset key"
-  - "with node affinity for hostname node-01"
-
-# included:
+# excluded:
 #   datacenterDescriptions:
 #   - "with match subnet and storage location enabled"
 #   - "with match subnet and storage location disabled"
+#   - "with default instance types enabled"
+#   - "with default instance types disabled"
+#   - "with default preferences types enabled"
+#   - "with default preferences types disabled"
+#   - "with ccm zone and region enabled"
+#   - "with ccm zone and region disabled"
+#   - "with ccm load balancer enabled"
+#   - "with ccm load balancer disabled"
+#   - "with use pod resources cpu enabled"
+#   - "with use pod resources cpu disabled"
+#   - "with dns policy set to Default"
+#   - "with dns policy set to None"
+#   - "with dns policy set to ClusterFirstWithHostNet"
+#   - "with images from container disk"
+#   - "with default preferences types disabled"
+#   - "with default preferences types enabled"
+#   - "with default instance types disabled"
+#   - "with default instance types enabled"
 #   - "with eviction strategy set to live-migrate"
 #   - "with eviction strategy set to external"
 
 #   clusterDescriptions:
+#   - "with different update window"
 #   - "with user ssh key agent enabled"
+#   - "with audit logging enabled"
 
 #   machineDescriptions:
 #   - "with 8192Mi memory"
 #   - "with 4 CPUs"
 #   - "with primary disk OS image from an HTTP source"
 #   - "with primary disk OS image from a container"
+#   - "with custom cpu and memory"
 #   - "with a secondary disk"
 #   - "with topology spread constraint set to DoNotSchedule"
 #   - "with topology spread constraint on hostname"
+#   - "with empty node affinity preset type"
+#   - "with dns policy set to Default"
+#   - "with dns policy set to None"
+#   - "with dns policy set to ClusterFirstWithHostNet"
+#   - "with empty instancetype"
+#   - "with empty preference"
+#   # - "with node affinity preset values"
+#   # - "with node affinity preset key"
+#   # - "with node affinity for hostname kkp-cluster-worker"
+
+included:
+  datacenterDescriptions:
+  - "with match subnet and storage location enabled"
+  # - "with match subnet and storage location disabled"
+  - "with eviction strategy set to live-migrate"
+  # - "with eviction strategy set to external"
+
+  clusterDescriptions:
+  - "with user ssh key agent enabled"
+
+  machineDescriptions:
+  - "with 8192Mi memory"
+  - "with 4 CPUs"
+  - "with primary disk OS image from an HTTP source"
+  # - "with primary disk OS image from a container"
+  # - "with a secondary disk"
+  - "with topology spread constraint set to DoNotSchedule"
+  # - "with topology spread constraint on hostname"

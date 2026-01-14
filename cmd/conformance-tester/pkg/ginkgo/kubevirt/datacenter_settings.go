@@ -14,16 +14,16 @@ import (
 )
 
 type DatacenterSetting struct {
-	name     string
-	group    string
-	modifier func(dc *kubermaticv1.Datacenter)
+	Name     string
+	Group    string
+	Modifier func(dc *kubermaticv1.Datacenter)
 }
 
-var datacenterSettings = []DatacenterSetting{
+var DatacenterSettings = []DatacenterSetting{
 	{
-		name:  "with default control plane network policies enabled",
-		group: "netpol",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default control plane network policies enabled",
+		Group: "netpol",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -31,9 +31,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with default control plane network policies disabled",
-		group: "netpol",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default control plane network policies disabled",
+		Group: "netpol",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -41,9 +41,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with namespaced mode enabled",
-		group: "namespace",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with namespaced mode enabled",
+		Group: "namespace",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -54,9 +54,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with namespaced mode disabled",
-		group: "namespace",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with namespaced mode disabled",
+		Group: "namespace",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -66,9 +66,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with dns policy set to ClusterFirst",
-		group: "dns",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with dns policy set to ClusterFirst",
+		Group: "dns",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -76,9 +76,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with dns policy set to Default",
-		group: "dns",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with dns policy set to Default",
+		Group: "dns",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -86,9 +86,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with dns policy set to None",
-		group: "dns",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with dns policy set to None",
+		Group: "dns",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -96,9 +96,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with images from container disk",
-		group: "images",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with images from container disk",
+		Group: "images",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -114,9 +114,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with images from http source",
-		group: "images",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with images from http source",
+		Group: "images",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -132,9 +132,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with eviction strategy set to live-migrate",
-		group: "eviction",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with eviction strategy set to live-migrate",
+		Group: "eviction",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -142,9 +142,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with eviction strategy set to external",
-		group: "eviction",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with eviction strategy set to external",
+		Group: "eviction",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -152,9 +152,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with match subnet and storage location enabled",
-		group: "subnet",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with match subnet and storage location enabled",
+		Group: "subnet",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -162,9 +162,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with match subnet and storage location disabled",
-		group: "subnet",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with match subnet and storage location disabled",
+		Group: "subnet",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -172,9 +172,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with default instance types enabled",
-		group: "instancetypes",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default instance types enabled",
+		Group: "instancetypes",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -182,9 +182,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with default instance types disabled",
-		group: "instancetypes",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default instance types disabled",
+		Group: "instancetypes",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -192,9 +192,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with default preferences types enabled",
-		group: "preferences",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default preferences types enabled",
+		Group: "preferences",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -202,9 +202,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with default preferences types disabled",
-		group: "preferences",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with default preferences types disabled",
+		Group: "preferences",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -212,9 +212,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with ccm zone and region enabled",
-		group: "ccm",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with ccm zone and region enabled",
+		Group: "ccm",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -222,9 +222,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with ccm zone and region disabled",
-		group: "ccm",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with ccm zone and region disabled",
+		Group: "ccm",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -232,9 +232,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with ccm load balancer enabled",
-		group: "ccm-lb",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with ccm load balancer enabled",
+		Group: "ccm-lb",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -242,9 +242,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with ccm load balancer disabled",
-		group: "ccm-lb",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with ccm load balancer disabled",
+		Group: "ccm-lb",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -252,9 +252,9 @@ var datacenterSettings = []DatacenterSetting{
 		},
 	},
 	{
-		name:  "with use pod resources cpu enabled",
-		group: "pod-cpu",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with use pod resources cpu enabled",
+		Group: "pod-cpu",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -263,9 +263,9 @@ var datacenterSettings = []DatacenterSetting{
 	},
 
 	{
-		name:  "with use pod resources cpu disabled",
-		group: "pod-cpu",
-		modifier: func(dc *kubermaticv1.Datacenter) {
+		Name:  "with use pod resources cpu disabled",
+		Group: "pod-cpu",
+		Modifier: func(dc *kubermaticv1.Datacenter) {
 			if dc.Spec.Kubevirt == nil {
 				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 			}
@@ -275,8 +275,8 @@ var datacenterSettings = []DatacenterSetting{
 }
 
 var defaultDatacenterSettings = DatacenterSetting{
-	name: "default",
-	modifier: func(dc *kubermaticv1.Datacenter) {
+	Name: "default",
+	Modifier: func(dc *kubermaticv1.Datacenter) {
 		defaultDC := kubermaticv1.Datacenter{
 			Spec: kubermaticv1.DatacenterSpec{
 				Kubevirt: &kubermaticv1.DatacenterSpecKubevirt{
@@ -308,13 +308,13 @@ var defaultDatacenterSettings = DatacenterSetting{
 	},
 }
 
-func DatacenterSettings(ctx context.Context, client ctrlruntimeclient.Client, namespace string) []DatacenterSetting {
+func GenericDatacenterSettings(ctx context.Context, client ctrlruntimeclient.Client, namespace string) []DatacenterSetting {
 	discoverdSettings, err := discoverDefaultDatacenterSettings(ctx, client, namespace)
 	if err != nil {
 		panic(fmt.Errorf("failed to discover default datacenter settings: %w", err))
 	}
 	generatedDatacenterSettings := buildDefaultDatacenterSettings(discoverdSettings)
-	for _, settings := range datacenterSettings {
+	for _, settings := range DatacenterSettings {
 		generatedDatacenterSettings = append(generatedDatacenterSettings, settings)
 	}
 	return generatedDatacenterSettings
@@ -386,9 +386,9 @@ func buildDefaultDatacenterSettings(settings *DefaultDatacenterSettings) []Datac
 
 	for _, setting := range settings.VPCs {
 		modifiers = append(modifiers, DatacenterSetting{
-			name:  fmt.Sprintf("with vpc %s", setting.Name),
-			group: "vpc",
-			modifier: func(dc *kubermaticv1.Datacenter) {
+			Name:  fmt.Sprintf("with vpc %s", setting.Name),
+			Group: "vpc",
+			Modifier: func(dc *kubermaticv1.Datacenter) {
 				if dc.Spec.Kubevirt == nil {
 					dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
 				}

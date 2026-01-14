@@ -1,14 +1,19 @@
 package kubevirt
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"iter"
-	"maps"
+	"os"
+	"sort"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
+	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/types"
+	apitypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/kubectl/pkg/util/slice"
@@ -19,8 +24,10 @@ import (
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/util"
+	"k8c.io/kubermatic/v2/pkg/version"
 	"k8c.io/kubermatic/v2/pkg/version/kubermatic"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 
 	controllerutil "k8c.io/kubermatic/v2/pkg/controller/util"
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +50,68 @@ var runTestFunc = func(k iter.Seq[string], v string) bool {
 }
 
 func getTableEntries() []TableEntry {
+
+	kkpConfig, err := k8cginkgo.LoadKubermaticConfiguration()
+	if err != nil {
+		log.Fatalw("Failed to load KKP configuration", zap.Error(err))
+	}
+	file, err := os.Create("debug_output.txt")
+	if err != nil {
+		log.Fatalw("Failed to create debug output file", zap.Error(err))
+	}
+	defer file.Close()
+	log.Info("generating seeds...")
+	datacenterNameMappings = make(map[string]string)
+	defaultSeedSettings = buildDefaultSeedSettings(GenericDatacenterSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions, opts.Included.DatacenterDescriptions)
+	seed = &kubermaticv1.Seed{}
+	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
+	if err != nil {
+		log.Fatalw("Failed to get seed", zap.Error(err))
+	}
+
+	if seed.Spec.Datacenters == nil {
+		seed.Spec.Datacenters = map[string]kubermaticv1.Datacenter{}
+	}
+
+	seedKeys := make([]string, 0, len(defaultSeedSettings))
+	for k := range defaultSeedSettings {
+		seedKeys = append(seedKeys, k)
+	}
+	sort.Strings(seedKeys)
+
+	for _, key := range seedKeys {
+		s := defaultSeedSettings[key]
+		for dcName, dc := range s.Spec.Datacenters {
+			hasher := sha1.New()
+			hasher.Write([]byte(dcName))
+			hashedName := hex.EncodeToString(hasher.Sum(nil))[:10]
+			datacenterNameMappings[dcName] = hashedName
+			dc.Country = "conformance"
+			dc.Location = dcName
+			seed.Spec.Datacenters[hashedName] = dc
+		}
+	}
+
+	versionManager := version.NewFromConfiguration(kkpConfig)
+	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
+	if err != nil {
+		log.Fatalw("Failed to get versions for provider", zap.Error(err))
+	}
+	// v, _ := versionManager.GetVersion("1.34.1")
+	// versions = []*version.Version{v}
+	log.Info("generating clusters...")
+	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, k8cginkgo.ClusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
+	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
+	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
+	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
+	if err != nil {
+		log.Fatalw("Failed to get default kubevirt config", zap.Error(err))
+	}
+	fmt.Fprintf(file, "Default KubeVirt Config: %+v\n", defaultKubevirtConfig)
+	fmt.Fprint(file, "\nGenerated Scenarios:\n")
+	log.Info("generating scenarios...")
+	newScenarios, finalMachineDescriptions = buildNewScenarios(MachineSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace, &opts.Resources), newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.Excluded.MachineDescriptions, opts.Included.MachineDescriptions)
+
 	var newEntries []TableEntry
 	versionSlice := []string{}
 	if len(opts.Releases) > 0 {
@@ -78,10 +147,10 @@ func getTableEntries() []TableEntry {
 					continue
 				}
 
-				if slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) && strings.Contains(title, "with match subnet and storage location enabled") && strings.Contains(title, "with user ssh key agent enabled") {
-					log.Infof("Skipping scenario %q due to known issue with match subnet and user ssh key agent", title)
-					_ = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
-				}
+				// if slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) && strings.Contains(title, "with match subnet and storage location enabled") && strings.Contains(title, "with user ssh key agent enabled") {
+				// 	log.Infof("Skipping scenario %q due to known issue with match subnet and user ssh key agent", title)
+				// 	_ = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
+				// }
 
 				exclude := false
 				if len(opts.Included.DatacenterDescriptions) > 0 {
@@ -149,39 +218,7 @@ func getTableEntries() []TableEntry {
 }
 
 var _ = Describe("Scenario", func() {
-	var disabledSettings map[string][]interface{}
-	if len(legacyOpts.TestSettings) > 0 {
-		disabledSettings = make(map[string][]interface{})
-		for _, s := range legacyOpts.TestSettings {
-			disabledSettings[strings.TrimSpace(s.Description)] = s.StringVariants
-		}
-	}
-	versionSlice := []string{}
-	for _, v := range opts.Releases {
-		versionSlice = append(versionSlice, v)
-	}
 	DescribeTable("KubeVirt", func(description string, clusterName string, clusterSpec *kubermaticv1.ClusterSpec, machineSpec *v1alpha1.MachineSpec, scenarioName string) {
-		runTest := true
-		if disabledSettings != nil {
-			runTest = runTestFunc(maps.Keys(disabledSettings), description)
-			log.Infof("Considering test setting %q for provider %q: runTest=%v", description, "kubevirt", runTest)
-		}
-		if !runTest {
-			Skip("This test setting was not selected to run via the --test-settings flag.")
-		}
-
-		exclude := false
-		for _, excluded := range opts.Excluded.DatacenterDescriptions {
-			if strings.Contains(description, excluded) {
-				exclude = true
-				break
-			}
-		}
-
-		if exclude {
-			Skip(fmt.Sprintf("Excluding test setting %q via the --exclude-machine-descriptions flag.", description))
-		}
-
 		cluster := &kubermaticv1.Cluster{}
 		if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", clusterName, clusterSpec.Cloud.DatacenterName[:8])}, cluster); err != nil {
 			log.Errorf("Failed to get cluster %s: %v", clusterName, err)

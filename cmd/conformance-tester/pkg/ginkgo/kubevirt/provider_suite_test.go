@@ -2,14 +2,11 @@ package kubevirt
 
 import (
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"maps"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -25,8 +22,6 @@ import (
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	"k8c.io/kubermatic/v2/pkg/version"
-
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
@@ -40,7 +35,6 @@ import (
 
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
-	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 )
 
 type MachineScenario struct {
@@ -89,42 +83,32 @@ var (
 	finalMachineDescriptions map[string]map[string][]string
 	newClusterClients        map[string]ctrlruntimeclient.Client
 	datacenterNameMappings   map[string]string
+	seed                     *kubermaticv1.Seed
 )
-
-func GetClusterVersions() []string {
-	versions := []string{}
-	for _, scenario := range kkpConfig.Spec.Versions.Versions {
-		versions = append(versions, scenario.String())
-	}
-	return versions
-}
-
-func GetDatacenterDescriptions() []string {
-	descriptions := []string{}
-	for _, modifier := range datacenterSettings {
-		descriptions = append(descriptions, modifier.name)
-	}
-	return descriptions
-}
-
-func GetClusterDescriptions() []string {
-	descriptions := []string{}
-	for _, modifier := range clusterSettings {
-		descriptions = append(descriptions, modifier.name)
-	}
-	return descriptions
-}
-
-func GetMachineDescriptions() []string {
-	descriptions := []string{}
-	for _, modifier := range machineSettings {
-		descriptions = append(descriptions, modifier.name)
-	}
-	return descriptions
-}
 
 func TestMain(m *testing.M) {
 	var err error
+
+	// client, _, err := k8cutils.GetClients()
+	// if err != nil {
+	// 	log.Fatalw("Failed to create clients", zap.Error(err))
+	// }
+
+	// // step 1
+	// versions := utils.GetReleaseVersions()
+	// log.Infof("Available Kubernetes versions: %v", versions)
+	// // step 2
+	// datacenters := GetDatacenterDescriptions()
+	// log.Infof("Available datacenter descriptions: %v", datacenters)
+	// // step 3
+	// clusters := utils.GetClusterDescriptions()
+	// log.Infof("Available cluster descriptions: %v", clusters)
+	// // step 4
+	// machines := GetMachineDescriptions()
+	// log.Infof("Available machine descriptions: %v", machines)
+	// // step 5
+	// _ = k8cginkgo.ResourceSettings{}
+
 	rootCtx = signals.SetupSignalHandler()
 	opts, err = k8cginkgo.NewOptionsFromYAML(log)
 	if err != nil {
@@ -139,70 +123,6 @@ func TestMain(m *testing.M) {
 	}
 	legacyOpts = legacytypes.NewDefaultOptions()
 	legacyOpts.AddFlags()
-	kkpConfig, err = loadKubermaticConfiguration()
-	if err != nil {
-		log.Fatalw("Failed to load KKP configuration", zap.Error(err))
-	}
-	file, err := os.Create("debug_output.txt")
-	if err != nil {
-		log.Fatalw("Failed to create debug output file", zap.Error(err))
-	}
-	defer file.Close()
-	log.Info("generating seeds...")
-	datacenterNameMappings = make(map[string]string)
-	defaultSeedSettings = buildDefaultSeedSettings(DatacenterSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions, opts.Included.DatacenterDescriptions)
-
-	seed := &kubermaticv1.Seed{}
-	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
-	if err != nil {
-		log.Fatalw("Failed to get seed", zap.Error(err))
-	}
-
-	if seed.Spec.Datacenters == nil {
-		seed.Spec.Datacenters = map[string]kubermaticv1.Datacenter{}
-	}
-
-	seedKeys := make([]string, 0, len(defaultSeedSettings))
-	for k := range defaultSeedSettings {
-		seedKeys = append(seedKeys, k)
-	}
-	sort.Strings(seedKeys)
-
-	for _, key := range seedKeys {
-		s := defaultSeedSettings[key]
-		for dcName, dc := range s.Spec.Datacenters {
-			hasher := sha1.New()
-			hasher.Write([]byte(dcName))
-			hashedName := hex.EncodeToString(hasher.Sum(nil))[:10]
-			datacenterNameMappings[dcName] = hashedName
-			dc.Country = "conformance"
-			dc.Location = dcName
-			seed.Spec.Datacenters[hashedName] = dc
-		}
-	}
-
-	err = runtimeOpts.SeedClusterClient.Update(rootCtx, seed)
-	if err != nil {
-		log.Fatalw("Failed to update seed", zap.Error(err))
-	}
-
-	versionManager := version.NewFromConfiguration(kkpConfig)
-	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
-	if err != nil {
-		log.Fatalw("Failed to get versions for provider", zap.Error(err))
-	}
-	log.Info("generating clusters...")
-	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, clusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
-	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
-	fmt.Fprintf(file, "\nGenerated Clusters: %v\n", len(newClusters))
-	defaultKubevirtConfig, err := getDefaultKubevirtConfig()
-	if err != nil {
-		log.Fatalw("Failed to get default kubevirt config", zap.Error(err))
-	}
-	fmt.Fprintf(file, "Default KubeVirt Config: %+v\n", defaultKubevirtConfig)
-	fmt.Fprint(file, "\nGenerated Scenarios:\n")
-	log.Info("generating scenarios...")
-	newScenarios, finalMachineDescriptions = buildNewScenarios(MachineSettings(rootCtx, runtimeOpts.SeedClusterClient, legacyOpts.KubermaticNamespace), newClusters, opts, log, *defaultKubevirtConfig, resolver, file, rootCtx, opts.Excluded.MachineDescriptions, opts.Included.MachineDescriptions)
 
 	flag.Parse()
 
@@ -233,75 +153,6 @@ func TestMain(m *testing.M) {
 	log.Infof("Excluded cluster descriptions: %v", opts.Excluded.ClusterDescriptions)
 	log.Infof("Included machine descriptions: %v", opts.Included.MachineDescriptions)
 	log.Infof("Excluded machine descriptions: %v", opts.Excluded.MachineDescriptions)
-
-	log.Infof("Final datacenter name mappings: %v", datacenterNameMappings)
-	log.Infof("Final cluster descriptions:")
-	for k, v := range finalClusterDescriptions {
-		log.Infof("  Cluster %q: %v", k, v)
-	}
-	log.Infof("Final machine descriptions:")
-	for clusterKey, descMap := range finalMachineDescriptions {
-		log.Infof("  Cluster %q:", clusterKey)
-		for dedupKey, descs := range descMap {
-			log.Infof("    Machine %q: %v", dedupKey, descs)
-		}
-	}
-
-	// Log what was actually included and excluded after generation
-	includedDatacenters := make(map[string]bool)
-	for dc := range datacenterNameMappings {
-		includedDatacenters[dc] = true
-	}
-	excludedDatacenters := []string{}
-	for _, dc := range opts.Excluded.DatacenterDescriptions {
-		if !includedDatacenters[dc] {
-			excludedDatacenters = append(excludedDatacenters, dc)
-		}
-	}
-	log.Infof("Actually included datacenters: %q", datacenterNameMappings)
-	log.Infof("Actually excluded datacenters: %v", excludedDatacenters)
-
-	includedClusters := make(map[string]bool)
-	for c := range finalClusterDescriptions {
-		includedClusters[c] = true
-	}
-	excludedClusters := []string{}
-	for _, c := range opts.Excluded.ClusterDescriptions {
-		found := false
-		for _, descs := range finalClusterDescriptions {
-			for _, desc := range descs {
-				if desc == c {
-					found = true
-					break
-				}
-			}
-			if found {
-				break
-			}
-		}
-		if !found {
-			excludedClusters = append(excludedClusters, c)
-		}
-	}
-	log.Infof("Actually included clusters: %q", finalClusterDescriptions)
-	log.Infof("Actually excluded clusters: %v", excludedClusters)
-
-	includedMachines := make(map[string]bool)
-	for _, descMap := range finalMachineDescriptions {
-		for _, descs := range descMap {
-			for _, desc := range descs {
-				includedMachines[desc] = true
-			}
-		}
-	}
-	excludedMachines := []string{}
-	for _, m := range opts.Excluded.MachineDescriptions {
-		if !includedMachines[m] {
-			excludedMachines = append(excludedMachines, m)
-		}
-	}
-	log.Infof("Actually included machines: %q", includedMachines)
-	log.Infof("Actually excluded machines: %v", excludedMachines)
 
 	os.Exit(m.Run())
 }
@@ -356,7 +207,8 @@ var _ = SynchronizedBeforeSuite(func() {
 	})
 
 	By(k8cginkgo.KKP("Attaching datacenters to seed"), func() {
-
+		err := runtimeOpts.SeedClusterClient.Update(rootCtx, seed)
+		Expect(err).NotTo(HaveOccurred(), "Failed to update seed")
 	})
 
 	suiteCfg, reporterCfg := GinkgoConfiguration()
@@ -470,13 +322,14 @@ var _ = SynchronizedAfterSuite(func() {
 		}
 	}
 
-	for seedKey := range defaultSeedSettings {
-		for dc := range newClusters {
-			wg.Add(1)
-			go func(dc string) {
-				defer wg.Done()
-				cluster := &kubermaticv1.Cluster{}
-				if !skipClusterDeletion {
+	if !skipClusterDeletion {
+		for seedKey := range defaultSeedSettings {
+			for dc := range newClusters {
+				wg.Add(1)
+				go func(dc string) {
+					defer wg.Done()
+					cluster := &kubermaticv1.Cluster{}
+
 					if !slice.ContainsString(versionSlice, cluster.Spec.Version.String(), nil) {
 						return
 					}
@@ -494,27 +347,28 @@ var _ = SynchronizedAfterSuite(func() {
 					}
 					By(fmt.Sprintf("Cleaning up resources for cluster %s. Name is %s", dc, cluster.Name))
 					k8cginkgo.CommonCleanup(rootCtx, log, clients.NewKubeClient(legacyOpts), nil, userClusterClient, cluster)
-				}
 
-			}(dc)
+				}(dc)
+			}
+		}
+		wg.Wait()
+
+		By("Detaching datacenters from seed")
+		seed := &kubermaticv1.Seed{}
+		err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
+		if err != nil {
+			log.Errorf("Failed to get seed 'kubermatic' for cleanup: %v", err)
+		} else {
+			for _, hashedName := range datacenterNameMappings {
+				delete(seed.Spec.Datacenters, hashedName)
+			}
+
+			if err := runtimeOpts.SeedClusterClient.Update(rootCtx, seed); err != nil {
+				log.Errorf("Failed to update seed 'kubermatic' to remove datacenters: %v", err)
+			}
 		}
 	}
-	wg.Wait()
 
-	By("Detaching datacenters from seed")
-	seed := &kubermaticv1.Seed{}
-	err := runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
-	if err != nil {
-		log.Errorf("Failed to get seed 'kubermatic' for cleanup: %v", err)
-	} else {
-		for _, hashedName := range datacenterNameMappings {
-			delete(seed.Spec.Datacenters, hashedName)
-		}
-
-		if err := runtimeOpts.SeedClusterClient.Update(rootCtx, seed); err != nil {
-			log.Errorf("Failed to update seed 'kubermatic' to remove datacenters: %v", err)
-		}
-	}
 })
 
 var _ = ReportBeforeSuite(func(r Report) {})

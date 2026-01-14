@@ -49,13 +49,13 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 	var included, excluded []DatacenterSetting
 	for _, setting := range datacenterSettings {
 		if len(includedDescSet) > 0 {
-			if _, ok := includedDescSet[setting.name]; ok {
+			if _, ok := includedDescSet[setting.Name]; ok {
 				included = append(included, setting)
 			} else {
 				excluded = append(excluded, setting)
 			}
 		} else {
-			if _, ok := excludedDescSet[setting.name]; !ok {
+			if _, ok := excludedDescSet[setting.Name]; !ok {
 				included = append(included, setting)
 			} else {
 				excluded = append(excluded, setting)
@@ -68,9 +68,9 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 		groupedSettings := make(map[string][]DatacenterSetting)
 		var ungroupedSettings []DatacenterSetting
 		for _, setting := range settings {
-			if setting.group != "" {
-				groupedSettings[setting.group] = append(groupedSettings[setting.group], setting)
-			} else if setting.name != "default" {
+			if setting.Group != "" {
+				groupedSettings[setting.Group] = append(groupedSettings[setting.Group], setting)
+			} else if setting.Name != "default" {
 				ungroupedSettings = append(ungroupedSettings, setting)
 			}
 		}
@@ -84,8 +84,8 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 		seeds := make(map[string]kubermaticv1.Seed)
 		// Create a base "default" seed
 		defaultDst := kubermaticv1.Datacenter{}
-		if defaultDatacenterSettings.modifier != nil {
-			defaultDatacenterSettings.modifier(&defaultDst)
+		if defaultDatacenterSettings.Modifier != nil {
+			defaultDatacenterSettings.Modifier(&defaultDst)
 		}
 		seeds["default"] = kubermaticv1.Seed{
 			Spec: kubermaticv1.SeedSpec{
@@ -97,10 +97,10 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 			merged := false
 			for _, pKey := range parentKeys {
 				canMerge := true
-				if setting.group != "" {
+				if setting.Group != "" {
 					for _, desc := range descriptions[pKey] {
 						for _, s := range settings {
-							if s.name == desc && s.group == setting.group {
+							if s.Name == desc && s.Group == setting.Group {
 								canMerge = false
 								break
 							}
@@ -113,31 +113,31 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 				if canMerge && len(descriptions[pKey]) < maxCombinedSettings {
 					seed := seeds[pKey]
 					dc := seed.Spec.Datacenters[pKey]
-					if setting.modifier != nil {
-						setting.modifier(&dc)
+					if setting.Modifier != nil {
+						setting.Modifier(&dc)
 					}
 					seed.Spec.Datacenters[pKey] = dc
 					seeds[pKey] = seed
-					descriptions[pKey] = append(descriptions[pKey], setting.name)
+					descriptions[pKey] = append(descriptions[pKey], setting.Name)
 					merged = true
 					break
 				}
 			}
 			if !merged {
-				newKey := groupLabel + "-" + setting.name
+				newKey := groupLabel + "-" + setting.Name
 				dst := kubermaticv1.Datacenter{}
-				if defaultDatacenterSettings.modifier != nil {
-					defaultDatacenterSettings.modifier(&dst)
+				if defaultDatacenterSettings.Modifier != nil {
+					defaultDatacenterSettings.Modifier(&dst)
 				}
-				if setting.modifier != nil {
-					setting.modifier(&dst)
+				if setting.Modifier != nil {
+					setting.Modifier(&dst)
 				}
 				seeds[newKey] = kubermaticv1.Seed{
 					Spec: kubermaticv1.SeedSpec{
 						Datacenters: map[string]kubermaticv1.Datacenter{newKey: dst},
 					},
 				}
-				descriptions[newKey] = []string{setting.name}
+				descriptions[newKey] = []string{setting.Name}
 				parentKeys = append(parentKeys, newKey)
 			}
 		}
@@ -178,7 +178,7 @@ type clusterResult struct {
 }
 
 type clusterJob struct {
-	combination    []clusterSpecModifier
+	combination    []k8cginkgo.ClusterSpecModifier
 	dcKey          string
 	seed           kubermaticv1.Seed
 	kubeVersion    *version.Version
@@ -195,7 +195,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		// Create a descriptive name from the combination.
 		var modifierNames []string
 		for _, modifier := range job.combination {
-			modifierNames = append(modifierNames, modifier.name)
+			modifierNames = append(modifierNames, modifier.Name)
 		}
 		clusterName := strings.Join(modifierNames, " & ")
 		if clusterName == "" {
@@ -203,20 +203,20 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		}
 
 		// Create and modify the base spec.
-		baseSpec := defaultClusterSettings.Spec.DeepCopy()
+		baseSpec := k8cginkgo.DefaultClusterSettings.Spec.DeepCopy()
 		for _, modifier := range job.combination {
-			modifier.modify(baseSpec)
+			modifier.Modify(baseSpec)
 		}
 
 		// Create a sanitized spec for deduplication, ignoring certain modifier groups.
-		sanitizedSpec := defaultClusterSettings.Spec.DeepCopy()
+		sanitizedSpec := k8cginkgo.DefaultClusterSettings.Spec.DeepCopy()
 		ignoredGroups := map[string]bool{
 			"update-window": true,
 			"oidc":          true,
 		}
 		for _, modifier := range job.combination {
-			if !ignoredGroups[modifier.group] {
-				modifier.modify(sanitizedSpec)
+			if !ignoredGroups[modifier.Group] {
+				modifier.Modify(sanitizedSpec)
 			}
 		}
 
@@ -281,7 +281,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 func buildNewClusters(
 	rootCtx context.Context,
 	versions []*version.Version,
-	clusterModifiers []clusterSpecModifier,
+	clusterModifiers []k8cginkgo.ClusterSpecModifier,
 	defaultSeedSettings map[string]kubermaticv1.Seed,
 	seed *kubermaticv1.Seed,
 	opts *k8cginkgo.Options,
@@ -308,16 +308,16 @@ func buildNewClusters(
 	}
 
 	// Separate modifiers into included and excluded
-	var included, excluded []clusterSpecModifier
+	var included, excluded []k8cginkgo.ClusterSpecModifier
 	for _, m := range clusterModifiers {
 		if len(includedDescSet) > 0 {
-			if _, ok := includedDescSet[m.name]; ok {
+			if _, ok := includedDescSet[m.Name]; ok {
 				included = append(included, m)
 			} else {
 				excluded = append(excluded, m)
 			}
 		} else {
-			if _, ok := descSet[m.name]; !ok {
+			if _, ok := descSet[m.Name]; !ok {
 				included = append(included, m)
 			} else {
 				excluded = append(excluded, m)
@@ -326,11 +326,11 @@ func buildNewClusters(
 	}
 
 	// Helper to group/combine a set of modifiers
-	combineModifiers := func(modifiers []clusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+	combineModifiers := func(modifiers []k8cginkgo.ClusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 		// Group modifiers by their group name.
-		groupedModifiers := make(map[string][]clusterSpecModifier)
+		groupedModifiers := make(map[string][]k8cginkgo.ClusterSpecModifier)
 		for _, m := range modifiers {
-			groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
+			groupedModifiers[m.Group] = append(groupedModifiers[m.Group], m)
 		}
 
 		var groupNames []string
@@ -351,12 +351,12 @@ func buildNewClusters(
 			return map[string]*kubermaticv1.ClusterSpec{}, map[string][]string{}
 		}
 		// Combine modifiers and descriptions by index
-		combinedModifiers := make([][]clusterSpecModifier, len(groupedModifiers[longestKey]))
+		combinedModifiers := make([][]k8cginkgo.ClusterSpecModifier, len(groupedModifiers[longestKey]))
 		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
 		for _, modifiers := range groupedModifiers {
 			for idx, modifier := range modifiers {
 				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
-				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.Name)
 			}
 		}
 
@@ -377,7 +377,7 @@ func buildNewClusters(
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
 					for dcKey := range defaultSeedSettings {
-						jobCombination := make([]clusterSpecModifier, len(mods))
+						jobCombination := make([]k8cginkgo.ClusterSpecModifier, len(mods))
 						copy(jobCombination, mods)
 						jobs <- clusterJob{
 							combination:    jobCombination,

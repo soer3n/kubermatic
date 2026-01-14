@@ -2,11 +2,14 @@ package kubevirt
 
 import (
 	"encoding/json"
+	"strconv"
 
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
+
+	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
@@ -158,73 +161,6 @@ var machineSettings = []machineSpecModifier{
 			spec.VirtualMachine.Template.Memory.Value = "8192Mi"
 		},
 	},
-	// {
-	// 	name:  "with primary disk storage class set to standard",
-	// 	group: "primary-disk-sc",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.VirtualMachine.Template.PrimaryDisk.StorageClassName.Value = "standard"
-	// 	},
-	// },
-	// {
-	// 	name:  "with primary disk storage class set to kubermatic-fast",
-	// 	group: "primary-disk-sc",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.VirtualMachine.Template.PrimaryDisk.StorageClassName.Value = "kubermatic-fast"
-	// 	},
-	// },
-	// {
-	// 	name:  "with secondary disk storage class set to standard",
-	// 	group: "secondary-disk-sc",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		if len(spec.VirtualMachine.Template.SecondaryDisks) == 0 {
-	// 			spec.VirtualMachine.Template.SecondaryDisks = append(spec.VirtualMachine.Template.SecondaryDisks, kubevirt.SecondaryDisks{
-	// 				Disk: kubevirt.Disk{Size: providerconfig.ConfigVarString{Value: "10Gi"}},
-	// 			})
-	// 		}
-	// 		spec.VirtualMachine.Template.SecondaryDisks[0].StorageClassName.Value = "standard"
-	// 	},
-	// },
-	// {
-	// 	name:  "with secondary disk storage class set to kubermatic-fast",
-	// 	group: "secondary-disk-sc",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		if len(spec.VirtualMachine.Template.SecondaryDisks) == 0 {
-	// 			spec.VirtualMachine.Template.SecondaryDisks = append(spec.VirtualMachine.Template.SecondaryDisks, kubevirt.SecondaryDisks{
-	// 				Disk: kubevirt.Disk{Size: providerconfig.ConfigVarString{Value: "10Gi"}},
-	// 			})
-	// 		}
-	// 		spec.VirtualMachine.Template.SecondaryDisks[0].StorageClassName.Value = "kubermatic-fast"
-	// 	},
-	// },
-	// {
-	// 	name:  "with node affinity for hostname node-01",
-	// 	group: "node-affinity",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.Affinity.NodeAffinityPreset.Key.Value = "kubernetes.io/hostname"
-	// 		spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "kkp-cluster-worker"}}
-	// 	},
-	// },
-	// {
-	// 	name:  "with node affinity preset key",
-	// 	group: "node-affinity-key",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.Affinity.NodeAffinityPreset.Key.Value = "kubernetes.io/hostname"
-	// 	},
-	// },
-	// {
-	// 	name:  "with node affinity preset values",
-	// 	group: "node-affinity-values",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.Affinity.NodeAffinityPreset.Values = []providerconfig.ConfigVarString{{Value: "kkp-cluster-worker"}}
-	// 	},
-	// },
-	{
-		name:  "with empty node affinity preset type",
-		group: "node-affinity-type",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.Affinity.NodeAffinityPreset.Type.Value = ""
-		},
-	},
 	{
 		name:  "with topology spread constraint on hostname",
 		group: "topology-spread",
@@ -311,7 +247,7 @@ func getDefaultKubevirtConfig() (*kubevirt.RawConfig, error) {
 	}, nil
 }
 
-func MachineSettings(ctx context.Context, client ctrlruntimeclient.Client, namespace string) []machineSpecModifier {
+func MachineSettings(ctx context.Context, client ctrlruntimeclient.Client, namespace string, resources *k8cginkgo.ResourceSettings) []machineSpecModifier {
 	discoverdSettings, err := discoverDefaultMachineSettings(ctx, client, namespace)
 	if err != nil {
 		panic(fmt.Errorf("failed to discover default machine settings: %w", err))
@@ -320,7 +256,94 @@ func MachineSettings(ctx context.Context, client ctrlruntimeclient.Client, names
 	for _, settings := range machineSettings {
 		generatedMachineSettings = append(generatedMachineSettings, settings)
 	}
+	if resources == nil {
+		return append(generatedMachineSettings, machineSpecModifier{
+			name:  "with custom cpu and memory",
+			group: "custom-resources",
+			modify: func(spec *kubevirt.RawConfig) {
+				// No-op, just a placeholder to indicate default resources.
+			},
+		})
+	}
+	if resources.Memory != nil {
+		for _, settings := range memoryModifiers(resources.Memory) {
+			generatedMachineSettings = append(generatedMachineSettings, settings)
+		}
+	}
+	if resources.Cpu == nil {
+		for _, settings := range cpuModifiers(resources.Cpu) {
+			generatedMachineSettings = append(generatedMachineSettings, settings)
+		}
+	}
+	if resources.DiskSize != nil {
+		for _, settings := range diskModifiers(resources.DiskSize) {
+			generatedMachineSettings = append(generatedMachineSettings, settings)
+		}
+	}
 	return generatedMachineSettings
+}
+
+func memoryModifiers(memories []string) []machineSpecModifier {
+	var mods []machineSpecModifier
+	for _, mem := range memories {
+		mods = append(mods, machineSpecModifier{
+			name:  fmt.Sprintf("with %s memory", mem),
+			group: "memory",
+			modify: func(spec *kubevirt.RawConfig) {
+				spec.VirtualMachine.Template.Memory.Value = mem
+			},
+		})
+	}
+	return mods
+}
+
+func cpuModifiers(cpus []int) []machineSpecModifier {
+	var mods []machineSpecModifier
+	for _, v := range cpus {
+		v := v // capture range variable
+		mods = append(mods, machineSpecModifier{
+			name:  fmt.Sprintf("with %d vCPUs", v),
+			group: "cpu",
+			modify: func(spec *kubevirt.RawConfig) {
+				spec.VirtualMachine.Template.VCPUs.Cores = v
+			},
+		})
+		mods = append(mods, machineSpecModifier{
+			name:  fmt.Sprintf("with %d CPUs", v),
+			group: "cpu",
+			modify: func(spec *kubevirt.RawConfig) {
+				spec.VirtualMachine.Template.CPUs.Value = strconv.Itoa(v)
+			},
+		})
+	}
+	return mods
+}
+
+func diskModifiers(sizes []string) []machineSpecModifier {
+	var mods []machineSpecModifier
+	for _, size := range sizes {
+		size := size // capture range variable
+		mods = append(mods, machineSpecModifier{
+			name:  fmt.Sprintf("with primary disk size %s", size),
+			group: "primary-disk-size",
+			modify: func(spec *kubevirt.RawConfig) {
+				spec.VirtualMachine.Template.PrimaryDisk.Size.Value = size
+			},
+		})
+		mods = append(mods, machineSpecModifier{
+			name:  fmt.Sprintf("with secondary disk size %s", size),
+			group: "secondary-disk-size",
+			modify: func(spec *kubevirt.RawConfig) {
+				if len(spec.VirtualMachine.Template.SecondaryDisks) == 0 {
+					spec.VirtualMachine.Template.SecondaryDisks = append(spec.VirtualMachine.Template.SecondaryDisks, kubevirt.SecondaryDisks{
+						Disk: kubevirt.Disk{},
+					})
+				}
+				spec.VirtualMachine.Template.SecondaryDisks[0].Size.Value = size
+			},
+		})
+	}
+	return mods
 }
 
 type DefaultMachineSettings struct {
