@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getVMwareCloudDirectorTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getVMwareCloudDirectorTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderVMwareCloudDirector)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getVDCSecretFields returns the secret credential fields for VMware Cloud Director provider
 func (fd *FormData) getVDCSecretFields() []SecretField {
 	return []SecretField{

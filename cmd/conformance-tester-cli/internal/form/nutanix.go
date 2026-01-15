@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getNutanixTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getNutanixTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderNutanix)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getNutanixSecretFields returns the secret credential fields for Nutanix provider
 func (fd *FormData) getNutanixSecretFields() []SecretField {
 	return []SecretField{

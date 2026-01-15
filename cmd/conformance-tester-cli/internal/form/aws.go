@@ -1,9 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
 // getAWSSecretFields returns the secret credential fields for AWS provider
 func (fd *FormData) getAWSSecretFields() []SecretField {
 	return []SecretField{
@@ -26,14 +22,4 @@ func (fd *FormData) getAWSSecretFields() []SecretField {
 			Required: true,
 		},
 	}
-}
-
-// getAWSTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getAWSTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderAWS)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
 }

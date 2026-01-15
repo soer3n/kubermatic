@@ -1,0 +1,295 @@
+/*
+                  Kubermatic Enterprise Read-Only License
+                         Version 1.0 ("KERO-1.0")
+                     Copyright © 2026 Kubermatic GmbH
+
+   1.	You may only view, read and display for studying purposes the source
+      code of the software licensed under this license, and, to the extent
+      explicitly provided under this license, the binary code.
+   2.	Any use of the software which exceeds the foregoing right, including,
+      without limitation, its execution, compilation, copying, modification
+      and distribution, is expressly prohibited.
+   3.	THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,
+      EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+      MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+      IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+      CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+      TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+      SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+   END OF TERMS AND CONDITIONS
+*/
+
+package ui
+
+import (
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"k8c.io/machine-controller/sdk/providerconfig"
+)
+
+// Message types for execution.
+type (
+	logMsg   struct{ line string }
+	errMsg   struct{ err error }
+	doneMsg  struct{ success bool }
+	startMsg struct{ ch <-chan tea.Msg }
+)
+
+// App stages.
+const (
+	stageWelcome = iota
+	stageEnvironmentSelection
+	stageReleaseSelection
+	stageProviderSelection
+	stageDistributionSelection
+	stageDatacenterSettingsSelection
+	stageClusterSettingsSelection
+	stageMachineDeploymentSettingsSelection
+	stageClusterSettings
+	stageReviewSettings
+	stageExecuting
+	stageDone
+)
+
+type EnvironmentLocal struct {
+	Selected                     bool
+	CurrentField                 int
+	KubermaticConfigurationsPath textinput.Model
+	HelmValuesPath               textinput.Model
+	MLAValuesPath                textinput.Model
+	Errors                       EnvironmentLocalErrors
+}
+
+type EnvironmentLocalErrors struct {
+	KubermaticConfigurationsPath string
+	HelmValuesPath               string
+	MLAValuesPath                string
+}
+
+type EnvironmentExisting struct {
+	Selected       bool
+	CurrentField   int
+	KubeconfigPath textinput.Model
+	SeedName       textinput.Model
+	PresetName     textinput.Model
+	ProjectName    textinput.Model
+	Errors         EnvironmentExistingErrors
+}
+
+type EnvironmentExistingErrors struct {
+	KubeconfigPath string
+	SeedName       string
+	PresetName     string
+	ProjectName    string
+}
+
+// Provider holds configuration for a single cloud provider.
+type Provider struct {
+	CloudProvider providerconfig.CloudProvider
+	DisplayName   string
+	Selected      bool
+	CurrentField  int
+	Credentials   interface{} // Will hold provider-specific credentials
+	Errors        ProviderErrors
+}
+
+type ProviderErrors struct {
+	Fields map[string]string // Dynamic field errors
+}
+
+// AWS credentials
+type AWSCredentials struct {
+	AccessKeyID          textinput.Model
+	SecretAccessKey      textinput.Model
+	AssumeRoleARN        textinput.Model
+	AssumeRoleExternalID textinput.Model
+}
+
+// Azure credentials
+type AzureCredentials struct {
+	TenantID       textinput.Model
+	SubscriptionID textinput.Model
+	ClientID       textinput.Model
+	ClientSecret   textinput.Model
+}
+
+// GCP credentials
+type GCPCredentials struct {
+	ServiceAccount textinput.Model // Path to service account JSON
+}
+
+// Alibaba credentials
+type AlibabaCredentials struct {
+	AccessKeyID     textinput.Model
+	AccessKeySecret textinput.Model
+}
+
+// Anexia credentials
+type AnexiaCredentials struct {
+	Token textinput.Model
+}
+
+// DigitalOcean credentials
+type DigitalOceanCredentials struct {
+	Token textinput.Model
+}
+
+// Hetzner credentials
+type HetznerCredentials struct {
+	Token textinput.Model
+}
+
+// KubeVirt credentials
+type KubeVirtCredentials struct {
+	Kubeconfig textinput.Model
+}
+
+// Nutanix credentials
+type NutanixCredentials struct {
+	Username    textinput.Model
+	Password    textinput.Model
+	ClusterName textinput.Model
+	ProxyURL    textinput.Model
+	CSIUsername textinput.Model
+	CSIPassword textinput.Model
+	CSIEndpoint textinput.Model
+}
+
+// OpenStack credentials
+type OpenStackCredentials struct {
+	Username                    textinput.Model
+	Password                    textinput.Model
+	Project                     textinput.Model
+	ProjectID                   textinput.Model
+	Domain                      textinput.Model
+	ApplicationCredentialID     textinput.Model
+	ApplicationCredentialSecret textinput.Model
+	Token                       textinput.Model
+}
+
+// vSphere credentials
+type VSphereCredentials struct {
+	Username textinput.Model
+	Password textinput.Model
+}
+
+// VMware Cloud Director credentials
+type VMwareCloudDirectorCredentials struct {
+	Username     textinput.Model
+	Password     textinput.Model
+	APIToken     textinput.Model
+	Organization textinput.Model
+	VDC          textinput.Model
+}
+
+// ReleaseSelection holds the state for Kubernetes release selection.
+type ReleaseSelection struct {
+	MajorVersions     []string            // e.g., ["1.31", "1.32"]
+	MinorVersions     map[string][]string // e.g., {"1.31": ["1.31.1", "1.31.2"]}
+	SelectedMajor     map[string]bool     // Tracks which major versions are selected (selects all minors)
+	SelectedMinor     map[string]bool     // Tracks which minor versions are selected
+	FocusedMajorIndex int                 // Currently focused major version
+	FocusedMinorIndex int                 // Currently focused minor version within major
+	IsMinorFocused    bool                // Whether focus is on a minor version or major version
+}
+
+// DistributionSelection holds the state for OS distribution selection.
+type DistributionSelection struct {
+	Distributions     []providerconfig.OperatingSystem          // Available distributions
+	DistributionNames map[providerconfig.OperatingSystem]string // Display names
+	Selected          map[providerconfig.OperatingSystem]bool   // Selected distributions
+	FocusedIndex      int                                       // Currently focused distribution
+}
+
+// PackageRepository holds configuration for the offline package repository.
+type PackageRepository struct {
+	Enabled bool
+	Address textinput.Model
+	Error   string
+}
+
+// NodeConfig holds info for a single node.
+type NodeConfig struct {
+	Address    string `json:"privateAddress"`
+	Username   string `json:"sshUsername"`
+	SSHKeyPath string `json:"sshPrivateKeyFile"`
+}
+
+type NetworkConfig struct {
+	CIDR         textinput.Model
+	DNSServer    textinput.Model
+	GatewayIP    textinput.Model
+	CurrentField int // Tracks current input field (0=CIDR, 1=DNS, 2=Gateway)
+	Errors       NetworkErrors
+}
+
+type OCIConfiguration struct {
+	Endpoint     textinput.Model
+	Insecure     bool
+	Username     textinput.Model
+	Password     textinput.Model
+	CurrentField int
+	Error        string
+}
+
+type NetworkErrors struct {
+	CIDR      string
+	DNSServer string
+	GatewayIP string
+}
+
+type MetalLB struct {
+	Enabled bool
+	Input   textinput.Model
+	Error   string
+}
+
+type Review struct {
+	ConfigYAML string
+	Viewport   viewport.Model
+}
+type NodeInputFields struct {
+	Address    textinput.Model
+	Username   textinput.Model
+	SSHKeyPath textinput.Model
+}
+
+type NodeCount struct {
+	NodeCountInput         textinput.Model
+	ControlPlaneCountInput textinput.Model
+	APIEndpointInput       textinput.Model
+	CurrentField           int // 0=NodeCount, 1=ControlPlaneCount, 2=APIEndpoint
+	Error                  string
+	Max                    int
+}
+
+type Nodes struct {
+	Configs      []NodeConfig
+	Inputs       []NodeInputFields
+	Current      int
+	CurrentField int
+}
+
+type execOutputMsg struct {
+	output  string
+	success bool
+}
+
+// Add tuiLogWriter type.
+type tuiLogWriter struct {
+	ch chan<- string
+}
+
+func (w *tuiLogWriter) Write(p []byte) (n int, err error) {
+	lines := strings.Split(string(p), "\n")
+	for _, line := range lines {
+		if line != "" {
+			w.ch <- line
+		}
+	}
+	return len(p), nil
+}

@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getAzureTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getAzureTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderAzure)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getAzureSecretFields returns the secret credential fields for Azure provider
 func (fd *FormData) getAzureSecretFields() []SecretField {
 	return []SecretField{

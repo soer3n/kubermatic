@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getAlibabaTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getAlibabaTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderAlibaba)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getAlibabaSecretFields returns the secret credential fields for Alibaba provider
 func (fd *FormData) getAlibabaSecretFields() []SecretField {
 	return []SecretField{

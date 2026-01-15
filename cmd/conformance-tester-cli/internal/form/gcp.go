@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getGCPTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getGCPTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderGoogle)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getGCPSecretFields returns the secret credential fields for GCP provider
 func (fd *FormData) getGCPSecretFields() []SecretField {
 	return []SecretField{

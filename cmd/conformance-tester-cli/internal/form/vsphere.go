@@ -1,19 +1,5 @@
 package form
 
-import (
-	"k8c.io/machine-controller/sdk/providerconfig"
-)
-
-// getVSphereTestSettings returns provider-specific test settings (placeholder for future use)
-func (fd *FormData) getVSphereTestSettings() []string {
-	testSettings := GetTestSettingsForProvider(providerconfig.CloudProviderVsphere)
-	var result []string
-	for _, ts := range testSettings {
-		result = append(result, ts.Description)
-	}
-	return result
-}
-
 // getVSphereSecretFields returns the secret credential fields for vSphere provider
 func (fd *FormData) getVSphereSecretFields() []SecretField {
 	return []SecretField{

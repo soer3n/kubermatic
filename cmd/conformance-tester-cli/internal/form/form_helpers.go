@@ -1,7 +1,6 @@
 package form
 
 import (
-	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
@@ -17,11 +16,6 @@ type SecretField struct {
 	Label    string
 	Value    *string
 	Required bool
-}
-
-// GetTestSettingsForProvider returns the available test settings for a provider
-func GetTestSettingsForProvider(provider providerconfig.CloudProvider) []ginkgoutils.TestSettings {
-	return ginkgoutils.GetSettingsForProvider(provider)
 }
 
 // getTestSettingsValue returns a pointer to the correct TestSettings field in FormData.

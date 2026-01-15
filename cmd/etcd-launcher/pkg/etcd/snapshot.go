@@ -41,7 +41,7 @@ func CreateSnapshot(ctx context.Context, log *zap.SugaredLogger, etcdConfig clie
 	snapv3 := snapshot.NewV3(log.Desugar())
 
 	if opt.Compression == "" {
-		if _, err := snapv3.Save(ctx, etcdConfig, opt.File); err != nil {
+		if err := snapv3.Save(ctx, etcdConfig, opt.File); err != nil {
 			return err
 		}
 	}
@@ -49,7 +49,7 @@ func CreateSnapshot(ctx context.Context, log *zap.SugaredLogger, etcdConfig clie
 	tmpFile := opt.File + ".tmp"
 	defer os.Remove(tmpFile)
 
-	if _, err := snapv3.Save(ctx, etcdConfig, tmpFile); err != nil {
+	if err := snapv3.Save(ctx, etcdConfig, tmpFile); err != nil {
 		return err
 	}
 
