@@ -89,14 +89,9 @@ var (
 func TestMain(m *testing.M) {
 	var err error
 
-	// client, _, err := k8cutils.GetClients()
-	// if err != nil {
-	// 	log.Fatalw("Failed to create clients", zap.Error(err))
-	// }
-
-	// // step 1
-	// versions := utils.GetReleaseVersions()
-	// log.Infof("Available Kubernetes versions: %v", versions)
+	// // // step 1
+	// // versions := utils.GetReleaseVersions()
+	// // log.Infof("Available Kubernetes versions: %v", versions)
 	// // step 2
 	// datacenters := GetDatacenterDescriptions()
 	// log.Infof("Available datacenter descriptions: %v", datacenters)

@@ -1,25 +1,68 @@
 package utils
 
 import (
+	"strings"
+
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 )
 
-func GetReleaseVersions() []string {
-	versions := []string{}
-	kkpConfig, err := k8cginkgo.LoadKubermaticConfiguration()
-	if err != nil {
-		return versions
-	}
-	for _, scenario := range kkpConfig.Spec.Versions.Versions {
-		versions = append(versions, scenario.String())
-	}
-	return versions
+var DefaultMachineResources = k8cginkgo.ResourceSettings{
+	Cpu:      []int{2},
+	Memory:   []string{"4Gi"},
+	DiskSize: []string{"20Gi"},
 }
 
-func GetClusterDescriptions() []string {
-	descriptions := []string{}
+func GetClusterDescriptions() map[string]k8cginkgo.Description {
+	groupedSettings := map[string]k8cginkgo.Description{}
+	groupedSettingsDesc := map[string][]string{}
 	for _, modifier := range k8cginkgo.ClusterSettings {
-		descriptions = append(descriptions, modifier.Name)
+		groupedSettingsDesc[modifier.Group] = append(groupedSettingsDesc[modifier.Group], modifier.Name)
 	}
-	return descriptions
+
+	for group, descs := range groupedSettingsDesc {
+		strippedDescs := stripPrefix(descs)
+		groupedSettings[group] = k8cginkgo.Description{
+			Name:    longestCommonPrefixTokens(descs, " "),
+			Options: strippedDescs,
+		}
+	}
+	return groupedSettings
+}
+
+func stripPrefix(strs []string) []string {
+	prefix := longestCommonPrefixTokens(strs, " ")
+	out := make([]string, 0, len(strs))
+
+	for _, s := range strs {
+		out = append(out, strings.TrimPrefix(s, prefix))
+	}
+	return out
+}
+
+func longestCommonPrefixTokens(strs []string, sep string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+
+	base := strings.Split(strs[0], sep)
+	maxTokens := len(base)
+
+	for _, s := range strs[1:] {
+		tokens := strings.Split(s, sep)
+
+		i := 0
+		for i < maxTokens && i < len(tokens) && tokens[i] == base[i] {
+			i++
+		}
+		maxTokens = i
+
+		if maxTokens == 0 {
+			return ""
+		}
+	}
+
+	prefix := strings.Join(base[:maxTokens], sep)
+
+	// preserve trailing separator if it existed
+	return prefix + sep
 }

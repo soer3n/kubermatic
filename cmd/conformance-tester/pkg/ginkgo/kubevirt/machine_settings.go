@@ -50,16 +50,16 @@ var machineSettings = []machineSpecModifier{
 			// This assumes some default image is set elsewhere.
 		},
 	},
-	{
-		name:  "with custom cpu and memory",
-		group: "resources",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Instancetype = nil
-			spec.VirtualMachine.Preference = nil
-			spec.VirtualMachine.Template.CPUs.Value = "4"
-			spec.VirtualMachine.Template.Memory.Value = "8Gi"
-		},
-	},
+	// {
+	// 	name:  "with custom cpu and memory",
+	// 	group: "custom-resources",
+	// 	modify: func(spec *kubevirt.RawConfig) {
+	// 		spec.VirtualMachine.Instancetype = nil
+	// 		spec.VirtualMachine.Preference = nil
+	// 		spec.VirtualMachine.Template.CPUs.Value = "4"
+	// 		spec.VirtualMachine.Template.Memory.Value = "8Gi"
+	// 	},
+	// },
 	{
 		name:  "with changed cluster name",
 		group: "cluster-name",
@@ -138,27 +138,6 @@ var machineSettings = []machineSpecModifier{
 		group: "multi-queue",
 		modify: func(spec *kubevirt.RawConfig) {
 			spec.VirtualMachine.EnableNetworkMultiQueue.Value = ptr.To(false)
-		},
-	},
-	{
-		name:  "with 4 CPUs",
-		group: "cpu",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Template.CPUs.Value = "4"
-		},
-	},
-	{
-		name:  "with 2 vCPUs",
-		group: "cpu",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Template.VCPUs.Cores = 2
-		},
-	},
-	{
-		name:  "with 8192Mi memory",
-		group: "memory",
-		modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Template.Memory.Value = "8192Mi"
 		},
 	},
 	{
@@ -270,7 +249,7 @@ func MachineSettings(ctx context.Context, client ctrlruntimeclient.Client, names
 			generatedMachineSettings = append(generatedMachineSettings, settings)
 		}
 	}
-	if resources.Cpu == nil {
+	if resources.Cpu != nil {
 		for _, settings := range cpuModifiers(resources.Cpu) {
 			generatedMachineSettings = append(generatedMachineSettings, settings)
 		}

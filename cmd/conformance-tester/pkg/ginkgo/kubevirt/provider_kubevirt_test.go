@@ -94,11 +94,14 @@ func getTableEntries() []TableEntry {
 
 	versionManager := version.NewFromConfiguration(kkpConfig)
 	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
-	if err != nil {
-		log.Fatalw("Failed to get versions for provider", zap.Error(err))
+	// if err != nil {
+	// 	log.Fatalw("Failed to get versions for provider", zap.Error(err))
+	// }
+	versions = []*version.Version{}
+	for _, v := range opts.Releases {
+		versionObj, _ := versionManager.GetVersion(v)
+		versions = append(versions, versionObj)
 	}
-	// v, _ := versionManager.GetVersion("1.34.1")
-	// versions = []*version.Version{v}
 	log.Info("generating clusters...")
 	newClusters, finalClusterDescriptions = buildNewClusters(rootCtx, versions, k8cginkgo.ClusterSettings, defaultSeedSettings, seed, opts, kkpConfig, log, versionManager, file, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)

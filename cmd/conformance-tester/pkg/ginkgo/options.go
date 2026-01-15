@@ -116,6 +116,11 @@ type Settings struct {
 	MachineDescriptions    []string `yaml:"machineDescriptions,omitempty"`
 }
 
+type Description struct {
+	Name    string   `yaml:"name,omitempty"`
+	Options []string `yaml:"options,omitempty"`
+}
+
 type ResourceSettings struct {
 	Cpu      []int    `yaml:"cpu,omitempty"`
 	Memory   []string `yaml:"memory,omitempty"`
@@ -151,14 +156,7 @@ func NewDefaultOptions() *Options {
 		UserClusterPollInterval:      5 * time.Second,
 		NamePrefix:                   "dev-conformance-tester",
 		Secrets: types.Secrets{
-			Kubevirt: types.KubevirtSecrets{
-				KKPDatacenter:  "kubevirt",
-				KubeconfigFile: "/home/soer3n/vscode/mybackup/kubermatic-work/kubermatic/local-kkp",
-			},
-			// Hetzner: types.HetznerSecrets{
-			// 	KKPDatacenter: "hetzner",
-			// 	Token:         "your-hetzner-api-token",
-			// },
+			Kubevirt: types.KubevirtSecrets{},
 		},
 		LogDirectory: "_logs",
 		ReportsRoot:  "_reports",
