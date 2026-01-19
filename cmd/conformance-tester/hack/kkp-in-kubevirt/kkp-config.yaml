@@ -1,0 +1,17 @@
+apiVersion: kubermatic.k8c.io/v1
+kind: KubermaticConfiguration
+metadata:
+    name: kubermatic
+    namespace: kubermatic
+spec:
+    auth:
+        clientID: kubermatic
+        issuerClientID: kubermaticIssuer
+        issuerClientSecret: xsRyElbxuvat7rhHnLPfcZAp7KKqcUvk
+        issuerCookieKey: 2ELjU0W1xsMayfgJtF01RhC3vEDco92h
+        serviceAccountKey: KyD740gmgVnAU4JNDiOxENOlcg4vS72r
+        skipTokenIssuerTLSVerify: true
+        tokenIssuer: http://conformance.kubermatic.io/dex
+    ingress:
+        className: nginx
+        domain: conformance.kubermatic.io

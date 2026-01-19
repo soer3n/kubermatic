@@ -1,0 +1,65 @@
+dex:
+    config:
+        enablePasswordDB: true
+        expiry:
+            idTokens: 24h
+            signingKeys: 6h
+        frontend:
+            dir: /srv/dex/web
+            issuer: dex
+            logoURL: theme/logo.svg
+            theme: light
+        issuer: http://conformance.kubermatic.io/dex
+        oauth2:
+            responseTypes:
+                - code
+                - token
+                - id_token
+            skipApprovalScreen: true
+        staticClients:
+            - RedirectURIs:
+                - http://conformance.kubermatic.io
+                - http://conformance.kubermatic.io/projects
+              id: kubermatic
+              name: Kubermatic
+              secret: VzFXO2TE6esUDOi4QEF0d0f3KBVoi4I1
+            - RedirectURIs:
+                - http://conformance.kubermatic.io/api/v1/kubeconfig
+                - http://conformance.kubermatic.io/api/v2/kubeconfig/secret
+                - http://conformance.kubermatic.io/api/v2/dashboard/login
+              id: kubermaticIssuer
+              name: Kubermatic OIDC Issuer
+              secret: D6Sg56oMw5fhPSbtqt2fkukGxK3XnB4X
+        staticPasswords:
+            - email: kubermatic@example.com
+              hash: $2a$10$zMJhg/3axbm/m0KmoVxJiO1eO5gtNrgKDysy5GafQFrXY93OE9LsK
+              userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+              username: admin
+        storage:
+            config:
+                inCluster: true
+            type: kubernetes
+    ingress:
+        annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-staging
+        className: nginx
+        enabled: true
+        hosts:
+            - host: conformance.kubermatic.io
+              paths:
+                - path: /dex
+                  pathType: ImplementationSpecific
+        tls: []
+# nginx:
+#     controller:
+#         extraArgs:
+#             update-status: "true"
+#         nodeSelector:
+#             kubernetes.io/hostname: kkp-cluster-control-plane
+#         replicaCount: 1
+#         tolerations:
+#             - effect: NoSchedule
+#               key: node-role.kubernetes.io/control-plane
+#               operator: Exists
+telemetry:
+    uuid: 6b846fdd-e7e0-46ae-a94c-8482198d2823

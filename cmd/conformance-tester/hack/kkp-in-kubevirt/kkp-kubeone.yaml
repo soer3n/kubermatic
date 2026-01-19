@@ -1,0 +1,60 @@
+---
+apiVersion: kubeone.k8c.io/v1beta2
+kind: KubeOneCluster
+name: kubev-kkp-vpc
+versions:
+  kubernetes: 1.33.0
+
+apiEndpoint:
+  host: '10.16.0.139'
+  port: 6443
+  alternativeNames:
+    - '10.16.0.139'
+    - '127.0.0.1'
+
+containerRuntime:
+  containerd: {}
+
+machineController:
+  deploy: true
+
+operatingSystemManager:
+  deploy: true
+
+features:
+  nodeLocalDNS:
+    deploy: false
+
+addons:
+  enable: false
+
+clusterNetwork:
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.224.0.0/12
+  kubeProxy:
+    skipInstallation: false
+    iptables: {}
+  cni:
+    cilium: {}
+
+cloudProvider:
+  kubevirt:
+    infraNamespace: conformance-tester
+    zoneAndRegionEnabled: false
+    loadBalancerEnabled: true
+  external: true
+
+controlPlane:
+  hosts:
+  - hostname: "conformance-tester-kkp-cp-pool-0"
+    sshUsername: kubeone
+    sshPort: 22
+    sshPrivateKeyFile: "~/.ssh/id_rsa"
+    privateAddress: "10.16.0.139"
+    publicAddress: "10.16.0.139"
+    taints: []
+    annotations:
+      cluster.x-k8s.io/cluster-namespace: kube-system
+    bastion: 127.0.0.1
+    bastionUser: bastion
+    bastionPort: 2222

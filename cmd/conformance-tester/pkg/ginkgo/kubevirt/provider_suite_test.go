@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/kubectl/pkg/util/slice"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -25,6 +26,7 @@ import (
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	kubermaticlog "k8c.io/kubermatic/v2/pkg/log"
 	kkpreconciling "k8c.io/kubermatic/v2/pkg/resources/reconciling"
@@ -89,20 +91,20 @@ var (
 func TestMain(m *testing.M) {
 	var err error
 
-	// // // step 1
-	// // versions := utils.GetReleaseVersions()
-	// // log.Infof("Available Kubernetes versions: %v", versions)
-	// // step 2
-	// datacenters := GetDatacenterDescriptions()
-	// log.Infof("Available datacenter descriptions: %v", datacenters)
-	// // step 3
-	// clusters := utils.GetClusterDescriptions()
-	// log.Infof("Available cluster descriptions: %v", clusters)
-	// // step 4
-	// machines := GetMachineDescriptions()
-	// log.Infof("Available machine descriptions: %v", machines)
-	// // step 5
-	// _ = k8cginkgo.ResourceSettings{}
+	// // step 1
+	// versions := utils.GetReleaseVersions()
+	// log.Infof("Available Kubernetes versions: %v", versions)
+	// step 2
+	datacenters := GetDatacenterDescriptions()
+	log.Infof("Available datacenter descriptions: %v", datacenters)
+	// step 3
+	clusters := utils.GetClusterDescriptions()
+	log.Infof("Available cluster descriptions: %v", clusters)
+	// step 4
+	machines := GetMachineDescriptions()
+	log.Infof("Available machine descriptions: %v", machines)
+	// step 5
+	_ = k8cginkgo.ResourceSettings{}
 
 	rootCtx = signals.SetupSignalHandler()
 	opts, err = k8cginkgo.NewOptionsFromYAML(log)
@@ -133,11 +135,15 @@ func TestMain(m *testing.M) {
 		legacytypes.SecurityContextTests,
 	}
 	// enable all tests
+	opts.Tests = []string{}
 	opts.EnableTests = []string{}
+	opts.ExcludeTests = []string{}
 	for _, test := range testSlice {
 		opts.EnableTests = append(opts.EnableTests, test)
+		opts.Tests = append(opts.Tests, test)
 	}
 	legacyOpts = k8cginkgo.MergeOptions(log, opts, legacyOpts, runtimeOpts)
+	legacyOpts.Providers = sets.Set[string]{"kubevirt": {}}
 	if err := legacyOpts.ParseFlags(log); err != nil {
 		log.Warnf("Invalid flags", zap.Error(err))
 	}

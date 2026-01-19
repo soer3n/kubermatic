@@ -1,0 +1,110 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ssh-authorized-keys
+  namespace: conformance-tester
+data:
+  authorized_keys: |
+    ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDSZgXCZBkA33B+pinjmwTYlYWwnii8WWX/V+zx2+Z/m+H903inWpbUxOOf4MmNCJXuftFohdQeTfmRmVT9ZMjQxs4RTcvgRlSIaKgaPF8ZIq3N8Ew0mZC8v5VT4IjMENA9h+OtdAXMI2UeGap7qa0YNTV8KQQUsQqXqouS8nkuHCblV/wNyAMB/PWIoVFA+yy+MSq2aZelaKW9TkF/B9GSYlXzBNilHBUF4Ew9kW5EOeXR1xD0Wgcc7E/H+lNqC0h3LG5m3flZKVLDXG511twZRr+cyogDURet7kTO878MyAdUfEQN7tsq382MoXwS74xtzDUip4l7nfHMbUM2N2QEEsStp8ReP2q79+s0i7TNT8mBkoiiYIHjAb0rRNPC78zfGFybR8Q5dUd67DxlR5EmmMPgP/1SotyfMj0MWF6R7ySDhvUQ8DyN8EwSmlHBQ0/BpKesNAn49Kd489Qm3ZJeYsUI+WrX/iQS2yx7J0r/Hc58oKbcA0aT/fIJRXsI9yUheCVQvkFRB78d0jt4YqUu16SPSWTm9mH1dExA6mD0AL+CwZRY+hiJ8avZfnc2Gu45o/bvsM6+hUTpfY4IdTjdKguz3qXJ3b6gNsOeyU5PKmN2TNFScUIzebh929Z91Y3dQg0wa0Ggc2xFLUPndHRKXmPWmprlr0hd8Sam+G6XjQ== soer3n@soer3n
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sshd-config
+  namespace: conformance-tester
+data:
+  sshd_config: |
+    Port 2222
+    Protocol 2
+
+    PermitRootLogin no
+    PasswordAuthentication no
+    PubkeyAuthentication yes
+
+    AllowAgentForwarding yes
+    AllowTcpForwarding yes
+    X11Forwarding no
+
+    UsePAM no
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ssh-bastion
+  namespace: conformance-tester
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ssh-bastion
+  template:
+    metadata:
+      labels:
+        app: ssh-bastion
+      # annotations:
+      #   ovn.kubernetes.io/logical_switch: kkp-management-bgp-advertise-net
+      #   ovn.kubernetes.io/ip_address: 192.168.50.20
+    spec:
+      initContainers:
+        - name: init-sshd-config
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /config/sshd
+              cp /input/sshd_config /config/sshd/sshd_config
+              chmod 600 /config/sshd/sshd_config
+          volumeMounts:
+            - name: sshd-config
+              mountPath: /input
+              readOnly: true
+            - name: config
+              mountPath: /config
+      containers:
+        - name: netshoot-iptables
+          image: nicolaka/netshoot
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              apk add --no-cache iptables
+              sleep infinity
+        - name: sshd
+          image: linuxserver/openssh-server:latest
+          ports:
+            - containerPort: 2222
+          env:
+            - name: PUID
+              value: "1000"
+            - name: PGID
+              value: "1000"
+            - name: USER_NAME
+              value: bastion
+            - name: PASSWORD_ACCESS
+              value: "false"
+            - name: SSHD_CONFIG_FILE
+              value: /config/sshd/sshd_config
+            - name: PUBLIC_KEY_FILE
+              value: /config/keys/authorized_keys
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: ssh-keys
+              mountPath: /config/keys
+              readOnly: true
+      volumes:
+        - name: config
+          emptyDir: {}
+        - name: sshd-config
+          configMap:
+            name: sshd-config
+        - name: ssh-keys
+          configMap:
+            name: ssh-authorized-keys

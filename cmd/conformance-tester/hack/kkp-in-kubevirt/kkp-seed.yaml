@@ -1,0 +1,177 @@
+# Copyright 2020 The Kubermatic Kubernetes Platform contributors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubeconfig-kubev-seed
+  namespace: kubermatic
+type: Opaque
+data:
+  kubeconfig: YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6Ci0gY2x1c3RlcjoKICAgIGNlcnRpZmljYXRlLWF1dGhvcml0eS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VSQ1ZFTkRRV1V5WjBGM1NVSkJaMGxKU0hsNWNUZFBWVkpXT0VsM1JGRlpTa3R2V2tsb2RtTk9RVkZGVEVKUlFYZEdWRVZVVFVKRlIwRXhWVVVLUVhoTlMyRXpWbWxhV0VwMVdsaFNiR042UVdWR2R6QjVUbFJGZVUxcVJYaFBSRlUxVFdwS1lVWjNNSHBPVkVWNVRWUnJlRTlVUVRCTmFrcGhUVUpWZUFwRmVrRlNRbWRPVmtKQlRWUkRiWFF4V1cxV2VXSnRWakJhV0UxM1oyZEZhVTFCTUVkRFUzRkhVMGxpTTBSUlJVSkJVVlZCUVRSSlFrUjNRWGRuWjBWTENrRnZTVUpCVVVScVJXSklZbkJVY1U1c1pIRk1ZalE0SzNkek4weHRTRnB2ZFM5TVVIbEpka0pFTTFoNE1sTm9kbEpETkU5aFUwcHZieXM0SzB4Mk1Ha0tWV3B3ZEU5NU9IcGlNbVF4YmxRclNtcGtRaXRRVTBWTlJsbHZaRUp5ZUVkcGJuUnFRelZVSzAxMVNDdDRhVzVNUVRRMmFFTnlVR1JpSzBKT2FHeEVaZ3B3UlROVE0xUkpUM2hZY0VrMGEzTlVZMlF6UlhCb2VHZEVTRVk1VEhWcWNuUm1NVVo0WXpKQ1RtWlRORkZwYmxWNlUycENlVzF6T1dReFVVNXJiM00yQ2xZcmVuUjJSQzlRY1M4M1RFOVVMMDFoVmxsTVQwZG5ObFpMYkdOSlZWWk9UM1JVVDBoVGFFcEVjbEZwVm1wWE5uWkhaRWxPY2xNMVZHeDFRVWhCVVdrS1dYTnVjRVJCYlZSVVZHVlVSMkZLWTNaeFFrOTZVMFV2YUZBMmNEWnBUVTk2TWpGcGNHOUdPRkp0VVRBNGJXTTRUa2hhUlZneVF6ZG1UWEZhVkZwcmF3bzJXWE5qVEdaSU0yMVpZWFJKTmpKUmJVazFObGxCT0ZCb1pXTjJRV2ROUWtGQlIycFhWRUpZVFVFMFIwRXhWV1JFZDBWQ0wzZFJSVUYzU1VOd1JFRlFDa0puVGxaSVVrMUNRV1k0UlVKVVFVUkJVVWd2VFVJd1IwRXhWV1JFWjFGWFFrSlRPRFJhVnpOdFFVdzFUVTVTVlc1VFFUQXdkWE40VjNGc2NGTlVRVllLUW1kT1ZraFNSVVZFYWtGTloyZHdjbVJYU214amJUVnNaRWRXZWsxQk1FZERVM0ZIVTBsaU0wUlJSVUpEZDFWQlFUUkpRa0ZSUVZSV1pHVXlaakUwUXdwaldrWnhVbnB3WmxoNFkyb3ZRMWhtWVZwaFlrMUxZVmgxYTFjelVEVnpOblZSV0VjeFJuUmpLMEZMVjBJd1oySkxWVWhxYzA1VFdDdFhSVGR4TWpkUUNtaHZTSGxuWjNST2RtazROR2hoVmpGMFJGTXpiMFkyY0ZSekwyMXpVbFpvY3pOeWRrWkdWemRHTlVwTWJrRXlRMkZ6YlZaMlRXTlFlR0pTVEV0RlNrOEtOMGhrWVUxVVRrUnBNV05zV1d0eFpVbEpRMk5sYnpWSk5UUkpiMVl4UldoamNFRjBaVTB3ZW1ORVFqaDNTMUJET1ZsMkx5OURaV3RCWkZrdmQzbzVSd3BaUWpWTFkxSTRhbEZVVEdKa1VtRkVNMFpqU1VWbk9XVnJiazVNZUZGT1dqUnllRzlVWWxRelVGUkVXRlZTU0VJeFkxSlhjakFyYlN0MWRHVmFUa2RpQ21KblFsZzRSRGhWWm10cFdHOTNSbTlUZURoclZuVlBUR0oyU214eVJ6ZzJOR0pCZFhrdlVqSnFhMkY1UVc4MVlVeGtabVZHV0d0UlF6Sm5OR2h6VDNJS1ZEWnBjWEZEY0U5aVprbFBDaTB0TFMwdFJVNUVJRU5GVWxSSlJrbERRVlJGTFMwdExTMEsKICAgIHNlcnZlcjogaHR0cHM6Ly8xOTIuMTY4LjIwMC4xNTI6NjQ0MwogIG5hbWU6IGt1YmV2LWtrcC12cGMKY29udGV4dHM6Ci0gY29udGV4dDoKICAgIGNsdXN0ZXI6IGt1YmV2LWtrcC12cGMKICAgIHVzZXI6IGt1YmVybmV0ZXMtYWRtaW4KICBuYW1lOiBrdWJlcm5ldGVzLWFkbWluQGt1YmV2LWtrcC12cGMKY3VycmVudC1jb250ZXh0OiBrdWJlcm5ldGVzLWFkbWluQGt1YmV2LWtrcC12cGMKa2luZDogQ29uZmlnCnByZWZlcmVuY2VzOiB7fQp1c2VyczoKLSBuYW1lOiBrdWJlcm5ldGVzLWFkbWluCiAgdXNlcjoKICAgIGNsaWVudC1jZXJ0aWZpY2F0ZS1kYXRhOiBMUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VSTFZFTkRRV2hIWjBGM1NVSkJaMGxKV25aQ09GSlhLMnRqTTJ0M1JGRlpTa3R2V2tsb2RtTk9RVkZGVEVKUlFYZEdWRVZVVFVKRlIwRXhWVVVLUVhoTlMyRXpWbWxhV0VwMVdsaFNiR042UVdWR2R6QjVUbFJGZVUxcVJYaFBSRlUxVFdwS1lVWjNNSGxPYWtWNVRXcEZlRTlVUVRCTmFsSmhUVVIzZUFwSWVrRmtRbWRPVmtKQmIxUkdiWFF4V1cxV2FGcEhNRFpaTW5neFl6TlNiR05wTVdoYVJ6RndZbTVOZUVkVVFWaENaMDVXUWtGTlZFVkhkREZaYlZaNUNtSnRWakJhV0UxMFdWZFNkR0ZYTkhkblowVnBUVUV3UjBOVGNVZFRTV0l6UkZGRlFrRlJWVUZCTkVsQ1JIZEJkMmRuUlV0QmIwbENRVkZETlVZeFJFd0tVbWh0VEVGT1RWVk1ZekJxUzB3M1ExZHdkM2xSTmxKaWVISlFaWGg2VHpONlQzZHVWVXBGWmsxNE5UWmlhRVZHVkRoVGIxbHNPWE5UUzNKYWQzZFBNZ3AwVVZKT2JqRjZUVGRVZWpBNFVtTnBZM1YyTmtOQ2EwMHljbUY1Y25GU1NqaFNOV1F3YWxOMVVWWTNTbm9yYWtZeWJqUmtXVlF5ZW5CV1lsWktVelEzQ21sd2NUaEJhbFEzVGxGRFZGcDVVRTlKZFdkUlNFNUxaMkpXYWpWNFZFbG9jRlkxYlhGQ1VtdHNSSFp2ZUZvdmNUZzJUSEZKVTNCTlIxWnZLMUJwY0RVS1pFSXpNR1Z5YW5SR1J6bDFlazF1Tm10WWNETjBUSGRhVUZsNFZFbDRVV2hRV2xoV1NtNVdkVzB6TlVGNFJURnBjbmQyVjNrM2JWRjZSMjFNUVZsNVdBcEpVWEppYms1T1EwbDViakZ0VFhsNE9WVkVlRTFRUzFoYWVXNXBiVVZUTjNaVWQwMUZWVzFTZG5ObmNFaDBXV1pKV1ZoNksyeExaMEp6U1ZoaFRHSXlDazFhTVRZNVFrWmlaamQ2ZFZKNWNDOUJaMDFDUVVGSGFsWnFRbFZOUVRSSFFURlZaRVIzUlVJdmQxRkZRWGRKUm05RVFWUkNaMDVXU0ZOVlJVUkVRVXNLUW1kbmNrSm5SVVpDVVdORVFXcEJUVUpuVGxaSVVrMUNRV1k0UlVGcVFVRk5RamhIUVRGVlpFbDNVVmxOUW1GQlJreDZhR3hpWlZsQmRtdDNNVVpUWkFwSlJGUlRObnBHWVhGWGJFcE5RVEJIUTFOeFIxTkpZak5FVVVWQ1EzZFZRVUUwU1VKQlVVTlJiRFpyTm05VWExbzFNbEZUTXpNeGNHVTBkMDU1TW5CWUNrOUVPRWhJV25KdlZVZE1PWEZuVEhFelprNXlVREJwYWpOV1J6QkNNbTFwYlhsRFEwaEJTRUp6UjJ0TVJFUXdjVmRWTWtKWFQwRXlRVVpYTkd3dlpVVUtlVmR6TkVJMlYzUklZVGN4V0ZGV2FYWjBUM0ZTT0hNMllUZGxTVEJSYzBKRFVTc3dOMjA0ZWtSRlJGbEdSMEZXZDJOWk5pOU9Za2Q2U21zdlVWa3pUZ3BaTW5GcmF6ZDVjM1J2WjFWM2VtRXdSekkxV25OS1prbDZObk53V210VWVHaElkRFJoVkU1SVYzQk9VSEp5UVdkU2VIYzJUbVJRY1RBMVdqQXZlRmxGQ2xSemJrdGhSR2RKTUdwMGVXRjRWazFoVVM5S01YRTFTMnhLT0c0cldUUllXRlI1ZGtnek16RjRhalJJYkV4Uk5FOVhUblExWVVWNVpUaFBaMGRtUjB3S1YyTXJlbVpFVjJ4cllVRnBOM1JaUlhOQ2RHbFFhWGhVTlhCdVlWTmpRVlZ3UVVrMFUwTTBUSGRDUjBGRFYyVkJjaXRuVTB4MmN5OTNjVmQ2Q2kwdExTMHRSVTVFSUVORlVsUkpSa2xEUVZSRkxTMHRMUzBLCiAgICBjbGllbnQta2V5LWRhdGE6IExTMHRMUzFDUlVkSlRpQlNVMEVnVUZKSlZrRlVSU0JMUlZrdExTMHRMUXBOU1VsRmNGRkpRa0ZCUzBOQlVVVkJkVkprVVhrd1dWcHBkMFJVUmtNelRrbDVhU3QzYkhGalRXdFBhMWM0WVhvemMyTjZkRGg2YzBveFExSkllazFsQ21WdE5GSkNWUzlGY1VkS1ptSkZhWEV5WTAxRWRISlZSVlJhT1dONlR6QTRPVkJGV0VsdVRISXJaMmRhUkU1eE1uTnhObXRUWmtWbFdHUkpNSEpyUm1VS2VXTXZiM2hrY0N0SVYwVTVjelpXVnpGVFZYVlBOSEZoZGtGSk1DdDZWVUZyTW1OcWVtbE1iMFZDZWxOdlJ6RlpLMk5WZVVsaFZtVmFjV2RWV2twUk53bzJUVmRtTm5aUGFUWnBSWEZVUW14aFVHbzBjV1ZZVVdRNVNIRTBOMUpTZG1KemVrb3JjRVkyWkRkVE9FZFVNazFWZVUxVlNWUXlWakZUV2pGaWNIUXJDbEZOVWs1WmNUaE1NWE4xTld0TmVIQnBkMGROYkhsRlN6STFlbFJSYVUxd09WcHFUWE5tVmtFNFZFUjViREpqY0RSd2FFVjFOekE0UkVKR1NtdGlOMGtLUzFJM1YwaDVSMFk0TDNCVGIwRmlRMFl5YVRJNWFrZGtaWFpSVWxjekt6ZzNhMk54Wm5kSlJFRlJRVUpCYjBsQ1FVWjBPVzVsT1UwNFJsWlphUzh6S3dwblpHTjFWR1JVZFZONVZrSmpSak0xVVROSlRXbzFSRGhHTkU0M1preERjV0ZTWkd4cWNqVk5Xbk0xUWtOcFFWSmlNM0ZEZG1wUmVrZEVVbmxaVFVobUNsSjJSbWQwZFc1T1YzSXpWMEZQVUhOMlRVSnZUMVZrWm1rek5HVTJVRVl4TWtzdmVrOUpSMDFrYVdnMWNEZEdSVTlxTjFSNVVqSm1Zbk56WlZsRFowa0tWa0ZsU1hoU1kyaENRWEp4TlVkYWRXaHlkVE00VVdKWGIyMXZiRTVVSzBoUWIzcHdPVEppVDBkRVV6SkdiVVpRYUZsQ00zcEpZVFF3UlZCVk16TnNOZ28wT0RGRGNHSnlRVFZTVTJ4QlFWZDZhRGc0TXpoa2NXOU5UaXR4VlUxS1RFTlRabXRHU1RnNFlUVlhXR3RVT0VkaFFWZ3lWVUpoVjBoa2RYQTBTMjFUQ25aU2IwUXZVVGxKZDJsSlZsSjBUR0pRYUZwbFkycGlNa2hYUTA1bldHUTNTRk16WlcxUlJFaENVREo1VDJkSFZYbFpVM2sxUTJvemEyZERjMms0VjFBS1EzWlVaMUZ0UlVObldVVkJlVXd4TDFJM2N6aHdkVXBtZGtGMU1XVTRTRTVWVUZKYU5GcEZUa2g1ZFhsQlZrcDNiR0UyYWtkTVpUUnNlVXREYlVOa1VncGhZVzFKWnpOdmEzWm1jRE00TkZGbE0wWkdNVzVYZW0xc1ZWSkdPR1pVV2pkcVVsQTBSWE14UzJ4cWFYZHBkbFJ2WXpaaGFpdDVZWEI1YkVNeU16TTNDblp3U1U4NWFtTkpaVGd6V1ZGeGMxbzBPRkJZYTFOdFpWcDNaVlJrVW5vdlRVZENMMVZxT1dwYWNIVlZTWFZUTDNoTFNuRmlSemhEWjFsRlFUZEJjaThLU1VkdloyZG1kMlZ0ZDI1V2JYZGhhV280TTIxWVVHNVlTVnBVYkZCQ1owVmxjMVZXU1ZaNU0wSlFaMmw1SzFoNVNWSjFWRXhRYkhOeFVYRk9iMVZMWWdveFptTlRNa3N6VDNjd2IwOVVZMWMwTmxoeWNXcG1UM2xaUVRkWk5teFNNek5HVEVSdE9GZHNNR2xTT0M5aVZYQkpSRFpPTVc4MVVVWnFiSGhXVUVGVUNrNXZOamhvZFdwNVpHUlpPVEp3YW5KNGIxaFVhVlV5TW1ka2JHWldPWFZ4WVc1VGVGTjJSVU5uV1VWQmRtdERhbEJxWm1RemQydFVNVTlUUVVJMlFVSUtWMHRYVGk5cVVEaGlUSFE0UWt4aEsybzBObkJqTUdKRmQzcEViemwzTTJ0dmFrVlZaV2NyYzJaUldFTTBLMEZ1V1RSWmN6UTFkMUF5WnpaUlFVTmhad295V25SdmVrNXdZWFJDZWpCS1ZGWnRZV0ZsYmxrMWNrdGFTREk1Y1UxME5XRm1LME5CUzJKa0syOUNORmswT1Vsb1ZUZGhiM1pFTHl0UlVEaEtTRmh6Q2tGcmVXbDJlUzl0Y0VwMk1WSlVSSEE0TlVrdlRGTTRRMmRaUlVGM05YaE9WakpvTjNKb2VtOXdRMVZtVUhONlpERlFlVmRLYjBSd2RIRjFNREpRYzNrS1dYbGxSMWhzU2l0WVdVUm9TRlZhWmxKUE5tTktaelZDTjFWcFVXNUpOR1J3VGtOUVluSXJRemxNV1daaGJsbHllV3h0VW01aVpsTklLMkpPTDJ0MWJnb3hVVGxHYVZsaVpUVXljRlJ3ZEVWR01YWklaME15YkN0c2VIaGtabW94UTFCMGJFWkNVM2g0UjJoU1JYbERORzlZYVcxNlducHlaWFl6WTB4dGVubDNDbGR0TmtGTGNFVkRaMWxGUVdrcmRDOU9XVTEwU0ZsSFZuYzBlRGx6VnpjMk9YbzFTM1o2YzJvemQyWTROM2t4Y1VjMlJtdERaVmxoVGxsTVJsRlViVEVLUm1sUE9HOXpNRTVFYnpkTE1XOVpWRXhzVlZGc1MzVlBkVkZ6VmtwbGFVaFFaV2RuVEVSNVVWSkZUVlZtTlVoUFdVTXpZbEZNVEhkb1NXVkZZMDlyYlFwT2JrMVhSVlJFY0RKWk9XWlpUMUJpYTNsS1pWWlVWRlJXYlZWdVZsWlpiWHB2WW1jd1UyRnJXRTE0YUhGaVNXZDFaRE50VmpGUlBRb3RMUzB0TFVWT1JDQlNVMEVnVUZKSlZrRlVSU0JMUlZrdExTMHRMUW89Cg==
+
+---
+apiVersion: kubermatic.k8c.io/v1
+kind: Seed
+metadata:
+  name: kubermatic
+  namespace: kubermatic
+spec:
+  # these two fields are only informational
+  country: DE
+  location: Schwerin
+
+  # List of datacenters where this seed cluster is allowed to create clusters in
+  # In this example, user cluster will be deployed in eu-central-1 on AWS.
+  datacenters:
+    kubeadm:
+      location: local
+      country: DE
+      spec:
+        bringyourown: {}
+
+    kubevirt:
+      country: DE
+      location: home
+      spec:
+        kubevirt:
+          dnsConfig:
+            nameservers:
+            - 192.168.4.244
+          enableDedicatedCpus: true
+          enableDefaultNetworkPolicies: true
+          images:
+            http:
+              operatingSystems:
+                ubuntu:
+                  "24.04": http://nginx-fileserver.default.svc.cluster.local/noble-server-cloudimg-amd64.img
+          infraStorageClasses:
+          - isDefaultClass: true
+            name: longhorn
+          namespacedMode:
+            enabled: true
+            name: kubermatic
+          providerNetwork:
+            name: kube-ovn
+            networkPolicyEnabled: true
+            vpcs:
+            - name: kkp-vpc-tenant-1
+              subnets:
+              - name: kkp-vpc-tenant-1-net-1
+              - name: kkp-vpc-tenant-1-net-2
+            - name: kkp-vpc-tenant-2
+              subnets:
+              - name: kkp-vpc-tenant-2-net-1
+              - name: kkp-vpc-tenant-2-net-2
+
+  # DefaultComponentSettings are default values to set for newly created clusters.
+  defaultComponentSettings:
+    apiserver:
+      endpointReconcilingDisabled: false
+      nodePortRange: "30000-32767"
+      resources: null
+      tolerations: []
+    controllerManager:
+      leaderElection: {}
+      resources: null
+    etcd:
+      clusterSize: 3
+      diskSize: 5Gi
+      resources: null
+      # storageClass: ""
+    prometheus:
+      resources: {}
+    scheduler:
+      leaderElection: {}
+      resources: null
+    nodePortProxyEnvoy:
+      resources: null
+    konnectivityProxy:
+      resources: null
+
+  exposeStrategy: Tunneling
+  etcdBackupRestore:
+    destinations:
+      minio:
+        bucketName: kubermatic-etcd-backups
+        credentials:
+          name: backup-s3
+          namespace: kube-system
+        endpoint: http://minio.minio.svc.cluster.local:9000
+    defaultDestination: minio
+
+  metering:
+    enabled: false
+    # StorageClassName is the name of the storage class that the metering tool uses to save processed files before
+    # exporting it to s3 bucket. Default value is kubermatic-fast.
+    storageClassName: kubermatic-fast
+    # StorageSize is the size of the storage class. Default value is 100Gi.
+    storageSize: 10Gi
+  # Optional: MLA allows configuring seed level MLA (Monitoring, Logging & Alerting) stack settings.
+  mla:
+    userClusterMLAEnabled: false
+  # NodeportProxy can be used to configure the NodePort proxy service that is
+  # responsible for making user-cluster control planes accessible from the outside.
+  nodeportProxy:
+    annotations:
+      metallb.io/address-pool: vpc-kkp-seed-nodeport-proxy
+      metallb.io/ip-allocated-from-pool: vpc-kkp-seed-nodeport-proxy
+    #  external-dns.alpha.kubernetes.io/hostname: "*.kubermatic.cloud.soer3n.dev"
+    disable: false
+    # Envoy configures the Envoy application itself.
+    #envoy:
+    #  dockerRepository: docker.io/envoyproxy/envoy-alpine
+    #  resources:
+    #    limits:
+    #      cpu: 200m
+    #      memory: 64Mi
+    #    requests:
+    #      cpu: 50m
+    #      memory: 32Mi
+    # EnvoyManager configures the Kubermatic-internal Envoy manager.
+    #envoyManager:
+    #  dockerRepository: quay.io/kubermatic/nodeport-proxy
+    #  resources:
+    #    limits:
+    #      cpu: 150m
+    #      memory: 48Mi
+    #    requests:
+    #      cpu: 50m
+    #      memory: 32Mi
+    # Updater configures the component responsible for updating the LoadBalancer
+    # service.
+    #updater:
+    #  dockerRepository: quay.io/kubermatic/nodeport-proxy
+    #  resources:
+    #    limits:
+    #      cpu: 150m
+    #      memory: 32Mi
+    #    requests:
+    #      cpu: 50m
+    #      memory: 32Mi
+  # Optional: ProxySettings can be used to configure HTTP proxy settings on the
+  # worker nodes in user clusters. However, proxy settings on nodes take precedence.
+  proxySettings:
+    # Optional: If set, this proxy will be configured for both HTTP and HTTPS.
+    httpProxy: ""
+    # Optional: If set this will be set as NO_PROXY environment variable on the node;
+    # The value must be a comma-separated list of domains for which no proxy
+    # should be used, e.g. "*.example.com,internal.dev".
+    # Note that the in-cluster apiserver URL will be automatically prepended
+    # to this value.
+    noProxy: ""
+  # reference to the kubeconfig to use when connecting to this seed cluster
+  kubeconfig:
+    name: kubeconfig-kubev-seed
+    namespace: kubermatic

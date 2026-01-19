@@ -94,9 +94,6 @@ func getTableEntries() []TableEntry {
 
 	versionManager := version.NewFromConfiguration(kkpConfig)
 	versions, err := versionManager.GetVersionsForProvider(kubermaticv1.KubevirtCloudProvider)
-	// if err != nil {
-	// 	log.Fatalw("Failed to get versions for provider", zap.Error(err))
-	// }
 	versions = []*version.Version{}
 	for _, v := range opts.Releases {
 		versionObj, _ := versionManager.GetVersion(v)
@@ -149,11 +146,6 @@ func getTableEntries() []TableEntry {
 					newEntries = append(newEntries, entry)
 					continue
 				}
-
-				// if slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) && strings.Contains(title, "with match subnet and storage location enabled") && strings.Contains(title, "with user ssh key agent enabled") {
-				// 	log.Infof("Skipping scenario %q due to known issue with match subnet and user ssh key agent", title)
-				// 	_ = Entry(title, title, clusterName, clusterSpec, &machine, scenario, Label("skip"))
-				// }
 
 				exclude := false
 				if len(opts.Included.DatacenterDescriptions) > 0 {
@@ -241,22 +233,22 @@ var _ = Describe("Scenario", func() {
 		})
 
 		By(fmt.Sprintf("Machine setup done %q", clusterName))
-		By(fmt.Sprintf("Running smoke tests %q", clusterName), func() {
+		By(fmt.Sprintf("Running smoke tests %q (enabled: %v) (%v)", clusterName, legacyOpts.EnableTests, opts.EnableTests), func() {
 			n := 0
 			ExpectWithOffset(3, tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
 				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
-			}, userClusterClient, n+1), nil)
+			}, userClusterClient, n+1)).To(BeNil())
 			n = 0
 			ExpectWithOffset(3, tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
 				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
-			}, userClusterClient, n+1), nil)
-			ExpectWithOffset(3, tests.TestUserClusterMetrics(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
-			ExpectWithOffset(3, tests.TestUserclusterControllerRBAC(rootCtx, log, legacyOpts, cluster, userClusterClient, runtimeOpts.SeedClusterClient), nil)
-			ExpectWithOffset(3, tests.TestUserClusterNoK8sGcrImages(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
+			}, userClusterClient, n+1)).To(BeNil())
+			ExpectWithOffset(3, tests.TestUserClusterMetrics(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
+			ExpectWithOffset(3, tests.TestUserclusterControllerRBAC(rootCtx, log, legacyOpts, cluster, userClusterClient, runtimeOpts.SeedClusterClient)).To(BeNil())
+			ExpectWithOffset(3, tests.TestUserClusterNoK8sGcrImages(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
 			ExpectWithOffset(3, tests.TestUserClusterPodAndNodeMetrics(rootCtx, log, legacyOpts, cluster, map[string]string{
 				k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", clusterName),
-			}, userClusterClient), nil)
-			ExpectWithOffset(3, tests.TestUserClusterSeccompProfiles(rootCtx, log, legacyOpts, cluster, userClusterClient), nil)
+			}, userClusterClient)).To(BeNil())
+			ExpectWithOffset(3, tests.TestUserClusterSeccompProfiles(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
 		})
 		By(fmt.Sprintf("Smoke tests done %q", clusterName))
 		time.Sleep(500 * time.Millisecond)

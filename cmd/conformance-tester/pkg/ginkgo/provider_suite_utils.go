@@ -224,7 +224,7 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 			}
 
 			return false
-		}, legacyOpts.NodeReadyTimeout, 5*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
+		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
 	})
 	By(KKP("Wait for Pods inside usercluster to be ready"), func() {
 		Eventually(func() bool {
@@ -246,7 +246,7 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 			}
 
 			return false
-		}, legacyOpts.NodeReadyTimeout, legacyOpts.UserClusterPollInterval).Should(BeTrue(), "not all pods became ready within the timeout")
+		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "not all pods became ready within the timeout")
 	})
 	By(KKP("Wait for addons"), func() {
 		Eventually(func() bool {
