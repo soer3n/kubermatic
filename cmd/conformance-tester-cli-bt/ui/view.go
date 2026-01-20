@@ -116,13 +116,11 @@ var (
 
 // Fixed dimensions for consistent UI layout.
 const (
-	uiWidth        = 120 // Main content width
-	uiInnerWidth   = uiWidth - 8
 	uiBoxHeightPad = 2 // Adjustment for top/bottom borders in boxStyle
 )
 
 // renderQuitConfirm draws the quit confirmation dialog.
-func (m Model) renderQuitConfirm() string {
+func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 	const boxHeight = 15
 
 	// Dynamic content based on stage
@@ -184,7 +182,7 @@ func (m Model) renderQuitConfirm() string {
 }
 
 // renderWelcome displays the initial welcome screen.
-func (m Model) renderWelcome(helpWithBorder string) string {
+func (m Model) renderWelcome(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 15
 	title := styleHeader.Render(welcomeTitleText)
 	disclaimer := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(welcomeDisclaimerText)
@@ -201,7 +199,7 @@ func (m Model) renderWelcome(helpWithBorder string) string {
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderEnvironmentSelection(helpWithBorder string) string {
+func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 20
 	title := styleHeader.Render("Select Deployment Environment")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(environmentSelectionText)
@@ -303,7 +301,7 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string) string {
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderReleaseSelection(helpWithBorder string) string {
+func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 30
 	title := styleHeader.Render("Select Kubernetes Release")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(releaseSelectionText)
@@ -371,7 +369,7 @@ func (m Model) renderReleaseSelection(helpWithBorder string) string {
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderProviderSelection(helpWithBorder string) string {
+func (m Model) renderProviderSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 15
 	title := styleHeader.Render("Select Infrastructure Provider")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(providerSelectionText)
@@ -398,7 +396,7 @@ func (m Model) renderProviderSelection(helpWithBorder string) string {
 
 		// If provider is selected, show credential fields
 		if provider.Selected {
-			b.WriteString(m.renderProviderCredentials(provider, i) + "\n")
+			b.WriteString(m.renderProviderCredentials(provider, i, uiWidth) + "\n")
 		}
 	}
 
@@ -410,7 +408,7 @@ func (m Model) renderProviderSelection(helpWithBorder string) string {
 }
 
 // renderProviderCredentials renders the credential fields for a specific provider.
-func (m Model) renderProviderCredentials(provider Provider, providerIndex int) string {
+func (m Model) renderProviderCredentials(provider Provider, providerIndex int, uiWidth int) string {
 	var b strings.Builder
 	b.WriteString("\n")
 
@@ -491,7 +489,7 @@ func (m Model) renderProviderCredentials(provider Provider, providerIndex int) s
 	return b.String()
 }
 
-func (m Model) renderDistributionSelection(helpWithBorder string) string {
+func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 20
 	title := styleHeader.Render("Select Operating System Distributions")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(distributionSelectionText)
@@ -500,28 +498,90 @@ func (m Model) renderDistributionSelection(helpWithBorder string) string {
 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
 	b.WriteString(description + "\n\n")
 
-	// Render distribution checkboxes
-	for i, distribution := range m.distributionSelection.Distributions {
-		checkbox := "[ ]"
-		if m.distributionSelection.Selected[distribution] {
-			checkbox = "[x]"
+	// Check if no distributions are available
+	hasDistributions := false
+	for _, provider := range m.distributionSelection.Providers {
+		if len(m.distributionSelection.DistributionsByProvider[provider]) > 0 {
+			hasDistributions = true
+			break
 		}
+	}
 
-		displayName := m.distributionSelection.DistributionNames[distribution]
-		distOption := fmt.Sprintf("%s %s",
-			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-			displayName)
-
-		// Highlight if focused
-		if i == m.distributionSelection.FocusedIndex {
-			distOption = styleFocusHighlight.Render(distOption)
-		} else if m.distributionSelection.Selected[distribution] {
-			distOption = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(distOption)
+	if !hasDistributions {
+		var providersStr string
+		if len(m.distributionSelection.Providers) == 1 {
+			providersStr = m.distributionSelection.Providers[0]
 		} else {
-			distOption = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(distOption)
+			providersStr = strings.Join(m.distributionSelection.Providers, ", ")
+		}
+		noDistMsg := fmt.Sprintf("No distributions available for %s.", providersStr)
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(noDistMsg))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Press Enter to continue"))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
+
+	// Render hierarchical structure: Provider → Distributions
+	currentIndex := 0
+	for providerIdx, provider := range m.distributionSelection.Providers {
+		isProviderExpanded := m.distributionSelection.ExpandedProviders[provider]
+		isProviderFocused := currentIndex == m.distributionSelection.FocusedIndex
+
+		// Provider header with expand/collapse indicator
+		expandIndicator := "▶"
+		if isProviderExpanded {
+			expandIndicator = "▼"
 		}
 
-		b.WriteString(distOption + "\n")
+		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
+		if len(m.distributionSelection.Providers) > 1 {
+			if isProviderFocused {
+				providerHeader = styleFocusHighlight.Render(providerHeader)
+			} else {
+				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
+			}
+			b.WriteString(providerHeader + "\n")
+		}
+		currentIndex++
+
+		// Render distributions for this provider if expanded
+		if isProviderExpanded {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			for _, dist := range dists {
+				isDistFocused := currentIndex == m.distributionSelection.FocusedIndex
+				selectionKey := fmt.Sprintf("%s:%s", provider, dist)
+				isSelected := m.distributionSelection.Selected[selectionKey]
+
+				checkbox := "[ ]"
+				if isSelected {
+					checkbox = "[x]"
+				}
+
+				displayName := m.distributionSelection.DistributionNames[dist]
+				distLine := fmt.Sprintf("  %s %s",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+					displayName)
+
+				if isDistFocused {
+					distLine = styleFocusHighlight.Render(distLine)
+				} else if isSelected {
+					distLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(distLine)
+				} else {
+					distLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(distLine)
+				}
+
+				b.WriteString(distLine + "\n")
+				currentIndex++
+			}
+		}
+
+		// Add spacing between provider sections
+		if providerIdx < len(m.distributionSelection.Providers)-1 {
+			b.WriteString("\n")
+		}
 	}
 
 	// pad content to ensure help bar is at the bottom
@@ -530,401 +590,366 @@ func (m Model) renderDistributionSelection(helpWithBorder string) string {
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-// // renderNetworkConfig displays fields for network configuration.
-// func (m Model) renderNetworkConfig(helpWithBorder string) string {
-// 	const boxHeight = 22 // Increased height slightly for better spacing
-// 	title := styleHeader.Render("Network configuration for Kubermatic virtualization stack")
-// 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(networkConfigDescription)
+// renderDatacenterSettingsSelection renders the datacenter settings selection stage.
+func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+	const boxHeight = 20
 
-// 	// Build the main content with extra spacing
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n") // Extra line after title
-// 	b.WriteString(description + "\n\n")                                               // Extra line after description
+	// Build title based on number of providers
+	var title string
+	if len(m.datacenterSettingsSelection.Providers) == 1 {
+		title = styleHeader.Render(fmt.Sprintf("%s Datacenter Settings Selection", m.datacenterSettingsSelection.Providers[0]))
+	} else {
+		title = styleHeader.Render("Datacenter Settings Selection")
+	}
 
-// 	// Add form fields with consistent alignment and spacing
-// 	fields := []struct {
-// 		Label string
-// 		Input textinput.Model
-// 		Error string
-// 	}{
-// 		{"Network (CIDR):", m.Network.CIDR, m.Network.Errors.CIDR},
-// 		{"DNS Server:", m.Network.DNSServer, m.Network.Errors.DNSServer},
-// 		{"Gateway IP:", m.Network.GatewayIP, m.Network.Errors.GatewayIP},
-// 	}
+	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Select datacenter settings to test. Selecting none will use default values (typically false) for all settings.")
 
-// 	for _, field := range fields {
-// 		inputLine := lipgloss.JoinHorizontal(
-// 			lipgloss.Center,
-// 			styleLabel.Render(field.Label),
-// 			" ", // Space between label and input
-// 			styleInput.Render(field.Input.View()),
-// 		)
-// 		b.WriteString(inputLine + "\n")
-// 		// Add error message or blank line for spacing
-// 		if field.Error != "" {
-// 			b.WriteString(" " + styleError.Width(uiWidth-4).Render(field.Error) + "\n\n") // Extra line after error
-// 		} else {
-// 			b.WriteString("\n") // Blank line if no error
-// 		}
-// 	}
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
+	b.WriteString(description + "\n\n")
 
-// 	// Pad content to ensure help bar is at the bottom
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+	// Check if no settings are available
+	hasSettings := false
+	for _, provider := range m.datacenterSettingsSelection.Providers {
+		if len(m.datacenterSettingsSelection.SettingsByProvider[provider]) > 0 {
+			hasSettings = true
+			break
+		}
+	}
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+	if !hasSettings {
+		var providersStr string
+		if len(m.datacenterSettingsSelection.Providers) == 1 {
+			providersStr = m.datacenterSettingsSelection.Providers[0]
+		} else {
+			providersStr = strings.Join(m.datacenterSettingsSelection.Providers, ", ")
+		}
+		noSettingsMsg := fmt.Sprintf("No datacenter settings available for %s.", providersStr)
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(noSettingsMsg))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Press Enter to continue"))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
 
-// // renderMetalLB displays the MetalLB configuration toggle and input.
-// func (m Model) renderMetalLB(helpWithBorder string) string {
-// 	const boxHeight = 22 // Increased height for better spacing
-// 	title := styleHeader.Render("LoadBalancer service for Kubermatic virtualization")
-// 	disclaimerLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Bold(true).Render("Disclaimer:")
-// 	disclaimerText := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(metalLBDisclaimerText)
-// 	checkboxState := "[ ]"
-// 	if m.MetalLB.Enabled {
-// 		checkboxState = "[x]"
-// 	}
-// 	checkbox := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkboxState)
-// 	toggleLabel := "Enable LoadBalancer service (MetalLB)"
-// 	rangeLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Width(uiWidth - 20).Align(lipgloss.Left).Render("Define the LoadBalancer IP range:")
+	// Render hierarchical structure: Provider → Group → Options
+	currentIndex := 0
+	for providerIdx, provider := range m.datacenterSettingsSelection.Providers {
+		isProviderExpanded := m.datacenterSettingsSelection.ExpandedProviders[provider]
+		isProviderFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
 
-// 	// Build the main content with extra spacing
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n") // Extra line after title
-// 	b.WriteString(disclaimerLabel + " " + disclaimerText + "\n\n")                    // Extra line after disclaimer
+		// Provider header with expand/collapse indicator
+		expandIndicator := "▶"
+		if isProviderExpanded {
+			expandIndicator = "▼"
+		}
 
-// 	b.WriteString(fmt.Sprintf("%s %s\n\n", checkbox, toggleLabel)) // Extra line after toggle
+		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
+		if len(m.datacenterSettingsSelection.Providers) > 1 {
+			if isProviderFocused {
+				providerHeader = styleFocusHighlight.Render(providerHeader)
+			} else {
+				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
+			}
+			b.WriteString(providerHeader + "\n")
+		}
+		currentIndex++
 
-// 	// Conditionally render input and error if enabled
-// 	if m.MetalLB.Enabled {
-// 		b.WriteString(rangeLabel + "\n")
-// 		b.WriteString(styleInput.Render(m.MetalLB.Input.View()) + "\n")
-// 		if m.MetalLB.Error != "" {
-// 			b.WriteString("\n" + styleError.Width(uiWidth).Render(m.MetalLB.Error) + "\n\n") // Extra lines around error
-// 		} else {
-// 			b.WriteString("\n\n") // Extra blank lines if no error
-// 		}
-// 	} else {
-// 		// Reserve space for input and potential error when disabled, with spacing
-// 		b.WriteString("\n\n")
-// 	}
+		// Render setting groups for this provider if expanded
+		if isProviderExpanded {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				isGroupFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				isGroupSelected := m.datacenterSettingsSelection.SelectedGroups[groupKey]
 
-// 	// Pad content to ensure help bar is at the bottom
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+				// Setting group with checkbox
+				checkbox := "[ ]"
+				if isGroupSelected {
+					checkbox = "[✓]"
+				}
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+				groupHeader := fmt.Sprintf("  %s %s",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+					group.Name)
+				if isGroupFocused {
+					groupHeader = styleFocusHighlight.Render(groupHeader)
+				} else if isGroupSelected {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
+				} else {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+				}
+				b.WriteString(groupHeader + "\n")
+				currentIndex++
 
-// // renderContainerRegistry displays the container registry configuration for offline installations.
-// func (m Model) renderContainerRegistry(helpWithBorder string) string {
-// 	const boxHeight = 22
+				// Render options for this group (always shown)
+				for optionIdx, option := range group.Options {
+					isOptionFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					isSelected := m.datacenterSettingsSelection.Selected[selectionKey]
 
-// 	title := styleHeader.Render("Container Registry Configuration")
-// 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(containerRegistryText)
+					checkbox := "[ ]"
+					if isSelected {
+						checkbox = "[✓]"
+					}
 
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
-// 	b.WriteString(description + "\n\n")
+					optionLine := fmt.Sprintf("    %s %s",
+						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+						option)
 
-// 	// Only show the form in offline mode
-// 	if m.offline {
-// 		fields := []struct {
-// 			Label string
-// 			Input textinput.Model
-// 		}{
-// 			{"Registry endpoint:", m.ContainerRegistry.Endpoint},
-// 			{"Username (optional):", m.ContainerRegistry.Username},
-// 			{"Password (optional):", m.ContainerRegistry.Password},
-// 		}
+					if isOptionFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if isSelected {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
 
-// 		for _, field := range fields {
-// 			line := lipgloss.JoinHorizontal(
-// 				lipgloss.Center,
-// 				styleLabel.Render(field.Label),
-// 				" ",
-// 				styleInput.Render(field.Input.View()),
-// 			)
-// 			b.WriteString(line + "\n\n")
-// 		}
+					b.WriteString(optionLine + "\n")
+					currentIndex++
+					_ = optionIdx // Suppress unused variable warning
+				}
+				_ = groupIdx // Suppress unused variable warning
+			}
+		}
 
-// 		// Insecure registry toggle
-// 		insecureState := "[ ]"
-// 		if m.ContainerRegistry.Insecure {
-// 			insecureState = "[x]"
-// 		}
-// 		insecureLine := fmt.Sprintf("%s Allow insecure connections", insecureState)
-// 		insecureContent := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(insecureLine)
-// 		if m.ContainerRegistry.CurrentField == 3 { // 3 is the index for the insecure toggle
-// 			insecureContent = styleFocusHighlight.Render(insecureLine)
-// 		}
-// 		b.WriteString(lipgloss.JoinHorizontal(
-// 			lipgloss.Center,
-// 			styleLabel.Render("Insecure pull:"),
-// 			insecureContent,
-// 		) + "\n")
+		// Add spacing between provider sections
+		if providerIdx < len(m.datacenterSettingsSelection.Providers)-1 {
+			b.WriteString("\n")
+		}
+	}
 
-// 		// Show error if any
-// 		if m.ContainerRegistry.Error != "" {
-// 			b.WriteString("\n" + styleError.Width(uiWidth).Render(m.ContainerRegistry.Error) + "\n")
-// 		}
-// 	} else {
-// 		// In online mode, just show a message
-// 		b.WriteString("Container registry configuration is not required for online installations.\n\n")
-// 	}
+	// Pad content to ensure help bar is at the bottom
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+}
 
-// 	// Pad content to ensure help bar is at the bottom
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+// renderClusterSettingsSelection renders the cluster settings selection stage.
+func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+	const boxHeight = 20
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+	title := styleHeader.Render("Cluster Settings Selection")
+	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Select cluster settings to test. Selecting none will use default values (typically false) for all settings.")
 
-// // renderHelmRegistry displays the Helm registry configuration for offline installations.
-// func (m Model) renderHelmRegistry(helpWithBorder string) string {
-// 	const boxHeight = 22
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
+	b.WriteString(description + "\n\n")
 
-// 	title := styleHeader.Render("Helm Registry Configuration")
-// 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(helmRegistryText)
+	// Check if no settings are available
+	if len(m.clusterSettingsSelection.SettingGroups) == 0 {
+		noSettingsMsg := "No cluster settings available."
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(noSettingsMsg))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Press Enter to continue"))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
 
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
-// 	b.WriteString(description + "\n\n")
+	// Render setting groups
+	currentIndex := 0
+	for _, group := range m.clusterSettingsSelection.SettingGroups {
+		groupKey := group.Key
+		isGroupSelected := m.clusterSettingsSelection.SelectedGroups[groupKey]
+		isGroupFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
 
-// 	// Only show the form in offline mode
-// 	if m.offline {
-// 		fields := []struct {
-// 			Label string
-// 			Input textinput.Model
-// 		}{
-// 			{"Helm registry endpoint:", m.HelmRegistry.Endpoint},
-// 			{"Username (optional):", m.HelmRegistry.Username},
-// 			{"Password (optional):", m.HelmRegistry.Password},
-// 		}
+		// Setting group with checkbox
+		checkbox := "[ ]"
+		if isGroupSelected {
+			checkbox = "[✓]"
+		}
 
-// 		for _, field := range fields {
-// 			line := lipgloss.JoinHorizontal(
-// 				lipgloss.Center,
-// 				styleLabel.Render(field.Label),
-// 				" ",
-// 				styleInput.Render(field.Input.View()),
-// 			)
-// 			b.WriteString(line + "\n\n")
-// 		}
+		groupHeader := fmt.Sprintf("  %s %s",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+			group.Name)
+		if isGroupFocused {
+			groupHeader = styleFocusHighlight.Render(groupHeader)
+		} else if isGroupSelected {
+			groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
+		} else {
+			groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+		}
+		b.WriteString(groupHeader + "\n")
+		currentIndex++
 
-// 		// Insecure registry toggle
-// 		insecureState := "[ ]"
-// 		if m.HelmRegistry.Insecure {
-// 			insecureState = "[x]"
-// 		}
-// 		insecureLine := fmt.Sprintf("%s Allow insecure connections", insecureState)
-// 		insecureContent := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(insecureLine)
-// 		if m.HelmRegistry.CurrentField == 3 { // 3 is the index for the insecure toggle
-// 			insecureContent = styleFocusHighlight.Render(insecureLine)
-// 		}
-// 		b.WriteString(lipgloss.JoinHorizontal(
-// 			lipgloss.Center,
-// 			styleLabel.Render("Insecure pull:"),
-// 			insecureContent,
-// 		) + "\n")
+		// Render options for this group (always shown)
+		for optionIdx, option := range group.Options {
+			isOptionFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
+			selectionKey := fmt.Sprintf("%s:%s", groupKey, option)
+			isSelected := m.clusterSettingsSelection.Selected[selectionKey]
 
-// 		// Show error if any
-// 		if m.HelmRegistry.Error != "" {
-// 			b.WriteString("\n" + styleError.Width(uiWidth).Render(m.HelmRegistry.Error) + "\n")
-// 		}
-// 	} else {
-// 		// In online mode, just show a message
-// 		b.WriteString("Helm registry configuration is not required for online installations.\n\n")
-// 	}
+			checkbox := "[ ]"
+			if isSelected {
+				checkbox = "[✓]"
+			}
 
-// 	// Pad the content to maintain consistent height
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+			optionLine := fmt.Sprintf("    %s %s",
+				lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+				option)
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+			if isOptionFocused {
+				optionLine = styleFocusHighlight.Render(optionLine)
+			} else if isSelected {
+				optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+			} else {
+				optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+			}
 
-// // renderPackageRepository displays the package repository configuration for offline installations.
-// func (m Model) renderPackageRepository(helpWithBorder string) string {
-// 	const boxHeight = 22
+			b.WriteString(optionLine + "\n")
+			currentIndex++
+			_ = optionIdx // Suppress unused variable warning
+		}
+	}
 
-// 	title := styleHeader.Render("Package Repository Configuration")
-// 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(packageRepositoryText)
+	// Pad content to ensure help bar is at the bottom
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+}
 
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
-// 	b.WriteString(description + "\n\n")
+// renderMachineDeploymentSettingsSelection renders the machine deployment settings selection stage.
+func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+	const boxHeight = 20
 
-// 	// Toggle for enabling/disabling the package repository
-// 	toggleText := "Enable Package Repository"
-// 	if m.PackageRepo.Enabled {
-// 		toggleText = "✓ " + toggleText
-// 	} else {
-// 		toggleText = "  " + toggleText
-// 	}
+	// Build title based on number of providers
+	var title string
+	if len(m.machineDeploymentSettingsSelection.Providers) == 1 {
+		title = styleHeader.Render(fmt.Sprintf("%s Machine Deployment Settings Selection", m.machineDeploymentSettingsSelection.Providers[0]))
+	} else {
+		title = styleHeader.Render("Machine Deployment Settings Selection")
+	}
 
-// 	// Highlight the toggle if it's the active field
-// 	toggleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue))
-// 	if m.PackageRepo.Enabled {
-// 		toggleStyle = toggleStyle.Bold(true)
-// 	}
-// 	b.WriteString(toggleStyle.Render(toggleText) + "\n\n")
+	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Select machine deployment settings to test. Selecting none will use default values (typically false) for all settings.")
 
-// 	// Show the address input if enabled
-// 	if m.PackageRepo.Enabled {
-// 		b.WriteString(styleLabel.Render("Package Repository Address:") + "\n")
-// 		b.WriteString(styleInput.Render(m.PackageRepo.Address.View()) + "\n\n")
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
+	b.WriteString(description + "\n\n")
 
-// 		// Show error if any
-// 		if m.PackageRepo.Error != "" {
-// 			b.WriteString(styleError.Render(m.PackageRepo.Error) + "\n\n")
-// 		}
+	// Check if no settings are available
+	hasSettings := false
+	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+		if len(m.machineDeploymentSettingsSelection.SettingsByProvider[provider]) > 0 {
+			hasSettings = true
+			break
+		}
+	}
 
-// 		b.WriteString(styleHelpText.Render("Enter the URL of your package repository (e.g., http://package-repo.local:8080"))
-// 	} else {
-// 		b.WriteString(styleHelpText.Render("Press SPACE to enable and configure a package repository") + "\n\n")
-// 	}
+	if !hasSettings {
+		var providersStr string
+		if len(m.machineDeploymentSettingsSelection.Providers) == 1 {
+			providersStr = m.machineDeploymentSettingsSelection.Providers[0]
+		} else {
+			providersStr = strings.Join(m.machineDeploymentSettingsSelection.Providers, ", ")
+		}
+		noSettingsMsg := fmt.Sprintf("No machine deployment settings available for %s.", providersStr)
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(noSettingsMsg))
+		b.WriteString("\n\n")
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Press Enter to continue"))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
 
-// 	// Pad the content to maintain consistent height
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+	// Render hierarchical structure: Provider → Group → Options
+	currentIndex := 0
+	for providerIdx, provider := range m.machineDeploymentSettingsSelection.Providers {
+		isProviderExpanded := m.machineDeploymentSettingsSelection.ExpandedProviders[provider]
+		isProviderFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+		// Provider header with expand/collapse indicator
+		expandIndicator := "▶"
+		if isProviderExpanded {
+			expandIndicator = "▼"
+		}
 
-// // renderNodeCount displays the interface for selecting node counts and API endpoint.
-// func (m Model) renderNodeCount(helpWithBorder string) string {
-// 	const boxHeight = 22
-// 	title := styleHeader.Render("Cluster Configuration")
-// 	description := lipgloss.NewStyle().
-// 		Foreground(lipgloss.Color(colorMainWhite)).
-// 		Render("Configure your cluster topology and API endpoint")
+		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
+		if len(m.machineDeploymentSettingsSelection.Providers) > 1 {
+			if isProviderFocused {
+				providerHeader = styleFocusHighlight.Render(providerHeader)
+			} else {
+				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
+			}
+			b.WriteString(providerHeader + "\n")
+		}
+		currentIndex++
 
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
-// 	b.WriteString(description + "\n\n")
+		// Render setting groups for this provider if expanded
+		if isProviderExpanded {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				isGroupFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				isGroupSelected := m.machineDeploymentSettingsSelection.SelectedGroups[groupKey]
 
-// 	// Define fields with labels and inputs
-// 	fields := []struct {
-// 		Label string
-// 		Input textinput.Model
-// 	}{
-// 		{"Total Node Count:", m.NodeCount.NodeCountInput},
-// 		{"Control Plane Count:", m.NodeCount.ControlPlaneCountInput},
-// 		{"API Endpoint:", m.NodeCount.APIEndpointInput},
-// 	}
+				// Setting group with checkbox
+				checkbox := "[ ]"
+				if isGroupSelected {
+					checkbox = "[✓]"
+				}
 
-// 	// Render each field
-// 	for _, field := range fields {
-// 		inputLine := lipgloss.JoinHorizontal(
-// 			lipgloss.Center,
-// 			styleLabel.Render(field.Label),
-// 			" ",
-// 			styleInput.Render(field.Input.View()),
-// 		)
-// 		b.WriteString(inputLine + "\n\n")
-// 	}
+				groupHeader := fmt.Sprintf("  %s %s",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+					group.Name)
+				if isGroupFocused {
+					groupHeader = styleFocusHighlight.Render(groupHeader)
+				} else if isGroupSelected {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
+				} else {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+				}
+				b.WriteString(groupHeader + "\n")
+				currentIndex++
 
-// 	// Show error if any
-// 	if m.NodeCount.Error != "" {
-// 		b.WriteString(styleError.Width(uiWidth).Render(m.NodeCount.Error) + "\n\n")
-// 	}
+				// Render options for this group (always shown)
+				for optionIdx, option := range group.Options {
+					isOptionFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					isSelected := m.machineDeploymentSettingsSelection.Selected[selectionKey]
 
-// 	// Add help text
-// 	helpText := styleHelpText.Render(
-// 		"The first N nodes (where N = Control Plane Count) will be configured as control plane nodes.\n" +
-// 			"Remaining nodes will be worker nodes. API endpoint can be a comma-separated list of DNS names.",
-// 	)
-// 	b.WriteString(helpText + "\n")
+					checkbox := "[ ]"
+					if isSelected {
+						checkbox = "[✓]"
+					}
 
-// 	// Pad content to ensure help bar is at the bottom
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
+					optionLine := fmt.Sprintf("    %s %s",
+						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+						option)
 
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
+					if isOptionFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if isSelected {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
 
-// // renderNodeDetails displays input fields for configuring individual nodes.
-// // This view lets the height grow dynamically based on content.
-// func (m Model) renderNodeDetails(helpWithBorder string) string {
-// 	header := styleHeader.Render(fmt.Sprintf("Node %d/%d", m.Nodes.Current+1, len(m.Nodes.Inputs)))
+					b.WriteString(optionLine + "\n")
+					currentIndex++
+					_ = optionIdx // Suppress unused variable warning
+				}
+				_ = groupIdx // Suppress unused variable warning
+			}
+		}
 
-// 	currentNode := m.Nodes.Inputs[m.Nodes.Current]
-// 	fields := []struct {
-// 		Label string
-// 		Input textinput.Model
-// 	}{
-// 		{"Address:", currentNode.Address},
-// 		{"Username:", currentNode.Username},
-// 		{"SSH Key Path:", currentNode.SSHKeyPath},
-// 	}
+		// Add spacing between provider sections
+		if providerIdx < len(m.machineDeploymentSettingsSelection.Providers)-1 {
+			b.WriteString("\n")
+		}
+	}
 
-// 	var b strings.Builder
-// 	b.WriteString(header + "\n\n") // Extra line after header
-// 	for i, field := range fields {
-// 		fieldLine := lipgloss.JoinHorizontal(
-// 			lipgloss.Center,
-// 			styleLabel.Render(field.Label),
-// 			styleInput.Render(field.Input.View()),
-// 		)
-// 		b.WriteString(fieldLine + "\n")
-// 		// Add an extra line after each field, except potentially the last if you prefer
-// 		// Or add extra line only between fields
-// 		if i < len(fields)-1 { // Add space between fields, not after the last one
-// 			b.WriteString("\n")
-// 		}
-// 	}
-
-// 	return styleBox.Width(uiWidth).Render(b.String() + "\n" + helpWithBorder)
-// }
-
-// // renderCSIToggle displays the CSI driver configuration toggle.
-// func (m Model) renderCSIToggle(helpWithBorder string) string {
-// 	const boxHeight = 20 // Increased height for better spacing
-// 	title := styleHeader.Render("Important Disclaimer: Storage CSI Driver for Kubermatic-virtualization")
-// 	disclaimerLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Bold(true).Render("Please be advised:")
-// 	disclaimerText := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(csiDisclaimerText)
-// 	checkboxState := "[ ]"
-// 	if m.CSIEnabled {
-// 		checkboxState = "[x]"
-// 	}
-// 	checkbox := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkboxState)
-// 	toggleLabel := "Install default CSI driver (for evaluation only)"
-
-// 	var b strings.Builder
-// 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n") // Extra line after title
-// 	b.WriteString(disclaimerLabel + disclaimerText + "\n\n")                          // Extra line after disclaimer
-// 	b.WriteString(fmt.Sprintf("%s %s\n", checkbox, toggleLabel))                      // Line for the toggle
-
-// 	// Pad content to ensure help bar is at the bottom
-// 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
-// 	contentBody := strings.Join(lines, "\n")
-
-// 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
-// }
-
-// // renderReview displays the final configuration for user confirmation.
-// func (m Model) renderReview(helpWithBorder string) string {
-// 	header := styleHeader.Render("Review Configuration")
-
-// 	// Build the main content
-// 	var b strings.Builder
-// 	b.WriteString(header + "\n\n") // Extra line after header
-
-// 	// Display viewport content or fallback
-// 	if m.Review.Viewport.Height > 0 {
-// 		b.WriteString(m.Review.Viewport.View())
-// 	} else {
-// 		// Fallback if viewport isn't initialized
-// 		b.WriteString(styleItem.Render(m.Review.ConfigYAML))
-// 	}
-
-// 	return styleBox.Width(uiWidth).Render(b.String() + "\n" + helpWithBorder)
-// }
+	// Pad content to ensure help bar is at the bottom
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+}
 
 // renderExecuting displays logs during the configuration application process.
-func (m Model) renderExecuting(helpWithBorder string) string {
+func (m Model) renderExecuting(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	header := styleHeader.Render("Applying Configuration")
 
 	// Build the main content
@@ -940,7 +965,7 @@ func (m Model) renderExecuting(helpWithBorder string) string {
 }
 
 // renderDone displays the final success message.
-func (m Model) renderDone(helpWithBorder string) string {
+func (m Model) renderDone(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	header := styleHeader.Render("Congratulations!")
 	var message string
 	if m.executionError != "" {
@@ -977,9 +1002,9 @@ func helpBar(stage int) string {
 		stageReleaseSelection:                   "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageProviderSelection:                  "↑/↓ to navigate, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
 		stageDistributionSelection:              "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
-		stageDatacenterSettingsSelection:        "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
-		stageClusterSettingsSelection:           "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
-		stageMachineDeploymentSettingsSelection: "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
+		stageDatacenterSettingsSelection:        "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
+		stageClusterSettingsSelection:           "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
+		stageMachineDeploymentSettingsSelection: "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageClusterSettings:                    "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
 		stageReviewSettings:                     "↑/↓ to scroll, PgUp/PgDn for faster scroll, Enter to confirm, ← to go back.",
 		stageExecuting:                          "Logs will appear here. Press ctrl+c to cancel.",
@@ -1073,21 +1098,6 @@ const releaseSelectionText = `Select the supported kubernetes release version fo
 const providerSelectionText = `Select the infrastructure provider where your Kubernetes cluster will be deployed. Kubermatic Conformance Tester supports multiple providers to ensure compatibility and performance across different environments.`
 
 const distributionSelectionText = `Select one or more operating system distributions for your cluster nodes. Multiple distributions can be selected to test compatibility across different OS environments.`
-
-const containerRegistryText = `Specify the address of your offline container registry—and credentials if authentication is required. Kubermatic Conformance Tester will rely exclusively on this registry for all container images. Toggle the insecure option if the registry uses self-signed certificates or HTTP.`
-const helmRegistryText = `Specify the address of your offline Helm registry—and credentials if authentication is required. Kubermatic Virtualization will rely exclusively on this registry for all Helm charts. Toggle the insecure option if the registry uses self-signed certificates or HTTP.`
-
-const packageRepositoryText = `Kubermatic Virtualization provides a package repository for offline environments. If you are using it, specify the address or hostname of the repository server. In that case, Kubermatic Virtualization will rely exclusively on this repository for all package installations and updates.
-
-If you are not using the repository, leave this field empty and configure your system manually to use your custom package repository.`
-
-const networkConfigDescription = `Network configuration is necessary to configure the Kubermatic virtualization stack. Please provide the following details:`
-
-const metalLBDisclaimerText = `MetalLB in Kubermatic Virtualization is provided as the default load balancer solution. While MetalLB is a mature and production-ready solution, its configuration, maintenance, and suitability for your specific use case are the responsibility of the user. Ensure that it aligns with your organization's operational requirements, scalability needs, and compliance policies.`
-
-const csiDisclaimerText = ` The default Container Storage Interface (CSI) driver provided by Kubermatic-virtualization is not intended or supported for production environments.
-This CSI driver is specifically offered for evaluation and staging purposes only. It serves to provide baseline storage functionality for Kubermatic-virtualization during these phases.
-Kubermatic does not guarantee the ongoing maintenance, reliability, or performance of this default CSI driver. Its use in any production capacity is at your own risk and is not recommended. For production deployments, we strongly advise utilizing a fully supported and robust storage solution.`
 
 const successInstallationText = `Kubermatic Virtualization has been successfully installed! You can now proceed with configuring and using the virtualization features. If you encounter any issues, feel free to consult the documentation or support resources.`
 

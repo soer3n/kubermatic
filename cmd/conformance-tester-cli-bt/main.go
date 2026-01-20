@@ -31,10 +31,9 @@ import (
 )
 
 func main() {
-	offline := flag.Bool("offline", false, "Enable offline mode for air-gapped installations")
 	flag.Parse()
 
-	nodeConfigs, err := ui.KubeVCluster(*offline)
+	nodeConfigs, err := ui.ConformanceTester()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -45,5 +44,4 @@ func main() {
 		os.Exit(0)
 	}
 
-	fmt.Printf("Configuration completed with %d nodes\n", len(nodeConfigs))
 }

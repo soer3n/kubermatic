@@ -23,6 +23,7 @@
 package ui
 
 import (
+	"os"
 	"sort"
 	"strings"
 
@@ -30,6 +31,9 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/kubevirt"
+	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	"k8c.io/kubermatic/v2/pkg/defaulting"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
@@ -51,20 +55,11 @@ type Model struct {
 
 	distributionSelection DistributionSelection
 
-	offline bool
-	MetalLB MetalLB
-	// CSI toggle
-	CSIEnabled bool
-	// Network config
-	Network NetworkConfig
+	datacenterSettingsSelection DatacenterSettingsSelection
 
-	ContainerRegistry OCIConfiguration
-	HelmRegistry      OCIConfiguration
-	PackageRepo       PackageRepository
+	clusterSettingsSelection ClusterSettingsSelection
 
-	NodeCount NodeCount
-
-	Nodes Nodes
+	machineDeploymentSettingsSelection MachineDeploymentSettingsSelection
 
 	Review  Review
 	cmdChan <-chan tea.Msg
@@ -77,6 +72,10 @@ type Model struct {
 	// Quit confirmation modal state
 	quitConfirmVisible bool
 	quitConfirmIndex   int
+
+	// Terminal dimensions for dynamic sizing
+	terminalWidth  int
+	terminalHeight int
 }
 
 func newTextInput(placeholder string, charLimit int) textinput.Model {
@@ -146,10 +145,68 @@ func initializeReleaseSelection() ReleaseSelection {
 	}
 }
 
-// initializeDistributionSelection creates the distribution selection structure.
-func initializeDistributionSelection() DistributionSelection {
-	distributions := providerconfig.AllOperatingSystems
+// providerDistributionCompatibility defines which distributions are supported by each provider.
+var providerDistributionCompatibility = map[string][]providerconfig.OperatingSystem{
+	"AWS": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+		providerconfig.OperatingSystemAmazonLinux2,
+		providerconfig.OperatingSystemRHEL,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"Alibaba": {
+		providerconfig.OperatingSystemUbuntu,
+	},
+	"Anexia": {
+		providerconfig.OperatingSystemUbuntu,
+	},
+	"Azure": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+		providerconfig.OperatingSystemRHEL,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"DigitalOcean": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"GCP": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+	},
+	"Hetzner": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"KubeVirt": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+		providerconfig.OperatingSystemRHEL,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"Nutanix": {
+		providerconfig.OperatingSystemUbuntu,
+	},
+	"OpenStack": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+		providerconfig.OperatingSystemRHEL,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+	"VMware Cloud Director": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+	},
+	"vSphere": {
+		providerconfig.OperatingSystemUbuntu,
+		providerconfig.OperatingSystemFlatcar,
+		providerconfig.OperatingSystemRHEL,
+		providerconfig.OperatingSystemRockyLinux,
+	},
+}
 
+// initializeDistributionSelection creates the distribution selection structure.
+func initializeDistributionSelection(providers []string) DistributionSelection {
 	// Create display names map
 	displayNames := map[providerconfig.OperatingSystem]string{
 		providerconfig.OperatingSystemUbuntu:       "Ubuntu",
@@ -159,11 +216,166 @@ func initializeDistributionSelection() DistributionSelection {
 		providerconfig.OperatingSystemRockyLinux:   "Rocky Linux",
 	}
 
+	distributionsByProvider := make(map[string][]providerconfig.OperatingSystem)
+
+	// Get distributions for each selected provider
+	for _, provider := range providers {
+		if supportedDists, exists := providerDistributionCompatibility[provider]; exists {
+			distributionsByProvider[provider] = supportedDists
+		}
+	}
+
+	// Initialize all providers as expanded by default
+	expandedProviders := make(map[string]bool)
+	for _, provider := range providers {
+		expandedProviders[provider] = true
+	}
+
 	return DistributionSelection{
-		Distributions:     distributions,
-		DistributionNames: displayNames,
-		Selected:          make(map[providerconfig.OperatingSystem]bool),
-		FocusedIndex:      0,
+		Providers:               providers,
+		DistributionsByProvider: distributionsByProvider,
+		DistributionNames:       displayNames,
+		Selected:                make(map[string]bool),
+		FocusedIndex:            0,
+		ExpandedProviders:       expandedProviders,
+	}
+}
+
+// initializeDatacenterSettingsSelection creates the datacenter settings selection structure.
+func initializeDatacenterSettingsSelection(providers []string) DatacenterSettingsSelection {
+	settingsByProvider := make(map[string][]SettingGroup)
+
+	// Gather settings from all selected providers
+	for _, provider := range providers {
+		var descriptionsMap map[string]k8cginkgo.Description
+
+		// Provider-specific datacenter settings retrieval
+		switch strings.ToLower(provider) {
+		case "kubevirt":
+			descriptionsMap = kubevirt.GetDatacenterDescriptions()
+		// Add more providers here as they become available
+		// case "aws":
+		// 	descriptionsMap = aws.GetDatacenterDescriptions()
+		default:
+			descriptionsMap = make(map[string]k8cginkgo.Description)
+		}
+
+		// Convert map to SettingGroup slice
+		var groups []SettingGroup
+		for key, desc := range descriptionsMap {
+			groups = append(groups, SettingGroup{
+				Key:        key,
+				Name:       desc.Name,
+				Options:    desc.Options,
+				IsExpanded: true, // Always show options
+			})
+		}
+
+		// Sort groups by key for consistent display
+		sort.Slice(groups, func(i, j int) bool {
+			return groups[i].Key < groups[j].Key
+		})
+
+		settingsByProvider[provider] = groups
+	}
+
+	// Initialize all providers as expanded by default
+	expandedProviders := make(map[string]bool)
+	for _, provider := range providers {
+		expandedProviders[provider] = true
+	}
+
+	return DatacenterSettingsSelection{
+		Providers:          providers,
+		SettingsByProvider: settingsByProvider,
+		Selected:           make(map[string]bool),
+		SelectedGroups:     make(map[string]bool),
+		FocusedIndex:       0,
+		ExpandedProviders:  expandedProviders,
+	}
+}
+
+// initializeMachineDeploymentSettingsSelection creates the machine deployment settings selection structure.
+func initializeMachineDeploymentSettingsSelection(providers []string) MachineDeploymentSettingsSelection {
+	settingsByProvider := make(map[string][]SettingGroup)
+
+	// Gather settings from all selected providers
+	for _, provider := range providers {
+		var descriptionsMap map[string]k8cginkgo.Description
+
+		// Provider-specific machine deployment settings retrieval
+		switch strings.ToLower(provider) {
+		case "kubevirt":
+			descriptionsMap = kubevirt.GetMachineDescriptions()
+		// Add more providers here as they become available
+		// case "aws":
+		// 	descriptionsMap = aws.GetMachineDescriptions()
+		default:
+			descriptionsMap = make(map[string]k8cginkgo.Description)
+		}
+
+		// Convert map to SettingGroup slice
+		var groups []SettingGroup
+		for key, desc := range descriptionsMap {
+			groups = append(groups, SettingGroup{
+				Key:        key,
+				Name:       desc.Name,
+				Options:    desc.Options,
+				IsExpanded: true, // Always show options
+			})
+		}
+
+		// Sort groups by key for consistent display
+		sort.Slice(groups, func(i, j int) bool {
+			return groups[i].Key < groups[j].Key
+		})
+
+		settingsByProvider[provider] = groups
+	}
+
+	// Initialize all providers as expanded by default
+	expandedProviders := make(map[string]bool)
+	for _, provider := range providers {
+		expandedProviders[provider] = true
+	}
+
+	return MachineDeploymentSettingsSelection{
+		Providers:          providers,
+		SettingsByProvider: settingsByProvider,
+		Selected:           make(map[string]bool),
+		SelectedGroups:     make(map[string]bool),
+		FocusedIndex:       0,
+		ExpandedProviders:  expandedProviders,
+	}
+}
+
+// initializeClusterSettingsSelection creates the cluster settings selection structure.
+func initializeClusterSettingsSelection() ClusterSettingsSelection {
+	descriptionsMap := ginkgoutils.GetClusterDescriptions()
+
+	// Convert map to SettingGroup slice
+	var groups []SettingGroup
+	keys := make([]string, 0, len(descriptionsMap))
+	for key := range descriptionsMap {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		desc := descriptionsMap[key]
+		groups = append(groups, SettingGroup{
+			Key:        key,
+			Name:       desc.Name,
+			Options:    desc.Options,
+			IsExpanded: true, // Always show options
+		})
+	}
+
+	return ClusterSettingsSelection{
+		SettingGroups:  groups,
+		Selected:       make(map[string]bool),
+		SelectedGroups: make(map[string]bool),
+		FocusedIndex:   0,
 	}
 }
 
@@ -286,7 +498,7 @@ func initializeProviders() []Provider {
 	return providers
 }
 
-func initialModel(offline bool) Model {
+func initialModel() Model {
 	model := Model{
 		stage: stageWelcome,
 		localEnv: EnvironmentLocal{
@@ -309,64 +521,10 @@ func initialModel(offline bool) Model {
 		environmentFocusIndex: 0,
 		environmentFieldIndex: 0,
 		releaseSelection:      initializeReleaseSelection(),
-		providers:             initializeProviders(), distributionSelection: initializeDistributionSelection(), providerFocusIndex: 0,
-		providerFieldIndex: 0,
-		// MetalLB: MetalLB{
-		// 	Enabled: false,
-		// 	Input:   newTextInput("e.g., 192.168.1.100-192.168.1.150", 50),
-		// },
-		// CSIEnabled: false,
-		// Network: NetworkConfig{
-		// 	CIDR:         newTextInput("e.g., 10.244.0.0/16", 18),
-		// 	DNSServer:    newTextInput("e.g., 8.8.8.8", 15),
-		// 	GatewayIP:    newTextInput("e.g., 192.168.1.1", 15),
-		// 	CurrentField: 0,
-		// 	Errors:       NetworkErrors{},
-		// },
-		// NodeCount: NodeCount{
-		// 	NodeCountInput:         newTextInput("e.g., 10", 4),
-		// 	ControlPlaneCountInput: newTextInput("e.g., 3", 4),
-		// 	APIEndpointInput:       newTextInput("e.g., dns1.example.com,dns2.example.com", 256),
-		// 	CurrentField:           0,
-		// 	Max:                    1000,
-		// },
-		// Nodes: Nodes{
-		// 	Configs: []NodeConfig{{}},
-		// 	Inputs: []NodeInputFields{{
-		// 		Address:    newTextInput("Address", 64),
-		// 		Username:   newTextInput("Username", 32),
-		// 		SSHKeyPath: newTextInput("SSH Key Path", 256),
-		// 	}},
-		// 	Current:      0,
-		// 	CurrentField: 0,
-		// },
-	}
-
-	// Focus the first input field
-	// model.NodeCount.NodeCountInput.Focus()
-
-	if offline {
-		model.ContainerRegistry = OCIConfiguration{
-			Endpoint:     newTextInput("Container Registry Endpoint", 256),
-			Insecure:     false,
-			Username:     newTextInput("Container Registry Username", 32),
-			Password:     newTextInput("Container Registry Password", 32),
-			CurrentField: 0,
-		}
-
-		model.HelmRegistry = OCIConfiguration{
-			Endpoint: newTextInput("Helm Registry Endpoint", 256),
-			Insecure: false,
-			Username: newTextInput("Helm Registry Username", 32),
-			Password: newTextInput("Helm Registry Password", 32),
-		}
-
-		model.PackageRepo = PackageRepository{
-			Enabled: false,
-			Address: newTextInput("e.g., http://package-repo.local:8080", 256),
-		}
-
-		model.offline = true
+		providers:             initializeProviders(),
+		distributionSelection: initializeDistributionSelection([]string{}), // Will be reinitialized after provider selection
+		providerFocusIndex:    0,
+		providerFieldIndex:    0,
 	}
 
 	return model
@@ -421,6 +579,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleProviderSelection(msg)
 		case stageDistributionSelection:
 			return m.handleDistributionSelection(msg)
+		case stageDatacenterSettingsSelection:
+			return m.handleDatacenterSettingsSelection(msg)
+		case stageClusterSettingsSelection:
+			return m.handleClusterSettingsSelection(msg)
+		case stageMachineDeploymentSettingsSelection:
+			return m.handleMachineDeploymentSettingsSelection(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -440,20 +604,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func KubeVCluster(offline bool) ([]NodeConfig, error) {
-	m, err := tea.NewProgram(initialModel(offline)).Run()
+// getUIWidth returns the dynamic UI width based on terminal size.
+// Falls back to 150 if terminal width hasn't been detected yet.
+func (m Model) getUIWidth() int {
+	if m.terminalWidth == 0 {
+		return 150 // Default width
+	}
+	// Use 90% of terminal width, with minimum of 80 and maximum of 200
+	width := int(float64(m.terminalWidth) * 0.9)
+	if width < 80 {
+		width = 80
+	}
+	if width > 200 {
+		width = 200
+	}
+	return width
+}
+
+// getUIInnerWidth returns the inner width (accounting for box padding).
+func (m Model) getUIInnerWidth() int {
+	return m.getUIWidth() - 8
+}
+
+func ConformanceTester() (tea.Model, error) {
+	m, err := tea.NewProgram(initialModel()).Run()
 	if err != nil {
 		return nil, err
 	}
-	if myModel, ok := m.(Model); ok {
-		return myModel.Nodes.Configs, nil
-	}
-	return nil, nil
+	// if myModel, ok := m.(Model); ok {
+	// 	return myModel.Nodes.Configs, nil
+	// }
+	return m, nil
 }
 
 // --- View Entry Point ---
 // View renders the entire UI based on the current application stage.
 func (m Model) View() string {
+	// Get dynamic UI dimensions
+	uiWidth := m.getUIWidth()
+	uiInnerWidth := m.getUIInnerWidth()
+
 	helpText := helpBar(m.stage)
 	helpContent := styleHelpBar.Width(uiInnerWidth).Render(helpText)
 	helpWithBorder := styleHelpBarBorder.Width(uiInnerWidth).Render("") + "\n" + helpContent
@@ -461,24 +651,31 @@ func (m Model) View() string {
 	var content string
 	switch m.stage {
 	case stageWelcome:
-		content = m.renderWelcome(helpWithBorder)
+		content = m.renderWelcome(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageEnvironmentSelection:
-		content = m.renderEnvironmentSelection(helpWithBorder)
+		content = m.renderEnvironmentSelection(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageReleaseSelection:
-		content = m.renderReleaseSelection(helpWithBorder)
+		content = m.renderReleaseSelection(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageProviderSelection:
-		content = m.renderProviderSelection(helpWithBorder)
+		content = m.renderProviderSelection(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageDistributionSelection:
-		content = m.renderDistributionSelection(helpWithBorder)
+		content = m.renderDistributionSelection(helpWithBorder, uiWidth, uiInnerWidth)
+	case stageDatacenterSettingsSelection:
+		content = m.renderDatacenterSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+	case stageClusterSettingsSelection:
+		content = m.renderClusterSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+	case stageMachineDeploymentSettingsSelection:
+		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
 
 	// case stageReview:
 	// 	content = m.renderReview(helpWithBorder)
 	case stageExecuting:
-		content = m.renderExecuting(helpWithBorder)
+		content = m.renderExecuting(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageDone:
-		content = m.renderDone(helpWithBorder)
+		content = m.renderDone(helpWithBorder, uiWidth, uiInnerWidth)
 	default:
 		// Render nothing for unknown stages
+		os.Exit(0)
 		return ""
 	}
 
@@ -491,7 +688,7 @@ func (m Model) View() string {
 
 	if m.quitConfirmVisible {
 		// Show only the modal centered, on top of everything
-		modal := m.renderQuitConfirm()
+		modal := m.renderQuitConfirm(uiWidth, uiInnerWidth)
 		bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
 
 		return lipgloss.Place(uiWidth+8, 0, lipgloss.Center, lipgloss.Center, bannerContent+"\n"+modal)

@@ -197,81 +197,55 @@ type ReleaseSelection struct {
 	IsMinorFocused    bool                // Whether focus is on a minor version or major version
 }
 
+// SettingGroup represents a group of related settings with a parent name and child options.
+type SettingGroup struct {
+	Key        string   // Unique key from map (e.g., "cpuTopology")
+	Name       string   // Display name (e.g., "CPU Topology")
+	Options    []string // Child options (e.g., ["threads", "cores", "sockets"])
+	IsExpanded bool     // Whether options are visible
+}
+
+// DatacenterSettingsSelection holds the state for datacenter settings selection stage.
+type DatacenterSettingsSelection struct {
+	Providers          []string                  // List of provider names
+	SettingsByProvider map[string][]SettingGroup // Settings grouped by provider
+	Selected           map[string]bool           // Selected options (key: "provider:groupKey:option")
+	SelectedGroups     map[string]bool           // Selected groups (key: "provider:groupKey")
+	FocusedIndex       int                       // Currently focused item index
+	ExpandedProviders  map[string]bool           // Tracks which providers are expanded
+}
+
+// MachineDeploymentSettingsSelection holds the state for machine deployment settings selection stage.
+type MachineDeploymentSettingsSelection struct {
+	Providers          []string                  // List of provider names
+	SettingsByProvider map[string][]SettingGroup // Settings grouped by provider
+	Selected           map[string]bool           // Selected options (key: "provider:groupKey:option")
+	SelectedGroups     map[string]bool           // Selected groups (key: "provider:groupKey")
+	FocusedIndex       int                       // Currently focused item index
+	ExpandedProviders  map[string]bool           // Tracks which providers are expanded
+}
+
+// ClusterSettingsSelection holds the state for cluster settings selection stage.
+type ClusterSettingsSelection struct {
+	SettingGroups  []SettingGroup  // List of setting groups
+	Selected       map[string]bool // Selected options (key: "groupKey:option")
+	SelectedGroups map[string]bool // Selected groups (key: "groupKey")
+	FocusedIndex   int             // Currently focused item index
+}
+
 // DistributionSelection holds the state for OS distribution selection.
 type DistributionSelection struct {
-	Distributions     []providerconfig.OperatingSystem          // Available distributions
-	DistributionNames map[providerconfig.OperatingSystem]string // Display names
-	Selected          map[providerconfig.OperatingSystem]bool   // Selected distributions
-	FocusedIndex      int                                       // Currently focused distribution
-}
-
-// PackageRepository holds configuration for the offline package repository.
-type PackageRepository struct {
-	Enabled bool
-	Address textinput.Model
-	Error   string
-}
-
-// NodeConfig holds info for a single node.
-type NodeConfig struct {
-	Address    string `json:"privateAddress"`
-	Username   string `json:"sshUsername"`
-	SSHKeyPath string `json:"sshPrivateKeyFile"`
-}
-
-type NetworkConfig struct {
-	CIDR         textinput.Model
-	DNSServer    textinput.Model
-	GatewayIP    textinput.Model
-	CurrentField int // Tracks current input field (0=CIDR, 1=DNS, 2=Gateway)
-	Errors       NetworkErrors
-}
-
-type OCIConfiguration struct {
-	Endpoint     textinput.Model
-	Insecure     bool
-	Username     textinput.Model
-	Password     textinput.Model
-	CurrentField int
-	Error        string
-}
-
-type NetworkErrors struct {
-	CIDR      string
-	DNSServer string
-	GatewayIP string
-}
-
-type MetalLB struct {
-	Enabled bool
-	Input   textinput.Model
-	Error   string
+	Providers               []string                                    // List of provider names
+	DistributionsByProvider map[string][]providerconfig.OperatingSystem // Distributions grouped by provider
+	DistributionNames       map[providerconfig.OperatingSystem]string   // Display names
+	Selected                map[string]bool                             // Selected distributions (key: "provider:distribution")
+	FocusedIndex            int                                         // Currently focused item index
+	ExpandedProviders       map[string]bool                             // Tracks which providers are expanded
 }
 
 type Review struct {
 	ConfigYAML string
 	Viewport   viewport.Model
-}
-type NodeInputFields struct {
-	Address    textinput.Model
-	Username   textinput.Model
-	SSHKeyPath textinput.Model
-}
-
-type NodeCount struct {
-	NodeCountInput         textinput.Model
-	ControlPlaneCountInput textinput.Model
-	APIEndpointInput       textinput.Model
-	CurrentField           int // 0=NodeCount, 1=ControlPlaneCount, 2=APIEndpoint
-	Error                  string
-	Max                    int
-}
-
-type Nodes struct {
-	Configs      []NodeConfig
-	Inputs       []NodeInputFields
-	Current      int
-	CurrentField int
 }
 
 type execOutputMsg struct {

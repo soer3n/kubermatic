@@ -207,29 +207,29 @@ func (m *Model) validateExistingEnvironment() bool {
 	// Clear previous errors
 	m.existingEnv.Errors = EnvironmentExistingErrors{}
 
-	// Validate Kubeconfig Path
-	if err := m.isValidKubeConfig(m.existingEnv.KubeconfigPath.Value()); err != nil {
-		m.existingEnv.Errors.KubeconfigPath = fmt.Sprintf("Invalid kubeconfig: %v", err)
-		return false
-	}
+	// // Validate Kubeconfig Path
+	// if err := m.isValidKubeConfig(m.existingEnv.KubeconfigPath.Value()); err != nil {
+	// 	m.existingEnv.Errors.KubeconfigPath = fmt.Sprintf("Invalid kubeconfig: %v", err)
+	// 	return false
+	// }
 
-	// Validate Seed Name
-	if strings.TrimSpace(m.existingEnv.SeedName.Value()) == "" {
-		m.existingEnv.Errors.SeedName = "Seed name is required"
-		return false
-	}
+	// // Validate Seed Name
+	// if strings.TrimSpace(m.existingEnv.SeedName.Value()) == "" {
+	// 	m.existingEnv.Errors.SeedName = "Seed name is required"
+	// 	return false
+	// }
 
-	// Validate Preset Name
-	if strings.TrimSpace(m.existingEnv.PresetName.Value()) == "" {
-		m.existingEnv.Errors.PresetName = "Preset name is required"
-		return false
-	}
+	// // Validate Preset Name
+	// if strings.TrimSpace(m.existingEnv.PresetName.Value()) == "" {
+	// 	m.existingEnv.Errors.PresetName = "Preset name is required"
+	// 	return false
+	// }
 
-	// Validate Project Name
-	if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
-		m.existingEnv.Errors.ProjectName = "Project name is required"
-		return false
-	}
+	// // Validate Project Name
+	// if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
+	// 	m.existingEnv.Errors.ProjectName = "Project name is required"
+	// 	return false
+	// }
 	return true
 }
 
@@ -290,114 +290,114 @@ func (m *Model) isValidCIDR(cidr string) bool {
 	return true
 }
 
-// Validate network configuration fields.
-func (m *Model) validateNetworkConfig() bool {
-	// Clear previous errors
-	m.Network.Errors = NetworkErrors{}
+// // Validate network configuration fields.
+// func (m *Model) validateNetworkConfig() bool {
+// 	// Clear previous errors
+// 	m.Network.Errors = NetworkErrors{}
 
-	// Get values from inputs
-	network := m.Network.CIDR.Value()
-	dnsServer := m.Network.DNSServer.Value()
-	gatewayIP := m.Network.GatewayIP.Value()
+// 	// Get values from inputs
+// 	network := m.Network.CIDR.Value()
+// 	dnsServer := m.Network.DNSServer.Value()
+// 	gatewayIP := m.Network.GatewayIP.Value()
 
-	// Validate Network CIDR
-	if network == "" {
-		m.Network.Errors.CIDR = ErrCIDRRequired
-		return false
-	}
-	if !m.isValidCIDR(network) {
-		m.Network.Errors.CIDR = ErrInvalidCIDRFormat
-		return false
-	}
+// 	// Validate Network CIDR
+// 	if network == "" {
+// 		m.Network.Errors.CIDR = ErrCIDRRequired
+// 		return false
+// 	}
+// 	if !m.isValidCIDR(network) {
+// 		m.Network.Errors.CIDR = ErrInvalidCIDRFormat
+// 		return false
+// 	}
 
-	// if network == kubeone.DefaultServiceSubnet {
-	// 	m.Network.Errors.CIDR = ErrCIDRDefaultServiceSubnet
-	// 	return false
-	// }
+// 	// if network == kubeone.DefaultServiceSubnet {
+// 	// 	m.Network.Errors.CIDR = ErrCIDRDefaultServiceSubnet
+// 	// 	return false
+// 	// }
 
-	// Validate DNS Server
-	if dnsServer == "" {
-		m.Network.Errors.DNSServer = ErrDNSServerRequired
-		return false
-	}
-	if !m.isValidIP(dnsServer) {
-		m.Network.Errors.DNSServer = ErrInvalidDNSServerFormat
-		return false
-	}
+// 	// Validate DNS Server
+// 	if dnsServer == "" {
+// 		m.Network.Errors.DNSServer = ErrDNSServerRequired
+// 		return false
+// 	}
+// 	if !m.isValidIP(dnsServer) {
+// 		m.Network.Errors.DNSServer = ErrInvalidDNSServerFormat
+// 		return false
+// 	}
 
-	// Validate Gateway IP
-	if gatewayIP == "" {
-		m.Network.Errors.GatewayIP = ErrGatewayIPRequired
-		return false
-	}
-	if !m.isValidIP(gatewayIP) {
-		m.Network.Errors.GatewayIP = ErrInvalidGatewayIPFormat
-		return false
-	}
+// 	// Validate Gateway IP
+// 	if gatewayIP == "" {
+// 		m.Network.Errors.GatewayIP = ErrGatewayIPRequired
+// 		return false
+// 	}
+// 	if !m.isValidIP(gatewayIP) {
+// 		m.Network.Errors.GatewayIP = ErrInvalidGatewayIPFormat
+// 		return false
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
-// validateContainerRegistry ensures the offline registry settings are usable.
-func (m *Model) validateContainerRegistry() bool {
-	if !m.offline {
-		return true
-	}
+// // validateContainerRegistry ensures the offline registry settings are usable.
+// func (m *Model) validateContainerRegistry() bool {
+// 	if !m.offline {
+// 		return true
+// 	}
 
-	m.ContainerRegistry.Error = ""
+// 	m.ContainerRegistry.Error = ""
 
-	if strings.TrimSpace(m.ContainerRegistry.Endpoint.Value()) == "" {
-		m.ContainerRegistry.Error = ErrRegistryEndpointRequired
-		return false
-	}
+// 	if strings.TrimSpace(m.ContainerRegistry.Endpoint.Value()) == "" {
+// 		m.ContainerRegistry.Error = ErrRegistryEndpointRequired
+// 		return false
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
-// updateHelmRegistryFocus ensures the focused input matches the selected field for Helm registry.
-func (m *Model) updateHelmRegistryFocus() {
-	if !m.offline {
-		return
-	}
+// // updateHelmRegistryFocus ensures the focused input matches the selected field for Helm registry.
+// func (m *Model) updateHelmRegistryFocus() {
+// 	if !m.offline {
+// 		return
+// 	}
 
-	m.HelmRegistry.Endpoint.Blur()
-	m.HelmRegistry.Username.Blur()
-	m.HelmRegistry.Password.Blur()
+// 	m.HelmRegistry.Endpoint.Blur()
+// 	m.HelmRegistry.Username.Blur()
+// 	m.HelmRegistry.Password.Blur()
 
-	switch m.HelmRegistry.CurrentField {
-	case 0:
-		m.HelmRegistry.Endpoint.Focus()
-	case 1:
-		m.HelmRegistry.Username.Focus()
-	case 2:
-		m.HelmRegistry.Password.Focus()
-	}
-}
+// 	switch m.HelmRegistry.CurrentField {
+// 	case 0:
+// 		m.HelmRegistry.Endpoint.Focus()
+// 	case 1:
+// 		m.HelmRegistry.Username.Focus()
+// 	case 2:
+// 		m.HelmRegistry.Password.Focus()
+// 	}
+// }
 
-// validateHelmRegistry ensures the Helm registry settings are valid.
-func (m *Model) validateHelmRegistry() bool {
-	if !m.offline {
-		return true
-	}
+// // validateHelmRegistry ensures the Helm registry settings are valid.
+// func (m *Model) validateHelmRegistry() bool {
+// 	if !m.offline {
+// 		return true
+// 	}
 
-	m.HelmRegistry.Error = ""
+// 	m.HelmRegistry.Error = ""
 
-	if strings.TrimSpace(m.HelmRegistry.Endpoint.Value()) == "" {
-		m.HelmRegistry.Error = "Helm registry endpoint is required"
-		return false
-	}
+// 	if strings.TrimSpace(m.HelmRegistry.Endpoint.Value()) == "" {
+// 		m.HelmRegistry.Error = "Helm registry endpoint is required"
+// 		return false
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
 // updatePackageRepoFocus ensures the package repository address input is focused when enabled.
-func (m *Model) updatePackageRepoFocus() {
-	if m.PackageRepo.Enabled {
-		m.PackageRepo.Address.Focus()
-	} else {
-		m.PackageRepo.Address.Blur()
-	}
-}
+// func (m *Model) updatePackageRepoFocus() {
+// 	if m.PackageRepo.Enabled {
+// 		m.PackageRepo.Address.Focus()
+// 	} else {
+// 		m.PackageRepo.Address.Blur()
+// 	}
+// }
 
 // normalizeRegistryBase converts any registry URL to oci:// format.
 func normalizeRegistryBase(input string) string {
@@ -424,42 +424,42 @@ func mustAtoi(s string) int {
 	return i
 }
 
-func (m *Model) processNodeCountInput() bool {
-	nodeCountStr := strings.TrimSpace(m.NodeCount.NodeCountInput.Value())
-	cpCountStr := strings.TrimSpace(m.NodeCount.ControlPlaneCountInput.Value())
+// func (m *Model) processNodeCountInput() bool {
+// 	nodeCountStr := strings.TrimSpace(m.NodeCount.NodeCountInput.Value())
+// 	cpCountStr := strings.TrimSpace(m.NodeCount.ControlPlaneCountInput.Value())
 
-	// Validate node count
-	if nodeCountStr == "" {
-		m.NodeCount.Error = ErrNodeCountRequired
-		return false
-	}
+// 	// Validate node count
+// 	if nodeCountStr == "" {
+// 		m.NodeCount.Error = ErrNodeCountRequired
+// 		return false
+// 	}
 
-	nodeCount, err := strconv.Atoi(nodeCountStr)
-	if err != nil || nodeCount < 1 || nodeCount > m.NodeCount.Max {
-		m.NodeCount.Error = fmt.Sprintf(ErrNodeCountOutOfRange, m.NodeCount.Max)
-		return false
-	}
+// 	nodeCount, err := strconv.Atoi(nodeCountStr)
+// 	if err != nil || nodeCount < 1 || nodeCount > m.NodeCount.Max {
+// 		m.NodeCount.Error = fmt.Sprintf(ErrNodeCountOutOfRange, m.NodeCount.Max)
+// 		return false
+// 	}
 
-	// Validate control plane count
-	if cpCountStr == "" {
-		m.NodeCount.Error = ErrControlPlaneCountRequired
-		return false
-	}
+// 	// Validate control plane count
+// 	if cpCountStr == "" {
+// 		m.NodeCount.Error = ErrControlPlaneCountRequired
+// 		return false
+// 	}
 
-	cpCount, err := strconv.Atoi(cpCountStr)
-	if err != nil || cpCount < 1 {
-		m.NodeCount.Error = ErrControlPlaneCountInvalid
-		return false
-	}
+// 	cpCount, err := strconv.Atoi(cpCountStr)
+// 	if err != nil || cpCount < 1 {
+// 		m.NodeCount.Error = ErrControlPlaneCountInvalid
+// 		return false
+// 	}
 
-	// Control plane count cannot exceed node count
-	if cpCount > nodeCount {
-		m.NodeCount.Error = ErrControlPlaneCountExceedsNodes
-		return false
-	}
+// 	// Control plane count cannot exceed node count
+// 	if cpCount > nodeCount {
+// 		m.NodeCount.Error = ErrControlPlaneCountExceedsNodes
+// 		return false
+// 	}
 
-	// Initialize nodes
-	// m.initializeNodes(nodeCount)
-	m.NodeCount.Error = ""
-	return true
-}
+// 	// Initialize nodes
+// 	// m.initializeNodes(nodeCount)
+// 	m.NodeCount.Error = ""
+// 	return true
+// }

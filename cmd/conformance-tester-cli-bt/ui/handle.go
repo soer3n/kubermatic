@@ -23,6 +23,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -319,13 +320,16 @@ func (m Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keyEnter:
 		// Proceed to next stage if at least one provider is selected
 		hasSelection := false
+		var selectedProviders []string
 		for _, provider := range m.providers {
 			if provider.Selected {
 				hasSelection = true
-				break
+				selectedProviders = append(selectedProviders, provider.DisplayName)
 			}
 		}
 		if hasSelection {
+			// Initialize distribution selection based on selected providers
+			m.distributionSelection = initializeDistributionSelection(selectedProviders)
 			m.stage = stageDistributionSelection
 		}
 		return m, nil
@@ -723,30 +727,60 @@ func (m Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		return m, nil
 
 	case keyDown:
-		if m.distributionSelection.FocusedIndex < len(m.distributionSelection.Distributions)-1 {
+		maxIndex := m.getDistributionMaxFocusIndex()
+		if m.distributionSelection.FocusedIndex < maxIndex {
 			m.distributionSelection.FocusedIndex++
 		}
 		return m, nil
 
+	case keyRight:
+		// Expand provider if focused on provider header
+		provider := m.getDistributionFocusedProvider()
+		if provider != "" {
+			m.distributionSelection.ExpandedProviders[provider] = true
+		}
+		return m, nil
+
+	case keyLeft:
+		// Collapse provider if focused on provider header
+		provider := m.getDistributionFocusedProvider()
+		if provider != "" {
+			m.distributionSelection.ExpandedProviders[provider] = false
+		}
+		return m, nil
+
 	case keySpace:
-		// Toggle selection for the focused distribution
-		currentDist := m.distributionSelection.Distributions[m.distributionSelection.FocusedIndex]
-		m.distributionSelection.Selected[currentDist] = !m.distributionSelection.Selected[currentDist]
+		// Toggle selection for the focused distribution (not provider header)
+		distKey := m.getDistributionFocusedDistribution()
+		if distKey != "" {
+			m.distributionSelection.Selected[distKey] = !m.distributionSelection.Selected[distKey]
+		}
 		return m, nil
 
 	case keySelectAll:
-		// Toggle select/deselect all distributions
+		// Toggle select/deselect all distributions across all providers
 		allSelected := true
-		for _, dist := range m.distributionSelection.Distributions {
-			if !m.distributionSelection.Selected[dist] {
-				allSelected = false
+		for _, provider := range m.distributionSelection.Providers {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			for _, dist := range dists {
+				selectionKey := fmt.Sprintf("%s:%s", provider, dist)
+				if !m.distributionSelection.Selected[selectionKey] {
+					allSelected = false
+					break
+				}
+			}
+			if !allSelected {
 				break
 			}
 		}
 
-		// If all are selected, deselect all; otherwise select all
-		for _, dist := range m.distributionSelection.Distributions {
-			m.distributionSelection.Selected[dist] = !allSelected
+		// Toggle all distributions
+		for _, provider := range m.distributionSelection.Providers {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			for _, dist := range dists {
+				selectionKey := fmt.Sprintf("%s:%s", provider, dist)
+				m.distributionSelection.Selected[selectionKey] = !allSelected
+			}
 		}
 		return m, nil
 
@@ -761,7 +795,20 @@ func (m Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 
 		if hasSelection {
-			m.stage = stageDatacenterSettingsSelection // Move to next stage
+			// Get all selected providers to initialize datacenter settings
+			var selectedProviders []string
+			for _, provider := range m.providers {
+				if provider.Selected {
+					selectedProviders = append(selectedProviders, provider.DisplayName)
+				}
+			}
+
+			// Initialize datacenter settings for all selected providers
+			if len(selectedProviders) > 0 {
+				m.datacenterSettingsSelection = initializeDatacenterSettingsSelection(selectedProviders)
+
+				m.stage = stageDatacenterSettingsSelection // Move to next stage
+			}
 		}
 		return m, nil
 
@@ -773,343 +820,654 @@ func (m Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	return m, nil
 }
 
-// func (m Model) handleNodesConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
-// 	var cmd tea.Cmd
-// 	m.focusCurrent()
+// getDistributionMaxFocusIndex returns the maximum focus index for distributions.
+func (m Model) getDistributionMaxFocusIndex() int {
+	count := 0
+	for _, provider := range m.distributionSelection.Providers {
+		count++ // Provider header
+		if m.distributionSelection.ExpandedProviders[provider] {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			count += len(dists) // Distributions
+		}
+	}
+	return count - 1
+}
 
-// 	// Node details stage handling
-// 	switch msg := msg.(type) {
-// 	case tea.KeyMsg:
-// 		switch msg.String() {
-// 		case keyEsc:
-// 			m.stage = stageSelectNodeCount
-// 			return m, nil
+// getDistributionFocusedProvider returns the provider name if focused on a provider header, empty string otherwise.
+func (m Model) getDistributionFocusedProvider() string {
+	currentIndex := 0
+	for _, provider := range m.distributionSelection.Providers {
+		if currentIndex == m.distributionSelection.FocusedIndex {
+			return provider
+		}
+		currentIndex++
 
-// 		case keyEnter:
-// 			if m.validateAndProceed() {
-// 				m.stage = stageCSIToggle
-// 			}
-// 			return m, nil
+		if m.distributionSelection.ExpandedProviders[provider] {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			currentIndex += len(dists)
+		}
+	}
+	return ""
+}
 
-// 		// Navigation keys
-// 		case keyUp:
-// 			if m.Nodes.CurrentField > 0 {
-// 				m.Nodes.CurrentField--
-// 			}
-// 			m.focusCurrent()
-// 			return m, nil
+// getDistributionFocusedDistribution returns the distribution key if focused on a distribution, empty string otherwise.
+func (m Model) getDistributionFocusedDistribution() string {
+	currentIndex := 0
+	for _, provider := range m.distributionSelection.Providers {
+		currentIndex++ // Provider header
 
-// 		case keyDown:
-// 			if m.Nodes.CurrentField < 2 {
-// 				m.Nodes.CurrentField++
-// 			}
-// 			m.focusCurrent()
-// 			return m, nil
+		if m.distributionSelection.ExpandedProviders[provider] {
+			dists := m.distributionSelection.DistributionsByProvider[provider]
+			for _, dist := range dists {
+				if currentIndex == m.distributionSelection.FocusedIndex {
+					return fmt.Sprintf("%s:%s", provider, dist)
+				}
+				currentIndex++
+			}
+		}
+	}
+	return ""
+}
 
-// 		case keyLeft:
-// 			if m.Nodes.Current > 0 {
-// 				m.Nodes.Current--
-// 				m.Nodes.CurrentField = 0 // Reset field on node change
-// 				m.focusCurrent()
-// 			}
-// 			return m, nil
+// handleDatacenterSettingsSelection handles input for the datacenter settings selection stage.
+func (m Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyUp:
+		if m.datacenterSettingsSelection.FocusedIndex > 0 {
+			m.datacenterSettingsSelection.FocusedIndex--
+		}
+		return m, nil
 
-// 		case keyRight:
-// 			if m.Nodes.Current < len(m.Nodes.Inputs)-1 {
-// 				m.Nodes.Current++
-// 				m.Nodes.CurrentField = 0 // Reset field on node change
-// 				m.focusCurrent()
-// 			}
-// 			return m, nil
+	case keyDown:
+		maxIndex := m.getDatacenterMaxFocusIndex()
+		if m.datacenterSettingsSelection.FocusedIndex < maxIndex {
+			m.datacenterSettingsSelection.FocusedIndex++
+		}
+		return m, nil
 
-// 		case keyTab:
-// 			m.Nodes.CurrentField = (m.Nodes.CurrentField + 1) % 3
-// 			m.focusCurrent()
-// 			return m, nil
+	case keyRight:
+		// Expand provider
+		provider, groupIdx := m.getDatacenterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - expand provider
+			m.datacenterSettingsSelection.ExpandedProviders[provider] = true
+		}
+		return m, nil
 
-// 		case keyShiftTab:
-// 			m.Nodes.CurrentField = (m.Nodes.CurrentField + 2) % 3
-// 			m.focusCurrent()
-// 			return m, nil
-// 		}
+	case keyLeft:
+		// Collapse provider
+		provider, groupIdx := m.getDatacenterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - collapse provider
+			m.datacenterSettingsSelection.ExpandedProviders[provider] = false
+		}
+		return m, nil
 
-// 		// Handle text input
-// 		currentNode := m.Nodes.Inputs[m.Nodes.Current]
-// 		switch m.Nodes.CurrentField {
-// 		case 0:
-// 			currentNode.Address, cmd = currentNode.Address.Update(msg)
-// 		case 1:
-// 			currentNode.Username, cmd = currentNode.Username.Update(msg)
-// 		case 2:
-// 			currentNode.SSHKeyPath, cmd = currentNode.SSHKeyPath.Update(msg)
-// 		}
-// 		m.Nodes.Inputs[m.Nodes.Current] = currentNode
-// 		return m, cmd
+	case keySpace:
+		// Check if focused on provider header
+		provider, groupIdx := m.getDatacenterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - ignore
+			return m, nil
+		}
 
-// 	default:
-// 		// Handle non-key messages (like window resize)
-// 		currentNode := m.Nodes.Inputs[m.Nodes.Current]
-// 		switch m.Nodes.CurrentField {
-// 		case 0:
-// 			currentNode.Address, cmd = currentNode.Address.Update(msg)
-// 		case 1:
-// 			currentNode.Username, cmd = currentNode.Username.Update(msg)
-// 		case 2:
-// 			currentNode.SSHKeyPath, cmd = currentNode.SSHKeyPath.Update(msg)
-// 		}
-// 		m.Nodes.Inputs[m.Nodes.Current] = currentNode
-// 		return m, cmd
-// 	}
-// }
+		// Check if focused on setting group or option
+		provider, groupIdx, optionIdx := m.getDatacenterFocusedOption()
+		if provider == "" {
+			return m, nil
+		}
 
-// func (m Model) handleMetalLBConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	switch msg.String() {
-// 	case keySpace:
-// 		m.MetalLB.Enabled = !m.MetalLB.Enabled
-// 		if m.MetalLB.Enabled {
-// 			m.MetalLB.Input.Focus()
-// 		} else {
-// 			m.MetalLB.Input.Blur()
-// 		}
-// 		return m, nil
-// 	case keyEnter:
-// 		if m.MetalLB.Enabled {
-// 			// Validate IP range input
-// 			inputValue := m.MetalLB.Input.Value()
-// 			if inputValue == "" {
-// 				m.MetalLB.Error = "IP range is required"
-// 				return m, nil
-// 			}
-// 			if !m.validateIPRange(inputValue) {
-// 				m.MetalLB.Error = "Invalid IP range format. Use format: 192.168.1.100-192.168.1.150"
-// 				return m, nil
-// 			}
-// 			m.MetalLB.Error = ""
-// 			if m.offline {
-// 				m.stage = stageContainerRegistry
-// 			} else {
-// 				m.stage = stageSelectNodeCount
-// 			}
-// 			return m, nil
-// 		}
-// 		if m.offline {
-// 			m.stage = stageContainerRegistry
-// 		} else {
-// 			m.stage = stageSelectNodeCount
-// 		}
-// 		return m, nil
-// 	case keyEsc:
-// 		m.stage = stageNetworkConfig
-// 		return m, nil
-// 	default:
-// 		// Handle text input when enabled
-// 		if m.MetalLB.Enabled {
-// 			var cmd tea.Cmd
-// 			m.MetalLB.Input, cmd = m.MetalLB.Input.Update(msg)
-// 			return m, cmd
-// 		}
-// 		return m, nil
-// 	}
-// }
+		groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+		if groupIdx >= len(groups) {
+			return m, nil
+		}
 
-// func (m Model) handleContainerRegistry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	if !m.offline {
-// 		m.stage = stageSelectNodeCount
-// 		return m, nil
-// 	}
+		group := groups[groupIdx]
+		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
 
-// 	m.updateContainerRegistryFocus()
+		if optionIdx == -1 {
+			// Focused on setting group - toggle all options
+			allSelected := true
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if !m.datacenterSettingsSelection.Selected[optionKey] {
+					allSelected = false
+					break
+				}
+			}
 
-// 	switch msg.String() {
-// 	case keyEsc:
-// 		m.stage = stageMetalLB
-// 		return m, nil
-// 	case keyLeft, keyShiftTab, keyUp:
-// 		if m.ContainerRegistry.CurrentField > 0 {
-// 			m.ContainerRegistry.CurrentField--
-// 			m.updateContainerRegistryFocus()
-// 		}
-// 		return m, nil
-// 	case keyRight, keyTab, keyDown:
-// 		if m.ContainerRegistry.CurrentField < 3 {
-// 			m.ContainerRegistry.CurrentField++
-// 			m.updateContainerRegistryFocus()
-// 		}
-// 		return m, nil
-// 	case keyEnter:
-// 		if m.validateContainerRegistry() {
-// 			if m.offline {
-// 				m.stage = stageHelmRegistry
-// 			} else {
-// 				m.stage = stageSelectNodeCount
-// 			}
-// 		}
-// 		return m, nil
-// 	case keySpace:
-// 		if m.ContainerRegistry.CurrentField == 3 {
-// 			m.ContainerRegistry.Insecure = !m.ContainerRegistry.Insecure
-// 			return m, nil
-// 		}
-// 	}
+			// Toggle all options
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				m.datacenterSettingsSelection.Selected[optionKey] = !allSelected
+			}
+			m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
+		} else {
+			// Focused on individual option - toggle it
+			if optionIdx >= len(group.Options) {
+				return m, nil
+			}
+			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
+			m.datacenterSettingsSelection.Selected[optionKey] = !m.datacenterSettingsSelection.Selected[optionKey]
 
-// 	var cmd tea.Cmd
-// 	switch m.ContainerRegistry.CurrentField {
-// 	case 0:
-// 		m.ContainerRegistry.Endpoint, cmd = m.ContainerRegistry.Endpoint.Update(msg)
-// 	case 1:
-// 		m.ContainerRegistry.Username, cmd = m.ContainerRegistry.Username.Update(msg)
-// 	case 2:
-// 		m.ContainerRegistry.Password, cmd = m.ContainerRegistry.Password.Update(msg)
-// 	}
+			// Update group selection state
+			allSelected := true
+			for _, option := range group.Options {
+				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+				if !m.datacenterSettingsSelection.Selected[optKey] {
+					allSelected = false
+					break
+				}
+			}
+			m.datacenterSettingsSelection.SelectedGroups[groupKey] = allSelected
+		}
+		return m, nil
 
-// 	return m, cmd
-// }
+	case keySelectAll:
+		// Check if all options are selected
+		allSelected := true
+		for _, provider := range m.datacenterSettingsSelection.Providers {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					if !m.datacenterSettingsSelection.Selected[selectionKey] {
+						allSelected = false
+						break
+					}
+				}
+				if !allSelected {
+					break
+				}
+			}
+			if !allSelected {
+				break
+			}
+		}
 
-// // handleHelmRegistry manages user input for Helm registry configuration.
-// func (m Model) handleHelmRegistry(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	if !m.offline {
-// 		m.stage = stagePackageRepository
-// 		return m, nil
-// 	}
+		// Toggle all options and groups
+		for _, provider := range m.datacenterSettingsSelection.Providers {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					m.datacenterSettingsSelection.Selected[selectionKey] = !allSelected
+				}
+				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
+			}
+		}
+		return m, nil
 
-// 	m.updateHelmRegistryFocus()
+	case keyEnter:
+		// Initialize cluster settings for the next stage
+		m.clusterSettingsSelection = initializeClusterSettingsSelection()
 
-// 	switch msg.String() {
-// 	case keyEsc:
-// 		m.stage = stageContainerRegistry
-// 		return m, nil
-// 	case keyLeft, keyShiftTab, keyUp:
-// 		if m.HelmRegistry.CurrentField > 0 {
-// 			m.HelmRegistry.CurrentField--
-// 			m.updateHelmRegistryFocus()
-// 		}
-// 		return m, nil
-// 	case keyRight, keyTab, keyDown:
-// 		if m.HelmRegistry.CurrentField < 3 {
-// 			m.HelmRegistry.CurrentField++
-// 			m.updateHelmRegistryFocus()
-// 		}
-// 		return m, nil
-// 	case keyEnter:
-// 		if m.validateHelmRegistry() {
-// 			m.stage = stagePackageRepository
-// 		}
-// 		return m, nil
-// 	case keySpace:
-// 		if m.HelmRegistry.CurrentField == 3 {
-// 			m.HelmRegistry.Insecure = !m.HelmRegistry.Insecure
-// 			return m, nil
-// 		}
-// 	}
+		// Move to next stage
+		m.stage = stageClusterSettingsSelection
+		return m, nil
 
-// 	var cmd tea.Cmd
-// 	switch m.HelmRegistry.CurrentField {
-// 	case 0:
-// 		m.HelmRegistry.Endpoint, cmd = m.HelmRegistry.Endpoint.Update(msg)
-// 	case 1:
-// 		m.HelmRegistry.Username, cmd = m.HelmRegistry.Username.Update(msg)
-// 	case 2:
-// 		m.HelmRegistry.Password, cmd = m.HelmRegistry.Password.Update(msg)
-// 	}
+	case keyEsc:
+		// Move to previous stage
+		m.stage = stageDistributionSelection
+		return m, nil
+	}
 
-// 	return m, cmd
-// }
+	return m, nil
+}
 
-// // handlePackageRepository manages user input for the package repository configuration.
-// func (m Model) handlePackageRepository(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	// Update focus state before handling input
-// 	m.updatePackageRepoFocus()
+// getDatacenterMaxFocusIndex returns the maximum focus index for datacenter settings.
+func (m Model) getDatacenterMaxFocusIndex() int {
+	count := 0
+	for _, provider := range m.datacenterSettingsSelection.Providers {
+		count++ // Provider header
+		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				count++                     // Setting group header
+				count += len(group.Options) // Options (always shown)
+			}
+		}
+	}
+	return count - 1
+}
 
-// 	switch msg.String() {
-// 	case keyEsc:
-// 		m.stage = stageHelmRegistry
-// 		return m, nil
-// 	case keyEnter:
-// 		if m.PackageRepo.Enabled && strings.TrimSpace(m.PackageRepo.Address.Value()) == "" {
-// 			m.PackageRepo.Error = "Package repository address is required when enabled"
-// 		} else {
-// 			m.PackageRepo.Error = ""
-// 			m.stage = stageSelectNodeCount
-// 		}
-// 		return m, nil
-// 	case keySpace:
-// 		m.PackageRepo.Enabled = !m.PackageRepo.Enabled
-// 		m.PackageRepo.Error = ""
-// 		return m, nil
-// 	}
+// getDatacenterFocusedItem returns (provider, groupIdx) for the focused item.
+// Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
+// (provider, groupIdx) if on setting group.
+func (m Model) getDatacenterFocusedItem() (string, int) {
+	currentIndex := 0
+	for _, provider := range m.datacenterSettingsSelection.Providers {
+		if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
+			return provider, -1 // On provider header
+		}
+		currentIndex++
 
-// 	// Only update the address field if the repository is enabled
-// 	if m.PackageRepo.Enabled {
-// 		var cmd tea.Cmd
-// 		m.PackageRepo.Address, cmd = m.PackageRepo.Address.Update(msg)
-// 		return m, cmd
-// 	}
+		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
+					return provider, groupIdx // On setting group
+				}
+				currentIndex++
 
-// 	return m, nil
-// }
+				if group.IsExpanded {
+					currentIndex += len(group.Options) // Skip options
+				}
+			}
+		}
+	}
+	return "", -1
+}
 
-// func (m Model) handleCSIToggle(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	switch msg.String() {
-// 	case keySpace:
-// 		m.CSIEnabled = !m.CSIEnabled
-// 		return m, nil
-// 	case keyEnter:
-// 		m.stage = stageReview
-// 		return m, nil
-// 	case keyEsc:
-// 		m.stage = stageNodeDetails
-// 		return m, nil
-// 	}
-// 	return m, nil
-// }
+// getDatacenterFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
+// Returns ("", -1, -1) if not focused on an option.
+func (m Model) getDatacenterFocusedOption() (string, int, int) {
+	currentIndex := 0
+	for _, provider := range m.datacenterSettingsSelection.Providers {
+		// Provider header
+		if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
+			return provider, -1, -1 // On provider header
+		}
+		currentIndex++
 
-// func (m Model) handleReview(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-// 	switch msg.String() {
-// 	case "up":
-// 		m.Review.Viewport.ScrollUp(1)
-// 	case "down":
-// 		m.Review.Viewport.ScrollDown(1)
-// 	case "pgup":
-// 		m.Review.Viewport.HalfPageUp()
-// 	case "pgdown":
-// 		m.Review.Viewport.HalfPageDown()
-// 	case "left", keyEsc:
-// 		m.stage = stageCSIToggle
-// 	case keyEnter:
-// 		m.stage = stageExecuting
-// 		return m, m.startExecution()
-// 	}
-// 	return m, nil
-// }
+		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				// Group header
+				if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
+					return provider, groupIdx, -1 // On setting group
+				}
+				currentIndex++
 
-// // Replace startExecution to use BootstrapCluster.
-// func (m *Model) startExecution() tea.Cmd {
-// 	return func() tea.Msg {
-// 		ch := make(chan string)
-// 		msgCh := make(chan tea.Msg)
-// 		// Forward string lines as logMsg to msgCh
-// 		go func() {
-// 			for line := range ch {
-// 				msgCh <- logMsg{line: line}
-// 			}
-// 			close(msgCh)
-// 		}()
-// 		// go func() {
-// 		// 	writer := &tuiLogWriter{ch: ch}
-// 		// 	config := getKubeVConfig(m)
-// 		// 	err := kubeone.BootstrapCluster(writer, config)
-// 		// 	if err != nil {
-// 		// 		ch <- "[ERROR] " + err.Error()
-// 		// 		msgCh <- errMsg{err: err}
-// 		// 	}
-// 		// 	close(ch)
-// 		// }()
-// 		return startMsg{ch: msgCh}
-// 	}
-// }
+				// Options (always shown since IsExpanded is always true)
+				for optionIdx := range group.Options {
+					if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
+						return provider, groupIdx, optionIdx
+					}
+					currentIndex++
+				}
+			}
+		}
+	}
+	return "", -1, -1
+}
+
+// handleClusterSettingsSelection handles input for the cluster settings selection stage.
+func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyUp:
+		if m.clusterSettingsSelection.FocusedIndex > 0 {
+			m.clusterSettingsSelection.FocusedIndex--
+		}
+		return m, nil
+
+	case keyDown:
+		maxIndex := m.getClusterMaxFocusIndex()
+		if m.clusterSettingsSelection.FocusedIndex < maxIndex {
+			m.clusterSettingsSelection.FocusedIndex++
+		}
+		return m, nil
+
+	case keySpace:
+		// Check if focused on setting group or option
+		groupIdx, optionIdx := m.getClusterFocusedOption()
+		if groupIdx < 0 || groupIdx >= len(m.clusterSettingsSelection.SettingGroups) {
+			return m, nil
+		}
+
+		group := m.clusterSettingsSelection.SettingGroups[groupIdx]
+		groupKey := group.Key
+
+		if optionIdx == -1 {
+			// Focused on setting group - toggle all options
+			allSelected := true
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if !m.clusterSettingsSelection.Selected[optionKey] {
+					allSelected = false
+					break
+				}
+			}
+
+			// Toggle all options
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				m.clusterSettingsSelection.Selected[optionKey] = !allSelected
+			}
+			m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
+		} else {
+			// Focused on individual option - toggle it
+			if optionIdx >= len(group.Options) {
+				return m, nil
+			}
+			optionKey := fmt.Sprintf("%s:%s", groupKey, group.Options[optionIdx])
+			m.clusterSettingsSelection.Selected[optionKey] = !m.clusterSettingsSelection.Selected[optionKey]
+
+			// Update group selection state
+			allSelected := true
+			for _, option := range group.Options {
+				optKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if !m.clusterSettingsSelection.Selected[optKey] {
+					allSelected = false
+					break
+				}
+			}
+			m.clusterSettingsSelection.SelectedGroups[groupKey] = allSelected
+		}
+		return m, nil
+
+	case keySelectAll:
+		// Check if all options are selected
+		allSelected := true
+		for _, group := range m.clusterSettingsSelection.SettingGroups {
+			for _, option := range group.Options {
+				selectionKey := fmt.Sprintf("%s:%s", group.Key, option)
+				if !m.clusterSettingsSelection.Selected[selectionKey] {
+					allSelected = false
+					break
+				}
+			}
+			if !allSelected {
+				break
+			}
+		}
+
+		// Toggle all options and groups
+		for _, group := range m.clusterSettingsSelection.SettingGroups {
+			groupKey := group.Key
+			for _, option := range group.Options {
+				selectionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				m.clusterSettingsSelection.Selected[selectionKey] = !allSelected
+			}
+			m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
+		}
+		return m, nil
+
+	case keyEnter:
+		// Get all selected providers to initialize machine deployment settings
+		var selectedProviders []string
+		for _, provider := range m.providers {
+			if provider.Selected {
+				selectedProviders = append(selectedProviders, provider.DisplayName)
+			}
+		}
+
+		// Initialize machine deployment settings for the selected providers
+		if len(selectedProviders) > 0 {
+			m.machineDeploymentSettingsSelection = initializeMachineDeploymentSettingsSelection(selectedProviders)
+		}
+
+		// Move to next stage
+		m.stage = stageMachineDeploymentSettingsSelection
+		return m, nil
+
+	case keyEsc:
+		// Move to previous stage
+		m.stage = stageDatacenterSettingsSelection
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// getClusterMaxFocusIndex returns the maximum focus index for cluster settings.
+func (m Model) getClusterMaxFocusIndex() int {
+	count := 0
+	for _, group := range m.clusterSettingsSelection.SettingGroups {
+		count++                     // Setting group header
+		count += len(group.Options) // Options (always shown)
+	}
+	return count - 1
+}
+
+// getClusterFocusedOption returns (groupIdx, optionIdx) for the focused item.
+// Returns (groupIdx, -1) if focused on group header.
+func (m Model) getClusterFocusedOption() (int, int) {
+	currentIndex := 0
+	for groupIdx, group := range m.clusterSettingsSelection.SettingGroups {
+		// Group header
+		if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+			return groupIdx, -1 // On setting group
+		}
+		currentIndex++
+
+		// Options (always shown since IsExpanded is always true)
+		for optionIdx := range group.Options {
+			if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+				return groupIdx, optionIdx
+			}
+			currentIndex++
+		}
+	}
+	return -1, -1
+}
+
+// handleMachineDeploymentSettingsSelection handles input for the machine deployment settings selection stage.
+func (m Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyUp:
+		if m.machineDeploymentSettingsSelection.FocusedIndex > 0 {
+			m.machineDeploymentSettingsSelection.FocusedIndex--
+		}
+		return m, nil
+
+	case keyDown:
+		maxIndex := m.getMachineDeploymentMaxFocusIndex()
+		if m.machineDeploymentSettingsSelection.FocusedIndex < maxIndex {
+			m.machineDeploymentSettingsSelection.FocusedIndex++
+		}
+		return m, nil
+
+	case keyRight:
+		// Expand provider
+		provider, groupIdx := m.getMachineDeploymentFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - expand provider
+			m.machineDeploymentSettingsSelection.ExpandedProviders[provider] = true
+		}
+		return m, nil
+
+	case keyLeft:
+		// Collapse provider
+		provider, groupIdx := m.getMachineDeploymentFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - collapse provider
+			m.machineDeploymentSettingsSelection.ExpandedProviders[provider] = false
+		}
+		return m, nil
+
+	case keySpace:
+		// Check if focused on provider header
+		provider, groupIdx := m.getMachineDeploymentFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - ignore
+			return m, nil
+		}
+
+		// Check if focused on setting group or option
+		provider, groupIdx, optionIdx := m.getMachineDeploymentFocusedOption()
+		if provider == "" {
+			return m, nil
+		}
+
+		groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+		if groupIdx >= len(groups) {
+			return m, nil
+		}
+
+		group := groups[groupIdx]
+		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+
+		if optionIdx == -1 {
+			// Focused on setting group - toggle all options
+			allSelected := true
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if !m.machineDeploymentSettingsSelection.Selected[optionKey] {
+					allSelected = false
+					break
+				}
+			}
+
+			// Toggle all options
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				m.machineDeploymentSettingsSelection.Selected[optionKey] = !allSelected
+			}
+			m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
+		} else {
+			// Focused on individual option - toggle it
+			if optionIdx >= len(group.Options) {
+				return m, nil
+			}
+			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
+			m.machineDeploymentSettingsSelection.Selected[optionKey] = !m.machineDeploymentSettingsSelection.Selected[optionKey]
+
+			// Update group selection state
+			allSelected := true
+			for _, option := range group.Options {
+				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+				if !m.machineDeploymentSettingsSelection.Selected[optKey] {
+					allSelected = false
+					break
+				}
+			}
+			m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = allSelected
+		}
+		return m, nil
+
+	case keySelectAll:
+		// Check if all options are selected
+		allSelected := true
+		for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					if !m.machineDeploymentSettingsSelection.Selected[selectionKey] {
+						allSelected = false
+						break
+					}
+				}
+				if !allSelected {
+					break
+				}
+			}
+			if !allSelected {
+				break
+			}
+		}
+
+		// Toggle all options and groups
+		for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					m.machineDeploymentSettingsSelection.Selected[selectionKey] = !allSelected
+				}
+				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
+			}
+		}
+		return m, nil
+
+	case keyEnter:
+		// Move to next stage
+		m.stage++
+		return m, nil
+
+	case keyEsc:
+		// Move to previous stage
+		m.stage = stageClusterSettingsSelection
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// getMachineDeploymentMaxFocusIndex returns the maximum focus index for machine deployment settings.
+func (m Model) getMachineDeploymentMaxFocusIndex() int {
+	count := 0
+	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+		count++ // Provider header
+		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				count++                     // Setting group header
+				count += len(group.Options) // Options (always shown)
+			}
+		}
+	}
+	return count - 1
+}
+
+// getMachineDeploymentFocusedItem returns (provider, groupIdx) for the focused item.
+// Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
+// (provider, groupIdx) if on setting group.
+func (m Model) getMachineDeploymentFocusedItem() (string, int) {
+	currentIndex := 0
+	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+		if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
+			return provider, -1 // On provider header
+		}
+		currentIndex++
+
+		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
+					return provider, groupIdx // On setting group
+				}
+				currentIndex++
+
+				if group.IsExpanded {
+					currentIndex += len(group.Options) // Skip options
+				}
+			}
+		}
+	}
+	return "", -1
+}
+
+// getMachineDeploymentFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
+// Returns ("", -1, -1) if not focused on an option.
+func (m Model) getMachineDeploymentFocusedOption() (string, int, int) {
+	currentIndex := 0
+	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+		// Provider header
+		if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
+			return provider, -1, -1 // On provider header
+		}
+		currentIndex++
+
+		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
+			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				// Group header
+				if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
+					return provider, groupIdx, -1 // On setting group
+				}
+				currentIndex++
+
+				// Options (always shown since IsExpanded is always true)
+				for optionIdx := range group.Options {
+					if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
+						return provider, groupIdx, optionIdx
+					}
+					currentIndex++
+				}
+			}
+		}
+	}
+	return "", -1, -1
+}
 
 // handleWindowSize manages viewport resizing.
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) tea.Cmd {
+	m.terminalWidth = msg.Width
+	m.terminalHeight = msg.Height
 	m.Review.Viewport.Width = msg.Width - 8
 	m.Review.Viewport.Height = msg.Height - 10
 	return nil
@@ -1172,50 +1530,6 @@ func (m *Model) handleExecOutput(msg execOutputMsg) tea.Cmd {
 	return nil
 }
 
-// func (m Model) handleNodeCountSelection(msg tea.KeyMsg) (Model, tea.Cmd) {
-// 	m.updateNodeCountFocus()
-
-// 	switch msg.String() {
-// 	case keyEsc, "left":
-// 		if m.offline {
-// 			m.stage = stagePackageRepository
-// 		} else {
-// 			m.stage = stageMetalLB
-// 		}
-// 		return m, nil
-// 	case keyEnter:
-// 		// Validate and proceed
-// 		if m.processNodeCountInput() {
-// 			m.stage = stageNodeDetails
-// 		}
-// 		return m, nil
-// 	case keyUp, keyShiftTab:
-// 		if m.NodeCount.CurrentField > 0 {
-// 			m.NodeCount.CurrentField--
-// 			m.updateNodeCountFocus()
-// 		}
-// 		return m, nil
-// 	case keyDown, keyTab:
-// 		if m.NodeCount.CurrentField < 2 {
-// 			m.NodeCount.CurrentField++
-// 			m.updateNodeCountFocus()
-// 		}
-// 		return m, nil
-// 	default:
-// 		// Handle text input based on current field
-// 		var cmd tea.Cmd
-// 		switch m.NodeCount.CurrentField {
-// 		case 0:
-// 			m.NodeCount.NodeCountInput, cmd = m.NodeCount.NodeCountInput.Update(msg)
-// 		case 1:
-// 			m.NodeCount.ControlPlaneCountInput, cmd = m.NodeCount.ControlPlaneCountInput.Update(msg)
-// 		case 2:
-// 			m.NodeCount.APIEndpointInput, cmd = m.NodeCount.APIEndpointInput.Update(msg)
-// 		}
-// 		return m, cmd
-// 	}
-// }
-
 func streamLogs(ch <-chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		msg, ok := <-ch
@@ -1225,147 +1539,6 @@ func streamLogs(ch <-chan tea.Msg) tea.Cmd {
 		return msg
 	}
 }
-
-// // Initialize nodes based on count.
-// func (m *Model) initializeNodes(n int) {
-// 	m.Nodes.Configs = make([]NodeConfig, n)
-// 	m.Nodes.Inputs = make([]NodeInputFields, n)
-// 	for i := range m.Nodes.Inputs {
-// 		m.Nodes.Inputs[i] = NodeInputFields{
-// 			Address:    newTextInput("Address", 64),
-// 			Username:   newTextInput("Username", 32),
-// 			SSHKeyPath: newTextInput("SSH Key Path", 256),
-// 		}
-// 	}
-// 	m.Nodes.Current = 0
-// }
-
-// func (m *Model) focusCurrent() {
-// 	// Safety checks
-// 	if len(m.Nodes.Inputs) == 0 {
-// 		return
-// 	}
-
-// 	// Clamp indexes to valid ranges
-// 	m.Nodes.Current = clamp(m.Nodes.Current, 0, len(m.Nodes.Inputs)-1)
-// 	m.Nodes.CurrentField = clamp(m.Nodes.CurrentField, 0, 2)
-
-// 	currentNode := m.Nodes.Inputs[m.Nodes.Current]
-
-// 	// Blur all fields first
-// 	currentNode.Address.Blur()
-// 	currentNode.Username.Blur()
-// 	currentNode.SSHKeyPath.Blur()
-
-// 	// Focus current field
-// 	switch m.Nodes.CurrentField {
-// 	case 0:
-// 		currentNode.Address.Focus()
-// 	case 1:
-// 		currentNode.Username.Focus()
-// 	case 2:
-// 		currentNode.SSHKeyPath.Focus()
-// 	}
-
-// 	m.Nodes.Inputs[m.Nodes.Current] = currentNode
-// }
-
-// // clamp ensures a value stays within min/max bounds.
-// //
-// //nolint:predeclared
-// func clamp(v, min, max int) int {
-// 	if v < min {
-// 		return min
-// 	}
-// 	if v > max {
-// 		return max
-// 	}
-// 	return v
-// }
-
-// // func getKubeVConfig(m *Model) kubeone.KubeVConfig {
-// // 	config := kubeone.KubeVConfig{
-// // 		DefaultCSIEnabled: m.CSIEnabled,
-// // 		CPCount:           mustAtoi(m.NodeCount.ControlPlaneCountInput.Value()),
-// // 		APIEndpoint:       m.NodeCount.APIEndpointInput.Value(),
-// // 		DefaultLBEnabled:  m.MetalLB.Enabled,
-// // 		LoadBalancerRange: m.MetalLB.Input.Value(),
-// // 		NetworkConfig: kubeone.NetworkConfig{
-// // 			NetworkCIDR: m.Network.CIDR.Value(),
-// // 			GatewayIP:   m.Network.GatewayIP.Value(),
-// // 			DNSServerIP: m.Network.DNSServer.Value(),
-// // 		},
-// // 		OfflineSettings: kubeone.OfflineSettings{
-// // 			Enabled: false,
-// // 		},
-// // 	}
-
-// // 	for _, n := range m.Nodes.Configs {
-// // 		node := kubeone.NodeConfig{
-// // 			Address:    n.Address,
-// // 			SSHKeyPath: n.SSHKeyPath,
-// // 			Username:   n.Username,
-// // 		}
-// // 		config.Nodes = append(config.Nodes, node)
-// // 	}
-
-// // 	if m.offline {
-// // 		config.OfflineSettings = kubeone.OfflineSettings{
-// // 			Enabled: true,
-// // 			ContainerRegistry: kubeone.OCIConfiguration{
-// // 				Address:  m.ContainerRegistry.Endpoint.Value(),
-// // 				Username: m.ContainerRegistry.Username.Value(),
-// // 				Password: m.ContainerRegistry.Password.Value(),
-// // 				Insecure: m.ContainerRegistry.Insecure,
-// // 			},
-// // 			HelmRegistry: kubeone.OCIConfiguration{
-// // 				Address:  normalizeRegistryBase(m.HelmRegistry.Endpoint.Value()),
-// // 				Username: m.HelmRegistry.Username.Value(),
-// // 				Password: m.HelmRegistry.Password.Value(),
-// // 				Insecure: m.HelmRegistry.Insecure,
-// // 			},
-// // 			PackageRepository: m.PackageRepo.Address.Value(),
-// // 		}
-// // 	}
-// // 	return config
-// // }
-
-// func (m *Model) validateAndProceed() bool {
-// 	allFilled := true
-
-// 	// Validate all required fields are filled
-// 	for _, node := range m.Nodes.Inputs {
-// 		if node.Address.Value() == "" ||
-// 			node.Username.Value() == "" ||
-// 			node.SSHKeyPath.Value() == "" {
-// 			allFilled = false
-// 			break
-// 		}
-// 	}
-
-// 	if allFilled {
-// 		// Convert input models to config structs
-// 		configs := make([]NodeConfig, len(m.Nodes.Inputs))
-// 		for i, input := range m.Nodes.Inputs {
-// 			configs[i] = NodeConfig{
-// 				Address:    input.Address.Value(),
-// 				Username:   input.Username.Value(),
-// 				SSHKeyPath: input.SSHKeyPath.Value(),
-// 			}
-// 		}
-// 		m.Nodes.Configs = configs
-
-// 		// Generate and set review configuration
-// 		yamlContent := generateReviewConfig(*m)
-// 		m.Review.ConfigYAML = yamlContent
-
-// 		// Initialize viewport with generated YAML
-// 		m.InitViewport(yamlContent, 80, 15)
-// 		m.stage = stageCSIToggle
-// 		return true
-// 	}
-// 	return false
-// }
 
 func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
 	switch msg.String() {
