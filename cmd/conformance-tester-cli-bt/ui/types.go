@@ -33,10 +33,15 @@ import (
 
 // Message types for execution.
 type (
-	logMsg   struct{ line string }
-	errMsg   struct{ err error }
-	doneMsg  struct{ success bool }
-	startMsg struct{ ch <-chan tea.Msg }
+	logMsg                struct{ line string }
+	errMsg                struct{ err error }
+	doneMsg               struct{ success bool }
+	startMsg              struct{ ch <-chan tea.Msg }
+	seedsPresetsLoadedMsg struct {
+		seeds   []string
+		presets []string
+		err     error
+	}
 )
 
 // App stages.
@@ -85,17 +90,26 @@ type EnvironmentExisting struct {
 	KubeconfigFocusedIndex     int
 	KubeconfigExpandedSections map[string]bool // Keys: "env", "file", "custom"
 	CustomKubeconfigPath       textinput.Model
-	SeedName                   textinput.Model
-	PresetName                 textinput.Model
-	ProjectName                textinput.Model
-	Errors                     EnvironmentExistingErrors
+	// Seeds and Presets fetched from cluster
+	AvailableSeeds      []string
+	SeedFocusedIndex    int
+	SelectedSeedIndex   int
+	AvailablePresets    []string
+	PresetFocusedIndex  int
+	SelectedPresetIndex int
+	LoadingSeeds        bool
+	LoadingPresets      bool
+	FetchError          string
+	ProjectName         textinput.Model
+	Errors              EnvironmentExistingErrors
 }
 
 type EnvironmentExistingErrors struct {
 	KubeconfigPath string
-	SeedName       string
-	PresetName     string
+	SeedName       string // Now validates selection rather than text input
+	PresetName     string // Now validates selection rather than text input
 	ProjectName    string
+	Fields         map[string]string // Additional validation errors
 }
 
 // Provider holds configuration for a single cloud provider.

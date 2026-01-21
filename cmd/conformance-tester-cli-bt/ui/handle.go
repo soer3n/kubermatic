@@ -70,6 +70,20 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else {
 				m.environmentFieldIndex = 0 // Move to checkbox
 			}
+		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex == 2 {
+			// Navigate within Seeds list
+			if m.existingEnv.SeedFocusedIndex > 0 {
+				m.existingEnv.SeedFocusedIndex--
+			} else {
+				m.environmentFieldIndex-- // Move to previous field
+			}
+		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex == 3 {
+			// Navigate within Presets list
+			if m.existingEnv.PresetFocusedIndex > 0 {
+				m.existingEnv.PresetFocusedIndex--
+			} else {
+				m.environmentFieldIndex-- // Move to previous field
+			}
 		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex > 0 {
 			m.environmentFieldIndex--
 		} else if m.environmentFocusIndex == 0 && m.localEnv.Selected && m.environmentFieldIndex > 0 {
@@ -97,7 +111,21 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				if m.existingEnv.KubeconfigFocusedIndex < maxVisualIndex {
 					m.existingEnv.KubeconfigFocusedIndex++
 				} else {
-					m.environmentFieldIndex++ // Move to next field
+					m.environmentFieldIndex++ // Move to next field (Seeds)
+				}
+			} else if m.environmentFieldIndex == 2 {
+				// In Seeds selection
+				if len(m.existingEnv.AvailableSeeds) > 0 && m.existingEnv.SeedFocusedIndex < len(m.existingEnv.AvailableSeeds)-1 {
+					m.existingEnv.SeedFocusedIndex++
+				} else {
+					m.environmentFieldIndex++ // Move to Presets
+				}
+			} else if m.environmentFieldIndex == 3 {
+				// In Presets selection
+				if len(m.existingEnv.AvailablePresets) > 0 && m.existingEnv.PresetFocusedIndex < len(m.existingEnv.AvailablePresets)-1 {
+					m.existingEnv.PresetFocusedIndex++
+				} else {
+					m.environmentFieldIndex++ // Move to Project Name
 				}
 			} else if m.environmentFieldIndex < 4 {
 				m.environmentFieldIndex++
@@ -176,10 +204,26 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				} else {
 					m.existingEnv.CustomKubeconfigPath.Blur()
 				}
+
+				// Trigger Seeds and Presets fetching
+				m.existingEnv.LoadingSeeds = true
+				m.existingEnv.LoadingPresets = true
+				m.existingEnv.FetchError = ""
+				cmd = m.fetchSeedsAndPresets()
+			}
+		} else if m.environmentFocusIndex == 1 && m.environmentFieldIndex == 2 {
+			// Select Seed
+			if len(m.existingEnv.AvailableSeeds) > 0 {
+				m.existingEnv.SelectedSeedIndex = m.existingEnv.SeedFocusedIndex
+			}
+		} else if m.environmentFocusIndex == 1 && m.environmentFieldIndex == 3 {
+			// Select Preset
+			if len(m.existingEnv.AvailablePresets) > 0 {
+				m.existingEnv.SelectedPresetIndex = m.existingEnv.PresetFocusedIndex
 			}
 		}
 		m.updateEnvironmentFocus()
-		return m, nil
+		return m, cmd
 
 	case keyLeft:
 		// Collapse kubeconfig section if on section header
@@ -227,15 +271,9 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 						m.existingEnv.CustomKubeconfigPath, cmd = m.existingEnv.CustomKubeconfigPath.Update(msg)
 					}
 				}
-			} else {
-				switch m.environmentFieldIndex {
-				case 2:
-					m.existingEnv.SeedName, cmd = m.existingEnv.SeedName.Update(msg)
-				case 3:
-					m.existingEnv.PresetName, cmd = m.existingEnv.PresetName.Update(msg)
-				case 4:
-					m.existingEnv.ProjectName, cmd = m.existingEnv.ProjectName.Update(msg)
-				}
+			} else if m.environmentFieldIndex == 4 {
+				// Only Project Name is a text input now (Seeds and Presets are selection lists)
+				m.existingEnv.ProjectName, cmd = m.existingEnv.ProjectName.Update(msg)
 			}
 		}
 		return m, cmd

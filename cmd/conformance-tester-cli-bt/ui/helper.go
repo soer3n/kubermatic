@@ -61,10 +61,8 @@ func (m *Model) updateEnvironmentFocus() {
 	m.localEnv.HelmValuesPath.Blur()
 	m.localEnv.MLAValuesPath.Blur()
 
-	// Blur all existing environment fields
+	// Blur all existing environment text input fields
 	m.existingEnv.CustomKubeconfigPath.Blur()
-	m.existingEnv.SeedName.Blur()
-	m.existingEnv.PresetName.Blur()
 	m.existingEnv.ProjectName.Blur()
 
 	// Focus the current field based on state
@@ -89,10 +87,7 @@ func (m *Model) updateEnvironmentFocus() {
 					m.existingEnv.CustomKubeconfigPath.Focus()
 				}
 			}
-		case 2:
-			m.existingEnv.SeedName.Focus()
-		case 3:
-			m.existingEnv.PresetName.Focus()
+		// case 2 and 3 are now Seeds and Presets selection lists (not text inputs)
 		case 4:
 			m.existingEnv.ProjectName.Focus()
 		}
@@ -141,7 +136,7 @@ func (m *Model) validateLocalEnvironment() bool {
 
 func (m *Model) validateExistingEnvironment() bool {
 	// Clear previous errors
-	m.existingEnv.Errors = EnvironmentExistingErrors{}
+	m.existingEnv.Errors = EnvironmentExistingErrors{Fields: make(map[string]string)}
 
 	// Validate kubeconfig
 	kubeconfigPath := m.getSelectedKubeconfigPath()
@@ -158,17 +153,19 @@ func (m *Model) validateExistingEnvironment() bool {
 		return false
 	}
 
-	// Validate other fields
-	if strings.TrimSpace(m.existingEnv.SeedName.Value()) == "" {
-		m.existingEnv.Errors.SeedName = "Seed name is required"
+	// Validate Seed selection
+	if m.existingEnv.SelectedSeedIndex < 0 || m.existingEnv.SelectedSeedIndex >= len(m.existingEnv.AvailableSeeds) {
+		m.existingEnv.Errors.Fields["SeedName"] = "Please select a Seed"
 		return false
 	}
 
-	if strings.TrimSpace(m.existingEnv.PresetName.Value()) == "" {
-		m.existingEnv.Errors.PresetName = "Preset name is required"
+	// Validate Preset selection
+	if m.existingEnv.SelectedPresetIndex < 0 || m.existingEnv.SelectedPresetIndex >= len(m.existingEnv.AvailablePresets) {
+		m.existingEnv.Errors.Fields["PresetName"] = "Please select a Preset"
 		return false
 	}
 
+	// Validate Project Name
 	if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
 		m.existingEnv.Errors.ProjectName = "Project name is required"
 		return false

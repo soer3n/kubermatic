@@ -23,6 +23,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,10 @@ import (
 	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	"k8c.io/kubermatic/v2/pkg/defaulting"
 	"k8c.io/machine-controller/sdk/providerconfig"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Model holds the state of the app.
@@ -693,10 +698,17 @@ func initialModel() Model {
 				"custom": false,
 			},
 			CustomKubeconfigPath: newTextInput("Enter path to Kubeconfig", 500),
-			SeedName:             newTextInput("e.g., seed-1", 64),
-			PresetName:           newTextInput("e.g., my-preset", 64),
+			AvailableSeeds:       []string{},
+			SeedFocusedIndex:     0,
+			SelectedSeedIndex:    -1,
+			AvailablePresets:     []string{},
+			PresetFocusedIndex:   0,
+			SelectedPresetIndex:  -1,
+			LoadingSeeds:         false,
+			LoadingPresets:       false,
+			FetchError:           "",
 			ProjectName:          newTextInput("e.g., my-project", 64),
-			Errors:               EnvironmentExistingErrors{},
+			Errors:               EnvironmentExistingErrors{Fields: make(map[string]string)},
 		},
 		environmentFocusIndex: 0,
 		environmentFieldIndex: 0,
@@ -720,6 +732,103 @@ func (m *Model) InitViewport(content string, width, height int) {
 
 func (m Model) Init() tea.Cmd {
 	return nil
+}
+
+// fetchSeedsAndPresets fetches Seeds and Presets from the Kubernetes cluster.
+func (m *Model) fetchSeedsAndPresets() tea.Cmd {
+	return func() tea.Msg {
+		// Get the selected kubeconfig path
+		kubeconfigPath := ""
+		optionIndex := m.getKubeconfigOptionIndexFromVisualIndex(m.existingEnv.KubeconfigFocusedIndex)
+		if optionIndex >= 0 && optionIndex < len(m.existingEnv.KubeconfigOptions) {
+			selectedOption := m.existingEnv.KubeconfigOptions[optionIndex]
+			if selectedOption.Type == "custom" {
+				kubeconfigPath = m.existingEnv.CustomKubeconfigPath.Value()
+			} else {
+				kubeconfigPath = selectedOption.Path
+			}
+		}
+
+		if kubeconfigPath == "" {
+			return seedsPresetsLoadedMsg{
+				err: fmt.Errorf("Please select a kubeconfig file"),
+			}
+		}
+
+		// Expand the path if it contains ~
+		if strings.HasPrefix(kubeconfigPath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return seedsPresetsLoadedMsg{err: fmt.Errorf("Unable to access home directory")}
+			}
+			kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
+		}
+
+		// Build config from kubeconfig file
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return seedsPresetsLoadedMsg{
+				err: fmt.Errorf("Invalid kubeconfig file or cluster is not accessible"),
+			}
+		}
+
+		// Create dynamic client
+		dynamicClient, err := dynamic.NewForConfig(config)
+		if err != nil {
+			return seedsPresetsLoadedMsg{
+				err: fmt.Errorf("Unable to connect to the cluster. Please check your kubeconfig"),
+			}
+		}
+
+		// Define GVRs for Seeds and Presets
+		seedGVR := schema.GroupVersionResource{
+			Group:    "kubermatic.k8c.io",
+			Version:  "v1",
+			Resource: "seeds",
+		}
+		presetGVR := schema.GroupVersionResource{
+			Group:    "kubermatic.k8c.io",
+			Version:  "v1",
+			Resource: "presets",
+		}
+
+		ctx := context.Background()
+
+		// Fetch Seeds
+		seedList, err := dynamicClient.Resource(seedGVR).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return seedsPresetsLoadedMsg{
+				err: fmt.Errorf("Unable to fetch Seeds. Ensure this is a Kubermatic cluster"),
+			}
+		}
+
+		seeds := make([]string, 0, len(seedList.Items))
+		for _, item := range seedList.Items {
+			seeds = append(seeds, item.GetName())
+		}
+		sort.Strings(seeds)
+
+		// Fetch Presets
+		presetList, err := dynamicClient.Resource(presetGVR).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			return seedsPresetsLoadedMsg{
+				seeds: seeds,
+				err:   fmt.Errorf("Unable to fetch Presets. Ensure this is a Kubermatic cluster"),
+			}
+		}
+
+		presets := make([]string, 0, len(presetList.Items))
+		for _, item := range presetList.Items {
+			presets = append(presets, item.GetName())
+		}
+		sort.Strings(presets)
+
+		return seedsPresetsLoadedMsg{
+			seeds:   seeds,
+			presets: presets,
+			err:     nil,
+		}
+	}
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -781,6 +890,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd = m.handleDone(msg)
 	case execOutputMsg:
 		cmd = m.handleExecOutput(msg)
+	case seedsPresetsLoadedMsg:
+		m.existingEnv.LoadingSeeds = false
+		m.existingEnv.LoadingPresets = false
+		if msg.err != nil {
+			m.existingEnv.FetchError = msg.err.Error()
+		} else {
+			m.existingEnv.AvailableSeeds = msg.seeds
+			m.existingEnv.AvailablePresets = msg.presets
+			m.existingEnv.FetchError = ""
+			// Reset selections when new data is loaded
+			m.existingEnv.SeedFocusedIndex = 0
+			m.existingEnv.SelectedSeedIndex = -1
+			m.existingEnv.PresetFocusedIndex = 0
+			m.existingEnv.SelectedPresetIndex = -1
+		}
 	}
 
 	return m, cmd

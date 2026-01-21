@@ -324,19 +324,19 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 						radioBtn = "(•)"
 					}
 
-					optionLine := fmt.Sprintf("\t\t\t\t%s %s",
+					content := fmt.Sprintf("%s %s",
 						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn),
 						option.Path)
 
 					if isFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
+						content = styleFocusHighlight.Render(content)
 					} else if option.Selected {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+						content = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(content)
 					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+						content = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(content)
 					}
 
-					b.WriteString(optionLine + "\n")
+					b.WriteString("\t\t\t\t" + content + "\n")
 				}
 				currentOptionIndex += len(envOptions)
 			}
@@ -387,28 +387,28 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 
 					// Build the option line with radio button and filename
 					radioBtnStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn)
-					var optionLine string
+					var content string
 
 					// If selected, show filename and path together with path faint
 					if option.Selected {
 						pathStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(fmt.Sprintf(" → %s", option.Path))
-						optionLine = fmt.Sprintf("\t\t\t\t%s %s%s", radioBtnStyled, filename, pathStyled)
+						content = fmt.Sprintf("%s %s%s", radioBtnStyled, filename, pathStyled)
 					} else {
-						optionLine = fmt.Sprintf("\t\t\t\t%s %s", radioBtnStyled, filename)
+						content = fmt.Sprintf("%s %s", radioBtnStyled, filename)
 					}
 
 					if isFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
+						content = styleFocusHighlight.Render(content)
 					} else if option.Selected {
 						// For selected items, only bold the filename part, keep path faint
 						filenameBold := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(filename)
 						pathStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(fmt.Sprintf(" → %s", option.Path))
-						optionLine = fmt.Sprintf("\t\t\t\t%s %s%s", radioBtnStyled, filenameBold, pathStyled)
+						content = fmt.Sprintf("%s %s%s", radioBtnStyled, filenameBold, pathStyled)
 					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+						content = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(content)
 					}
 
-					b.WriteString(optionLine + "\n")
+					b.WriteString("\t\t\t\t" + content + "\n")
 				}
 				currentOptionIndex += len(fileOptions)
 			}
@@ -455,18 +455,18 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 						radioBtn = "(•)"
 					}
 
-					optionLine := fmt.Sprintf("\t\t\t\t%s %s",
+					content := fmt.Sprintf("%s %s",
 						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn), "Use custom path")
 
 					if isFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
+						content = styleFocusHighlight.Render(content)
 					} else if option.Selected {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+						content = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(content)
 					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+						content = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(content)
 					}
 
-					b.WriteString(optionLine + "\n")
+					b.WriteString("\t\t\t\t" + content + "\n")
 
 					// Show custom path input on a new line when selected
 					if option.Selected {
@@ -489,31 +489,90 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 			b.WriteString(styleError.Width(uiWidth-4).Render(err) + "\n")
 		}
 
-		// Other existing cluster fields
-		existingFields := []struct {
-			Label    string
-			Input    textinput.Model
-			Error    string
-			FieldIdx int
-		}{
-			{"Seed Name:", m.existingEnv.SeedName, m.existingEnv.Errors.SeedName, 2},
-			{"Preset Name:", m.existingEnv.PresetName, m.existingEnv.Errors.PresetName, 3},
-			{"Project Name:", m.existingEnv.ProjectName, m.existingEnv.Errors.ProjectName, 4},
-		}
+		// Seeds Selection (fetched from cluster)
+		b.WriteString(styleLabel.Render("Seed Name:") + "\n")
+		if m.existingEnv.LoadingSeeds {
+			loadingMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render("Loading seeds...")
+			b.WriteString("\t\t\t\t\t\t" + loadingMsg + "\n")
+		} else if m.existingEnv.FetchError != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(m.existingEnv.FetchError)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		} else if len(m.existingEnv.AvailableSeeds) == 0 {
+			emptyMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render("No seeds found. Select a kubeconfig first.")
+			b.WriteString("\t\t\t\t\t\t" + emptyMsg + "\n")
+		} else {
+			for i, seed := range m.existingEnv.AvailableSeeds {
+				radioBtn := "( )"
+				if i == m.existingEnv.SelectedSeedIndex {
+					radioBtn = "(•)"
+				}
 
-		for _, field := range existingFields {
-			line := lipgloss.JoinHorizontal(
-				lipgloss.Left,
-				styleLabel.Render(field.Label),
-				" ",
-				styleInput.Render(field.Input.View()),
-			)
-			b.WriteString(line + "\n")
-
-			// Add error message if present
-			if field.Error != "" {
-				b.WriteString(styleError.Width(uiWidth-4).Render(field.Error) + "\n")
+				content := fmt.Sprintf("%s %s", radioBtn, seed)
+				isFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 2 && i == m.existingEnv.SeedFocusedIndex
+				if isFocused {
+					content = styleFocusHighlight.Render(content)
+				}
+				seedLine := "\t\t\t\t\t\t" + content
+				b.WriteString(seedLine + "\n")
 			}
+		}
+		if m.existingEnv.Errors.SeedName != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(m.existingEnv.Errors.SeedName)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		}
+		if err, ok := m.existingEnv.Errors.Fields["SeedName"]; ok && err != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(err)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		}
+		b.WriteString("\n")
+
+		// Presets Selection (fetched from cluster)
+		b.WriteString(styleLabel.Render("Preset Name:") + "\n")
+		if m.existingEnv.LoadingPresets {
+			loadingMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render("Loading presets...")
+			b.WriteString("\t\t\t\t\t\t" + loadingMsg + "\n")
+		} else if m.existingEnv.FetchError != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(m.existingEnv.FetchError)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		} else if len(m.existingEnv.AvailablePresets) == 0 {
+			emptyMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render("No presets found. Select a kubeconfig first.")
+			b.WriteString("\t\t\t\t\t\t" + emptyMsg + "\n")
+		} else {
+			for i, preset := range m.existingEnv.AvailablePresets {
+				radioBtn := "( )"
+				if i == m.existingEnv.SelectedPresetIndex {
+					radioBtn = "(•)"
+				}
+
+				content := fmt.Sprintf("%s %s", radioBtn, preset)
+				isFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 3 && i == m.existingEnv.PresetFocusedIndex
+				if isFocused {
+					content = styleFocusHighlight.Render(content)
+				}
+				presetLine := "\t\t\t\t\t\t" + content
+				b.WriteString(presetLine + "\n")
+			}
+		}
+		if m.existingEnv.Errors.PresetName != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(m.existingEnv.Errors.PresetName)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		}
+		if err, ok := m.existingEnv.Errors.Fields["PresetName"]; ok && err != "" {
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(err)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
+		}
+		b.WriteString("\n")
+
+		// Project Name (text input field)
+		projectLine := lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			styleLabel.Render("Project Name:"),
+			" ",
+			styleInput.Render(m.existingEnv.ProjectName.View()),
+		)
+		b.WriteString(projectLine + "\n")
+		if m.existingEnv.Errors.ProjectName != "" {
+			b.WriteString(styleError.Width(uiWidth-4).Render(m.existingEnv.Errors.ProjectName) + "\n")
 		}
 		b.WriteString("\n")
 	}
