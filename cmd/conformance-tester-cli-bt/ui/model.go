@@ -23,7 +23,9 @@
 package ui
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -60,6 +62,8 @@ type Model struct {
 	clusterSettingsSelection ClusterSettingsSelection
 
 	machineDeploymentSettingsSelection MachineDeploymentSettingsSelection
+
+	clusterConfiguration ClusterConfigurationSettings
 
 	Review  Review
 	cmdChan <-chan tea.Msg
@@ -350,10 +354,10 @@ func initializeMachineDeploymentSettingsSelection(providers []string) MachineDep
 }
 
 // initializeClusterSettingsSelection creates the cluster settings selection structure.
-func initializeClusterSettingsSelection() ClusterSettingsSelection {
+func initializeClusterSettingsSelection(providers []string) ClusterSettingsSelection {
 	descriptionsMap := ginkgoutils.GetClusterDescriptions()
 
-	// Convert map to SettingGroup slice
+	// Convert map to SettingGroup slice (same for all providers)
 	var groups []SettingGroup
 	keys := make([]string, 0, len(descriptionsMap))
 	for key := range descriptionsMap {
@@ -371,11 +375,110 @@ func initializeClusterSettingsSelection() ClusterSettingsSelection {
 		})
 	}
 
+	// Create settings map for each provider (same settings for all)
+	settingsMap := make(map[string][]SettingGroup)
+	for _, provider := range providers {
+		settingsMap[provider] = groups
+	}
+
+	// Initialize expanded providers map (all expanded by default)
+	expandedMap := make(map[string]bool)
+	for _, provider := range providers {
+		expandedMap[provider] = true
+	}
+
 	return ClusterSettingsSelection{
-		SettingGroups:  groups,
-		Selected:       make(map[string]bool),
-		SelectedGroups: make(map[string]bool),
-		FocusedIndex:   0,
+		Providers:          providers,
+		SettingsByProvider: settingsMap,
+		Selected:           make(map[string]bool),
+		SelectedGroups:     make(map[string]bool),
+		FocusedIndex:       0,
+		ExpandedProviders:  expandedMap,
+	}
+}
+
+// initializeClusterConfiguration creates the cluster configuration structure.
+func initializeClusterConfiguration() ClusterConfigurationSettings {
+	expandedCategories := map[string]bool{
+		"Cluster Naming":      true,
+		"Machine Deployment":  true,
+		"Resource Allocation": true,
+		"Test Options":        true,
+	}
+
+	return ClusterConfigurationSettings{
+		Categories: []ConfigCategory{
+			{
+				Name:        "Cluster Naming",
+				Description: "Configure how user clusters will be named during testing",
+				Settings: []ConfigSetting{
+					{
+						Name:        "Name Prefix",
+						Description: "Prefix for created user cluster names (e.g., 'test-cluster' creates test-cluster-1, test-cluster-2, etc.)",
+						Type:        ConfigTypeString,
+						Value:       "conformance-test",
+					},
+				},
+			},
+			{
+				Name:        "Machine Deployment",
+				Description: "Configure the worker nodes for each user cluster",
+				Settings: []ConfigSetting{
+					{
+						Name:        "Node Count",
+						Description: "Number of machine deployment replicas in each user cluster",
+						Type:        ConfigTypeInt,
+						Value:       3,
+					},
+				},
+			},
+			{
+				Name:        "Resource Allocation",
+				Description: "Configure resource requirements for worker nodes. Multiple values create separate test scenarios",
+				Settings: []ConfigSetting{
+					{
+						Name:        "CPU Cores",
+						Description: "CPU cores per worker node (e.g., 2, 4, 8). Comma-separated for multiple values",
+						Type:        ConfigTypeIntArray,
+						Value:       []int{2},
+					},
+					{
+						Name:        "Memory",
+						Description: "RAM per worker node (e.g., 4Gi, 8Gi, 16Gi). Comma-separated for multiple values",
+						Type:        ConfigTypeStringArray,
+						Value:       []string{"4Gi"},
+					},
+					{
+						Name:        "Disk Size",
+						Description: "Disk size per worker node (e.g., 25Gi, 50Gi, 100Gi). Comma-separated for multiple values",
+						Type:        ConfigTypeStringArray,
+						Value:       []string{"25Gi"},
+					},
+				},
+			},
+			{
+				Name:        "Test Options",
+				Description: "Additional testing features and configurations",
+				Settings: []ConfigSetting{
+					{
+						Name:        "Test Cluster Update",
+						Description: "Test Kubernetes version upgrades by updating clusters after initial deployment",
+						Type:        ConfigTypeBool,
+						Value:       false,
+					},
+					{
+						Name:        "Enable Dual Stack",
+						Description: "Enable IPv4/IPv6 dual-stack networking for created clusters",
+						Type:        ConfigTypeBool,
+						Value:       false,
+					},
+				},
+			},
+		},
+		FocusedIndex:       0,
+		EditMode:           false,
+		EditingBuffer:      "",
+		ExpandedCategories: expandedCategories,
 	}
 }
 
@@ -498,6 +601,76 @@ func initializeProviders() []Provider {
 	return providers
 }
 
+// discoverKubeconfigOptions discovers available kubeconfig options.
+func discoverKubeconfigOptions() []KubeconfigOption {
+	options := []KubeconfigOption{}
+
+	// Option 1: Environment variable KUBECONFIG
+	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
+		options = append(options, KubeconfigOption{
+			Type:        "env",
+			DisplayName: "Environment Variable (KUBECONFIG)",
+			Path:        envPath,
+			Selected:    true, // Default selection
+		})
+	}
+
+	// Option 2: Discover kubeconfigs in ~/.kube directory
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		kubeDir := filepath.Join(homeDir, ".kube")
+		if entries, err := os.ReadDir(kubeDir); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					// Skip common non-kubeconfig files
+					name := entry.Name()
+					if name == "cache" || name == "http-cache" {
+						continue
+					}
+
+					fullPath := filepath.Join(kubeDir, name)
+					displayName := fmt.Sprintf("~/.kube/%s", name)
+
+					options = append(options, KubeconfigOption{
+						Type:        "file",
+						DisplayName: displayName,
+						Path:        fullPath,
+						Selected:    false,
+					})
+				}
+			}
+		}
+	}
+
+	// Option 3: Custom path
+	options = append(options, KubeconfigOption{
+		Type:        "custom",
+		DisplayName: "Custom Path",
+		Path:        "",
+		Selected:    false,
+	})
+
+	// If no env variable, select first available option
+	if len(options) > 0 && options[0].Type != "env" {
+		options[0].Selected = true
+	}
+
+	return options
+}
+
+// getSelectedKubeconfigPath returns the currently selected kubeconfig path.
+func (m Model) getSelectedKubeconfigPath() string {
+	for _, option := range m.existingEnv.KubeconfigOptions {
+		if option.Selected {
+			if option.Type == "custom" {
+				return m.existingEnv.CustomKubeconfigPath.Value()
+			}
+			return option.Path
+		}
+	}
+	return ""
+}
+
 func initialModel() Model {
 	model := Model{
 		stage: stageWelcome,
@@ -510,13 +683,20 @@ func initialModel() Model {
 			Errors:                       EnvironmentLocalErrors{},
 		},
 		existingEnv: EnvironmentExisting{
-			Selected:       false,
-			CurrentField:   0,
-			KubeconfigPath: newTextInput("e.g., ~/.kube/config", 256),
-			SeedName:       newTextInput("e.g., seed-1", 64),
-			PresetName:     newTextInput("e.g., my-preset", 64),
-			ProjectName:    newTextInput("e.g., my-project", 64),
-			Errors:         EnvironmentExistingErrors{},
+			Selected:               false,
+			CurrentField:           0,
+			KubeconfigOptions:      discoverKubeconfigOptions(),
+			KubeconfigFocusedIndex: 0,
+			KubeconfigExpandedSections: map[string]bool{
+				"env":    false,
+				"file":   false,
+				"custom": false,
+			},
+			CustomKubeconfigPath: newTextInput("Enter path to Kubeconfig", 500),
+			SeedName:             newTextInput("e.g., seed-1", 64),
+			PresetName:           newTextInput("e.g., my-preset", 64),
+			ProjectName:          newTextInput("e.g., my-project", 64),
+			Errors:               EnvironmentExistingErrors{},
 		},
 		environmentFocusIndex: 0,
 		environmentFieldIndex: 0,
@@ -585,6 +765,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleClusterSettingsSelection(msg)
 		case stageMachineDeploymentSettingsSelection:
 			return m.handleMachineDeploymentSettingsSelection(msg)
+		case stageClusterConfiguration:
+			return m.handleClusterConfiguration(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -666,6 +848,8 @@ func (m Model) View() string {
 		content = m.renderClusterSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
 	case stageMachineDeploymentSettingsSelection:
 		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+	case stageClusterConfiguration:
+		content = m.renderClusterConfiguration(helpWithBorder, uiWidth, uiInnerWidth)
 
 	// case stageReview:
 	// 	content = m.renderReview(helpWithBorder)

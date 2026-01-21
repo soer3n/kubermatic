@@ -200,7 +200,7 @@ func (m Model) renderWelcome(helpWithBorder string, uiWidth, uiInnerWidth int) s
 }
 
 func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
-	const boxHeight = 20
+	const boxHeight = 30 // Increased height for kubeconfig options
 	title := styleHeader.Render("Select Deployment Environment")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(environmentSelectionText)
 
@@ -266,13 +266,236 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 
 	// Show Existing Cluster fields if selected
 	if m.existingEnv.Selected {
+		// Kubeconfig selection
+		kubeconfigLabel := styleLabel.Render("Kubeconfig:")
+		b.WriteString(kubeconfigLabel + "\n")
+
+		// Group options by type
+		var envOptions, fileOptions, customOptions []KubeconfigOption
+		for _, option := range m.existingEnv.KubeconfigOptions {
+			switch option.Type {
+			case "env":
+				envOptions = append(envOptions, option)
+			case "file":
+				fileOptions = append(fileOptions, option)
+			case "custom":
+				customOptions = append(customOptions, option)
+			}
+		}
+
+		currentOptionIndex := 0
+
+		// Section 1: Environment Variable
+		if len(envOptions) > 0 {
+			isExpanded := m.existingEnv.KubeconfigExpandedSections["env"]
+			isSectionFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && currentOptionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+			expandIndicator := "▶"
+			if isExpanded {
+				expandIndicator = "▼"
+			}
+
+			sectionHeaderText := fmt.Sprintf("\t\t\t%s Environment Variable", expandIndicator)
+			if isSectionFocused {
+				sectionHeaderText = styleFocusHighlight.Render(sectionHeaderText)
+			} else {
+				sectionHeaderText = lipgloss.NewStyle().
+					Foreground(lipgloss.Color(colorMainBlue)).
+					Bold(true).
+					Render(sectionHeaderText)
+			}
+			b.WriteString(sectionHeaderText + "\n")
+
+			sectionDesc := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(colorMainWhite)).
+				Faint(true).
+				Render("\t\t\tKubeconfig path from KUBECONFIG environment variable")
+			b.WriteString(sectionDesc + "\n")
+			currentOptionIndex++
+
+			if isExpanded {
+
+				for i, option := range envOptions {
+					optionIndex := currentOptionIndex + i
+					isFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && optionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+					radioBtn := "( )"
+					if option.Selected {
+						radioBtn = "(•)"
+					}
+
+					optionLine := fmt.Sprintf("\t\t\t\t%s %s",
+						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn),
+						option.Path)
+
+					if isFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if option.Selected {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
+
+					b.WriteString(optionLine + "\n")
+				}
+				currentOptionIndex += len(envOptions)
+			}
+			b.WriteString("\n")
+		}
+
+		// Section 2: Files from .kube directory
+		if len(fileOptions) > 0 {
+			isExpanded := m.existingEnv.KubeconfigExpandedSections["file"]
+			isSectionFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && currentOptionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+			expandIndicator := "▶"
+			if isExpanded {
+				expandIndicator = "▼"
+			}
+
+			sectionHeaderText := fmt.Sprintf("\t\t\t%s Kubeconfigs from ~/.kube", expandIndicator)
+			if isSectionFocused {
+				sectionHeaderText = styleFocusHighlight.Render(sectionHeaderText)
+			} else {
+				sectionHeaderText = lipgloss.NewStyle().
+					Foreground(lipgloss.Color(colorMainBlue)).
+					Bold(true).
+					Render(sectionHeaderText)
+			}
+			b.WriteString(sectionHeaderText + "\n")
+
+			sectionDesc := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(colorMainWhite)).
+				Faint(true).
+				Render("\t\t\tDiscovered kubeconfig files in your .kube directory")
+			b.WriteString(sectionDesc + "\n")
+			currentOptionIndex++
+
+			if isExpanded {
+
+				for i, option := range fileOptions {
+					optionIndex := currentOptionIndex + i
+					isFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && optionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+					radioBtn := "( )"
+					if option.Selected {
+						radioBtn = "(•)"
+					}
+
+					// Extract just the filename for display
+					filename := option.DisplayName[len("~/.kube/"):]
+
+					// Build the option line with radio button and filename
+					radioBtnStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn)
+					var optionLine string
+
+					// If selected, show filename and path together with path faint
+					if option.Selected {
+						pathStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(fmt.Sprintf(" → %s", option.Path))
+						optionLine = fmt.Sprintf("\t\t\t\t%s %s%s", radioBtnStyled, filename, pathStyled)
+					} else {
+						optionLine = fmt.Sprintf("\t\t\t\t%s %s", radioBtnStyled, filename)
+					}
+
+					if isFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if option.Selected {
+						// For selected items, only bold the filename part, keep path faint
+						filenameBold := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(filename)
+						pathStyled := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(fmt.Sprintf(" → %s", option.Path))
+						optionLine = fmt.Sprintf("\t\t\t\t%s %s%s", radioBtnStyled, filenameBold, pathStyled)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
+
+					b.WriteString(optionLine + "\n")
+				}
+				currentOptionIndex += len(fileOptions)
+			}
+			b.WriteString("\n")
+		}
+
+		// Section 3: Custom Path
+		if len(customOptions) > 0 {
+			isExpanded := m.existingEnv.KubeconfigExpandedSections["custom"]
+			isSectionFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && currentOptionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+			expandIndicator := "▶"
+			if isExpanded {
+				expandIndicator = "▼"
+			}
+
+			sectionHeaderText := fmt.Sprintf("\t\t\t%s Custom Path", expandIndicator)
+			if isSectionFocused {
+				sectionHeaderText = styleFocusHighlight.Render(sectionHeaderText)
+			} else {
+				sectionHeaderText = lipgloss.NewStyle().
+					Foreground(lipgloss.Color(colorMainBlue)).
+					Bold(true).
+					Render(sectionHeaderText)
+			}
+			b.WriteString(sectionHeaderText + "\n")
+
+			sectionDesc := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(colorMainWhite)).
+				Faint(true).
+				Render("\t\t\tSpecify a custom path to your kubeconfig file")
+			b.WriteString(sectionDesc + "\n")
+			currentOptionIndex++
+
+			if isExpanded {
+
+				for i, option := range customOptions {
+					optionIndex := currentOptionIndex + i
+					isFocused := m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 && optionIndex == m.existingEnv.KubeconfigFocusedIndex
+
+					// Always show radio button
+					radioBtn := "( )"
+					if option.Selected {
+						radioBtn = "(•)"
+					}
+
+					optionLine := fmt.Sprintf("\t\t\t\t%s %s",
+						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(radioBtn), "Use custom path")
+
+					if isFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if option.Selected {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
+
+					b.WriteString(optionLine + "\n")
+
+					// Show custom path input on a new line when selected
+					if option.Selected {
+						line := lipgloss.JoinHorizontal(
+							lipgloss.Left,
+							styleLabel.Render("Custom Path:"),
+							" ",
+							styleInput.Render(m.existingEnv.CustomKubeconfigPath.View()),
+						)
+						b.WriteString(line + "\n")
+					}
+				}
+				currentOptionIndex += len(customOptions)
+			}
+			b.WriteString("\n")
+		}
+
+		// Show kubeconfig error if present
+		if err := m.existingEnv.Errors.KubeconfigPath; err != "" {
+			b.WriteString(styleError.Width(uiWidth-4).Render(err) + "\n")
+		}
+
+		// Other existing cluster fields
 		existingFields := []struct {
 			Label    string
 			Input    textinput.Model
 			Error    string
 			FieldIdx int
 		}{
-			{"Kubeconfig Path:", m.existingEnv.KubeconfigPath, m.existingEnv.Errors.KubeconfigPath, 1},
 			{"Seed Name:", m.existingEnv.SeedName, m.existingEnv.Errors.SeedName, 2},
 			{"Preset Name:", m.existingEnv.PresetName, m.existingEnv.Errors.PresetName, 3},
 			{"Project Name:", m.existingEnv.ProjectName, m.existingEnv.Errors.ProjectName, 4},
@@ -731,7 +954,14 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth,
 func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	const boxHeight = 20
 
-	title := styleHeader.Render("Cluster Settings Selection")
+	// Build title based on number of providers
+	var title string
+	if len(m.clusterSettingsSelection.Providers) == 1 {
+		title = styleHeader.Render(fmt.Sprintf("%s Cluster Settings Selection", m.clusterSettingsSelection.Providers[0]))
+	} else {
+		title = styleHeader.Render("Cluster Settings Selection")
+	}
+
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Select cluster settings to test. Selecting none will use default values (typically false) for all settings.")
 
 	var b strings.Builder
@@ -739,8 +969,22 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, ui
 	b.WriteString(description + "\n\n")
 
 	// Check if no settings are available
-	if len(m.clusterSettingsSelection.SettingGroups) == 0 {
-		noSettingsMsg := "No cluster settings available."
+	hasSettings := false
+	for _, provider := range m.clusterSettingsSelection.Providers {
+		if len(m.clusterSettingsSelection.SettingsByProvider[provider]) > 0 {
+			hasSettings = true
+			break
+		}
+	}
+
+	if !hasSettings {
+		var providersStr string
+		if len(m.clusterSettingsSelection.Providers) == 1 {
+			providersStr = m.clusterSettingsSelection.Providers[0]
+		} else {
+			providersStr = strings.Join(m.clusterSettingsSelection.Providers, ", ")
+		}
+		noSettingsMsg := fmt.Sprintf("No cluster settings available for %s.", providersStr)
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(noSettingsMsg))
 		b.WriteString("\n\n")
 		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render("Press Enter to continue"))
@@ -750,58 +994,90 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, ui
 		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 	}
 
-	// Render setting groups
+	// Render hierarchical structure: Provider → Group → Options
 	currentIndex := 0
-	for _, group := range m.clusterSettingsSelection.SettingGroups {
-		groupKey := group.Key
-		isGroupSelected := m.clusterSettingsSelection.SelectedGroups[groupKey]
-		isGroupFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
+	for providerIdx, provider := range m.clusterSettingsSelection.Providers {
+		isProviderExpanded := m.clusterSettingsSelection.ExpandedProviders[provider]
+		isProviderFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
 
-		// Setting group with checkbox
-		checkbox := "[ ]"
-		if isGroupSelected {
-			checkbox = "[✓]"
+		// Provider header with expand/collapse indicator
+		expandIndicator := "▶"
+		if isProviderExpanded {
+			expandIndicator = "▼"
 		}
 
-		groupHeader := fmt.Sprintf("  %s %s",
-			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-			group.Name)
-		if isGroupFocused {
-			groupHeader = styleFocusHighlight.Render(groupHeader)
-		} else if isGroupSelected {
-			groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
-		} else {
-			groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
+		if len(m.clusterSettingsSelection.Providers) > 1 {
+			if isProviderFocused {
+				providerHeader = styleFocusHighlight.Render(providerHeader)
+			} else {
+				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
+			}
+			b.WriteString(providerHeader + "\n")
 		}
-		b.WriteString(groupHeader + "\n")
 		currentIndex++
 
-		// Render options for this group (always shown)
-		for optionIdx, option := range group.Options {
-			isOptionFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
-			selectionKey := fmt.Sprintf("%s:%s", groupKey, option)
-			isSelected := m.clusterSettingsSelection.Selected[selectionKey]
+		// Render setting groups for this provider if expanded
+		if isProviderExpanded {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				isGroupFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				isGroupSelected := m.clusterSettingsSelection.SelectedGroups[groupKey]
 
-			checkbox := "[ ]"
-			if isSelected {
-				checkbox = "[✓]"
+				// Setting group with checkbox
+				checkbox := "[ ]"
+				if isGroupSelected {
+					checkbox = "[✓]"
+				}
+
+				groupHeader := fmt.Sprintf("  %s %s",
+					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+					group.Name)
+				if isGroupFocused {
+					groupHeader = styleFocusHighlight.Render(groupHeader)
+				} else if isGroupSelected {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
+				} else {
+					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+				}
+				b.WriteString(groupHeader + "\n")
+				currentIndex++
+
+				// Render options for this group (always shown)
+				for optionIdx, option := range group.Options {
+					isOptionFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					isSelected := m.clusterSettingsSelection.Selected[selectionKey]
+
+					checkbox := "[ ]"
+					if isSelected {
+						checkbox = "[✓]"
+					}
+
+					optionLine := fmt.Sprintf("    %s %s",
+						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+						option)
+
+					if isOptionFocused {
+						optionLine = styleFocusHighlight.Render(optionLine)
+					} else if isSelected {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+					} else {
+						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+					}
+
+					b.WriteString(optionLine + "\n")
+					currentIndex++
+					_ = optionIdx // Suppress unused variable warning
+				}
+				_ = groupIdx // Suppress unused variable warning
 			}
+		}
 
-			optionLine := fmt.Sprintf("    %s %s",
-				lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-				option)
-
-			if isOptionFocused {
-				optionLine = styleFocusHighlight.Render(optionLine)
-			} else if isSelected {
-				optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
-			} else {
-				optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
-			}
-
-			b.WriteString(optionLine + "\n")
-			currentIndex++
-			_ = optionIdx // Suppress unused variable warning
+		// Add spacing between provider sections
+		if providerIdx < len(m.clusterSettingsSelection.Providers)-1 {
+			b.WriteString("\n")
 		}
 	}
 
@@ -948,6 +1224,103 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
+// renderClusterConfiguration renders the cluster configuration stage.
+func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+	const boxHeight = 20
+
+	title := styleHeader.Render("Cluster Configuration")
+	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(
+		"Configure resource allocation and testing options for user clusters")
+
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
+	b.WriteString(description + "\n\n")
+
+	currentIndex := 0
+
+	// Render categories and settings
+	for _, category := range m.clusterConfiguration.Categories {
+		// Category header
+		categoryFocused := currentIndex == m.clusterConfiguration.FocusedIndex
+		isCategoryExpanded := m.clusterConfiguration.ExpandedCategories[category.Name]
+
+		// Expand/collapse indicator
+		expandIndicator := "▶"
+		if isCategoryExpanded {
+			expandIndicator = "▼"
+		}
+
+		categoryHeader := fmt.Sprintf("%s %s", expandIndicator, category.Name)
+		if categoryFocused {
+			b.WriteString(styleFocusHighlight.Render(categoryHeader))
+		} else {
+			b.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color(colorMainBlue)).
+				Bold(true).
+				Render(categoryHeader))
+		}
+		b.WriteString("\n")
+
+		// Category description
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colorMainWhite)).
+			Faint(true).
+			Render(fmt.Sprintf("  %s", category.Description)))
+		b.WriteString("\n")
+		currentIndex++
+
+		// Render settings in this category only if expanded
+		if isCategoryExpanded {
+			for _, setting := range category.Settings {
+				settingFocused := currentIndex == m.clusterConfiguration.FocusedIndex
+				isEditing := settingFocused && m.clusterConfiguration.EditMode
+
+				// Setting name and value
+				var settingLine string
+				if setting.Type == ConfigTypeBool {
+					// Boolean settings show as toggles
+					checkbox := "[ ]"
+					if setting.Value.(bool) {
+						checkbox = "[✓]"
+					}
+					settingLine = fmt.Sprintf("  %s %s", checkbox, setting.Name)
+				} else {
+					// Other settings show their values
+					valueStr := m.formatConfigValue(&setting)
+					if isEditing {
+						valueStr = m.clusterConfiguration.EditingBuffer + "█" // Show cursor
+					}
+					settingLine = fmt.Sprintf("  %s: %s", setting.Name, valueStr)
+				}
+
+				if settingFocused {
+					b.WriteString(styleFocusHighlight.Render(settingLine))
+				} else {
+					b.WriteString(lipgloss.NewStyle().
+						Foreground(lipgloss.Color(colorMainWhite)).
+						Render(settingLine))
+				}
+				b.WriteString("\n")
+
+				// Setting description (smaller, dimmed)
+				descLine := fmt.Sprintf("    %s", setting.Description)
+				b.WriteString(lipgloss.NewStyle().
+					Foreground(lipgloss.Color(colorMainWhite)).
+					Faint(true).
+					Render(descLine))
+				b.WriteString("\n")
+				currentIndex++
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Pad content to ensure help bar is at the bottom
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+}
+
 // renderExecuting displays logs during the configuration application process.
 func (m Model) renderExecuting(helpWithBorder string, uiWidth, uiInnerWidth int) string {
 	header := styleHeader.Render("Applying Configuration")
@@ -998,14 +1371,14 @@ func helpBar(stage int) string {
 	// Using a map can be slightly more efficient and clearer for static mappings.
 	helpTexts := map[int]string{
 		stageWelcome:                            "Press Enter to continue.",
-		stageEnvironmentSelection:               "↑/↓ to navigate, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
+		stageEnvironmentSelection:               "↑/↓ to navigate, ←/→ to collapse/expand, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
 		stageReleaseSelection:                   "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageProviderSelection:                  "↑/↓ to navigate, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
 		stageDistributionSelection:              "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageDatacenterSettingsSelection:        "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
-		stageClusterSettingsSelection:           "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
+		stageClusterSettingsSelection:           "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageMachineDeploymentSettingsSelection: "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
-		stageClusterSettings:                    "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
+		stageClusterConfiguration:               "↑/↓ to navigate, ←/→ to collapse/expand categories, Space to edit/toggle, Enter to continue, Esc to go back.",
 		stageReviewSettings:                     "↑/↓ to scroll, PgUp/PgDn for faster scroll, Enter to confirm, ← to go back.",
 		stageExecuting:                          "Logs will appear here. Press ctrl+c to cancel.",
 		stageDone:                               "Press q to quit.",

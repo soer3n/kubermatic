@@ -49,7 +49,7 @@ const (
 	stageDatacenterSettingsSelection
 	stageClusterSettingsSelection
 	stageMachineDeploymentSettingsSelection
-	stageClusterSettings
+	stageClusterConfiguration
 	stageReviewSettings
 	stageExecuting
 	stageDone
@@ -70,14 +70,25 @@ type EnvironmentLocalErrors struct {
 	MLAValuesPath                string
 }
 
+// KubeconfigOption represents a kubeconfig source option.
+type KubeconfigOption struct {
+	Type        string // "env", "file", "custom"
+	DisplayName string
+	Path        string
+	Selected    bool
+}
+
 type EnvironmentExisting struct {
-	Selected       bool
-	CurrentField   int
-	KubeconfigPath textinput.Model
-	SeedName       textinput.Model
-	PresetName     textinput.Model
-	ProjectName    textinput.Model
-	Errors         EnvironmentExistingErrors
+	Selected                   bool
+	CurrentField               int
+	KubeconfigOptions          []KubeconfigOption
+	KubeconfigFocusedIndex     int
+	KubeconfigExpandedSections map[string]bool // Keys: "env", "file", "custom"
+	CustomKubeconfigPath       textinput.Model
+	SeedName                   textinput.Model
+	PresetName                 textinput.Model
+	ProjectName                textinput.Model
+	Errors                     EnvironmentExistingErrors
 }
 
 type EnvironmentExistingErrors struct {
@@ -227,10 +238,12 @@ type MachineDeploymentSettingsSelection struct {
 
 // ClusterSettingsSelection holds the state for cluster settings selection stage.
 type ClusterSettingsSelection struct {
-	SettingGroups  []SettingGroup  // List of setting groups
-	Selected       map[string]bool // Selected options (key: "groupKey:option")
-	SelectedGroups map[string]bool // Selected groups (key: "groupKey")
-	FocusedIndex   int             // Currently focused item index
+	Providers          []string                  // List of provider names
+	SettingsByProvider map[string][]SettingGroup // Settings grouped by provider
+	Selected           map[string]bool           // Selected options (key: "provider:groupKey:option")
+	SelectedGroups     map[string]bool           // Selected groups (key: "provider:groupKey")
+	FocusedIndex       int                       // Currently focused item index
+	ExpandedProviders  map[string]bool           // Tracks which providers are expanded
 }
 
 // DistributionSelection holds the state for OS distribution selection.
@@ -242,6 +255,41 @@ type DistributionSelection struct {
 	FocusedIndex            int                                         // Currently focused item index
 	ExpandedProviders       map[string]bool                             // Tracks which providers are expanded
 }
+
+// ClusterConfigurationSettings holds the state for cluster configuration stage.
+type ClusterConfigurationSettings struct {
+	Categories         []ConfigCategory
+	FocusedIndex       int             // Currently focused item index
+	EditMode           bool            // Whether we're editing a field
+	EditingBuffer      string          // Buffer for editing values
+	ExpandedCategories map[string]bool // Map of category names to their expanded state
+}
+
+// ConfigCategory represents a group of related configuration settings.
+type ConfigCategory struct {
+	Name        string
+	Description string
+	Settings    []ConfigSetting
+}
+
+// ConfigSetting represents a single configuration setting.
+type ConfigSetting struct {
+	Name        string
+	Description string
+	Type        ConfigSettingType
+	Value       interface{} // Can be string, int, []int, []string, or bool
+}
+
+// ConfigSettingType defines the type of configuration setting.
+type ConfigSettingType int
+
+const (
+	ConfigTypeString ConfigSettingType = iota
+	ConfigTypeInt
+	ConfigTypeIntArray
+	ConfigTypeStringArray
+	ConfigTypeBool
+)
 
 type Review struct {
 	ConfigYAML string

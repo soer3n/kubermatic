@@ -54,78 +54,6 @@ const (
 	ErrControlPlaneCountExceedsNodes = "Control plane count cannot exceed total node count"
 )
 
-// validateIPRange validates an IP range in the format "IP1-IP2"
-// e.g., "192.168.1.100-192.168.1.150".
-func (m *Model) validateIPRange(input string) bool {
-	if input == "" {
-		return false
-	}
-
-	// Split by hyphen
-	parts := strings.Split(input, "-")
-	if len(parts) != 2 {
-		return false
-	}
-
-	startIP := strings.TrimSpace(parts[0])
-	endIP := strings.TrimSpace(parts[1])
-
-	// Validate both IP addresses
-	if !m.isValidIP(startIP) || !m.isValidIP(endIP) {
-		return false
-	}
-
-	// Optional: Check that start IP is less than or equal to end IP
-	return m.isIPGreaterOrEqual(startIP, endIP)
-}
-
-// isValidIP validates a single IP address (e.g., "192.168.1.100").
-func (m *Model) isValidIP(ip string) bool {
-	parts := strings.Split(ip, ".")
-	if len(parts) != 4 {
-		return false
-	}
-
-	for _, part := range parts {
-		// Check for empty parts
-		if part == "" {
-			return false
-		}
-
-		// Check for leading zeros (e.g., "01" is invalid)
-		if len(part) > 1 && part[0] == '0' {
-			return false
-		}
-
-		// Convert to integer
-		num, err := strconv.Atoi(part)
-		if err != nil || num < 0 || num > 255 {
-			return false
-		}
-	}
-	return true
-}
-
-// isIPGreaterOrEqual checks if ip1 <= ip2.
-func (m *Model) isIPGreaterOrEqual(ip1, ip2 string) bool {
-	parts1 := strings.Split(ip1, ".")
-	parts2 := strings.Split(ip2, ".")
-
-	for i := 0; i < 4; i++ {
-		num1, _ := strconv.Atoi(parts1[i])
-		num2, _ := strconv.Atoi(parts2[i])
-
-		if num1 < num2 {
-			return true
-		} else if num1 > num2 {
-			return false
-		}
-		// If equal, continue to next octet
-	}
-	// IPs are identical
-	return true
-}
-
 // updateEnvironmentFocus updates the focus state of environment input fields
 func (m *Model) updateEnvironmentFocus() {
 	// Blur all local environment fields
@@ -134,7 +62,7 @@ func (m *Model) updateEnvironmentFocus() {
 	m.localEnv.MLAValuesPath.Blur()
 
 	// Blur all existing environment fields
-	m.existingEnv.KubeconfigPath.Blur()
+	m.existingEnv.CustomKubeconfigPath.Blur()
 	m.existingEnv.SeedName.Blur()
 	m.existingEnv.PresetName.Blur()
 	m.existingEnv.ProjectName.Blur()
@@ -152,7 +80,15 @@ func (m *Model) updateEnvironmentFocus() {
 	} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex > 0 {
 		switch m.environmentFieldIndex {
 		case 1:
-			m.existingEnv.KubeconfigPath.Focus()
+			// Focus custom kubeconfig path if custom option is selected
+			// Convert visual index to actual option index
+			optionIndex := m.getKubeconfigOptionIndexFromVisualIndex(m.existingEnv.KubeconfigFocusedIndex)
+			if optionIndex >= 0 && optionIndex < len(m.existingEnv.KubeconfigOptions) {
+				selectedOption := m.existingEnv.KubeconfigOptions[optionIndex]
+				if selectedOption.Type == "custom" && selectedOption.Selected {
+					m.existingEnv.CustomKubeconfigPath.Focus()
+				}
+			}
 		case 2:
 			m.existingEnv.SeedName.Focus()
 		case 3:
@@ -207,29 +143,37 @@ func (m *Model) validateExistingEnvironment() bool {
 	// Clear previous errors
 	m.existingEnv.Errors = EnvironmentExistingErrors{}
 
-	// // Validate Kubeconfig Path
-	// if err := m.isValidKubeConfig(m.existingEnv.KubeconfigPath.Value()); err != nil {
-	// 	m.existingEnv.Errors.KubeconfigPath = fmt.Sprintf("Invalid kubeconfig: %v", err)
-	// 	return false
-	// }
+	// Validate kubeconfig
+	kubeconfigPath := m.getSelectedKubeconfigPath()
+	if kubeconfigPath == "" {
+		m.existingEnv.Errors.KubeconfigPath = "Kubeconfig path is required"
+		return false
+	} else if _, err := os.Stat(kubeconfigPath); os.IsNotExist(err) {
+		m.existingEnv.Errors.KubeconfigPath = "Kubeconfig file does not exist"
+		return false
+	}
 
-	// // Validate Seed Name
-	// if strings.TrimSpace(m.existingEnv.SeedName.Value()) == "" {
-	// 	m.existingEnv.Errors.SeedName = "Seed name is required"
-	// 	return false
-	// }
+	if err := m.isValidKubeConfig(kubeconfigPath); err != nil {
+		m.existingEnv.Errors.KubeconfigPath = fmt.Sprintf("Invalid kubeconfig: %v", err)
+		return false
+	}
 
-	// // Validate Preset Name
-	// if strings.TrimSpace(m.existingEnv.PresetName.Value()) == "" {
-	// 	m.existingEnv.Errors.PresetName = "Preset name is required"
-	// 	return false
-	// }
+	// Validate other fields
+	if strings.TrimSpace(m.existingEnv.SeedName.Value()) == "" {
+		m.existingEnv.Errors.SeedName = "Seed name is required"
+		return false
+	}
 
-	// // Validate Project Name
-	// if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
-	// 	m.existingEnv.Errors.ProjectName = "Project name is required"
-	// 	return false
-	// }
+	if strings.TrimSpace(m.existingEnv.PresetName.Value()) == "" {
+		m.existingEnv.Errors.PresetName = "Preset name is required"
+		return false
+	}
+
+	if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
+		m.existingEnv.Errors.ProjectName = "Project name is required"
+		return false
+	}
+
 	return true
 }
 
@@ -254,8 +198,8 @@ func (m *Model) isValidKubeConfig(path string) error {
 		return err
 	}
 
-	// Test a simple API call to verify connectivity with a 5-second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Test a simple API call to verify connectivity with a 2-second timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	err = client.Get(ctx, types.NamespacedName{Name: "default"}, &corev1.Namespace{})
@@ -266,156 +210,6 @@ func (m *Model) isValidKubeConfig(path string) error {
 	return nil
 }
 
-// Validate CIDR notation (e.g., 10.244.0.0/16).
-func (m *Model) isValidCIDR(cidr string) bool {
-	parts := strings.Split(cidr, "/")
-	if len(parts) != 2 {
-		return false
-	}
-
-	ip := parts[0]
-	prefix := parts[1]
-
-	// Validate IP part
-	if !m.isValidIP(ip) {
-		return false
-	}
-
-	// Validate prefix
-	prefixNum, err := strconv.Atoi(prefix)
-	if err != nil || prefixNum < 0 || prefixNum > 32 {
-		return false
-	}
-
-	return true
-}
-
-// // Validate network configuration fields.
-// func (m *Model) validateNetworkConfig() bool {
-// 	// Clear previous errors
-// 	m.Network.Errors = NetworkErrors{}
-
-// 	// Get values from inputs
-// 	network := m.Network.CIDR.Value()
-// 	dnsServer := m.Network.DNSServer.Value()
-// 	gatewayIP := m.Network.GatewayIP.Value()
-
-// 	// Validate Network CIDR
-// 	if network == "" {
-// 		m.Network.Errors.CIDR = ErrCIDRRequired
-// 		return false
-// 	}
-// 	if !m.isValidCIDR(network) {
-// 		m.Network.Errors.CIDR = ErrInvalidCIDRFormat
-// 		return false
-// 	}
-
-// 	// if network == kubeone.DefaultServiceSubnet {
-// 	// 	m.Network.Errors.CIDR = ErrCIDRDefaultServiceSubnet
-// 	// 	return false
-// 	// }
-
-// 	// Validate DNS Server
-// 	if dnsServer == "" {
-// 		m.Network.Errors.DNSServer = ErrDNSServerRequired
-// 		return false
-// 	}
-// 	if !m.isValidIP(dnsServer) {
-// 		m.Network.Errors.DNSServer = ErrInvalidDNSServerFormat
-// 		return false
-// 	}
-
-// 	// Validate Gateway IP
-// 	if gatewayIP == "" {
-// 		m.Network.Errors.GatewayIP = ErrGatewayIPRequired
-// 		return false
-// 	}
-// 	if !m.isValidIP(gatewayIP) {
-// 		m.Network.Errors.GatewayIP = ErrInvalidGatewayIPFormat
-// 		return false
-// 	}
-
-// 	return true
-// }
-
-// // validateContainerRegistry ensures the offline registry settings are usable.
-// func (m *Model) validateContainerRegistry() bool {
-// 	if !m.offline {
-// 		return true
-// 	}
-
-// 	m.ContainerRegistry.Error = ""
-
-// 	if strings.TrimSpace(m.ContainerRegistry.Endpoint.Value()) == "" {
-// 		m.ContainerRegistry.Error = ErrRegistryEndpointRequired
-// 		return false
-// 	}
-
-// 	return true
-// }
-
-// // updateHelmRegistryFocus ensures the focused input matches the selected field for Helm registry.
-// func (m *Model) updateHelmRegistryFocus() {
-// 	if !m.offline {
-// 		return
-// 	}
-
-// 	m.HelmRegistry.Endpoint.Blur()
-// 	m.HelmRegistry.Username.Blur()
-// 	m.HelmRegistry.Password.Blur()
-
-// 	switch m.HelmRegistry.CurrentField {
-// 	case 0:
-// 		m.HelmRegistry.Endpoint.Focus()
-// 	case 1:
-// 		m.HelmRegistry.Username.Focus()
-// 	case 2:
-// 		m.HelmRegistry.Password.Focus()
-// 	}
-// }
-
-// // validateHelmRegistry ensures the Helm registry settings are valid.
-// func (m *Model) validateHelmRegistry() bool {
-// 	if !m.offline {
-// 		return true
-// 	}
-
-// 	m.HelmRegistry.Error = ""
-
-// 	if strings.TrimSpace(m.HelmRegistry.Endpoint.Value()) == "" {
-// 		m.HelmRegistry.Error = "Helm registry endpoint is required"
-// 		return false
-// 	}
-
-// 	return true
-// }
-
-// updatePackageRepoFocus ensures the package repository address input is focused when enabled.
-// func (m *Model) updatePackageRepoFocus() {
-// 	if m.PackageRepo.Enabled {
-// 		m.PackageRepo.Address.Focus()
-// 	} else {
-// 		m.PackageRepo.Address.Blur()
-// 	}
-// }
-
-// normalizeRegistryBase converts any registry URL to oci:// format.
-func normalizeRegistryBase(input string) string {
-	// Strip all possible schemes
-	clean := strings.TrimPrefix(input, "http://")
-	clean = strings.TrimPrefix(clean, "https://")
-	clean = strings.TrimPrefix(clean, "oci://")
-
-	// Handle possible double slashes after scheme removal
-	clean = strings.TrimPrefix(clean, "//")
-
-	// Remove leading/trailing slashes
-	clean = strings.Trim(clean, "/")
-
-	// Enforce oci:// scheme
-	return "oci://" + clean
-}
-
 func mustAtoi(s string) int {
 	i, err := strconv.Atoi(s)
 	if err != nil {
@@ -423,43 +217,3 @@ func mustAtoi(s string) int {
 	}
 	return i
 }
-
-// func (m *Model) processNodeCountInput() bool {
-// 	nodeCountStr := strings.TrimSpace(m.NodeCount.NodeCountInput.Value())
-// 	cpCountStr := strings.TrimSpace(m.NodeCount.ControlPlaneCountInput.Value())
-
-// 	// Validate node count
-// 	if nodeCountStr == "" {
-// 		m.NodeCount.Error = ErrNodeCountRequired
-// 		return false
-// 	}
-
-// 	nodeCount, err := strconv.Atoi(nodeCountStr)
-// 	if err != nil || nodeCount < 1 || nodeCount > m.NodeCount.Max {
-// 		m.NodeCount.Error = fmt.Sprintf(ErrNodeCountOutOfRange, m.NodeCount.Max)
-// 		return false
-// 	}
-
-// 	// Validate control plane count
-// 	if cpCountStr == "" {
-// 		m.NodeCount.Error = ErrControlPlaneCountRequired
-// 		return false
-// 	}
-
-// 	cpCount, err := strconv.Atoi(cpCountStr)
-// 	if err != nil || cpCount < 1 {
-// 		m.NodeCount.Error = ErrControlPlaneCountInvalid
-// 		return false
-// 	}
-
-// 	// Control plane count cannot exceed node count
-// 	if cpCount > nodeCount {
-// 		m.NodeCount.Error = ErrControlPlaneCountExceedsNodes
-// 		return false
-// 	}
-
-// 	// Initialize nodes
-// 	// m.initializeNodes(nodeCount)
-// 	m.NodeCount.Error = ""
-// 	return true
-// }

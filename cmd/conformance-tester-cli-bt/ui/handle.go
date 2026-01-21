@@ -24,6 +24,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -62,39 +63,72 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case keyUp:
-		if m.environmentFocusIndex > 0 {
+		if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex == 1 {
+			// Navigate within kubeconfig options
+			if m.existingEnv.KubeconfigFocusedIndex > 0 {
+				m.existingEnv.KubeconfigFocusedIndex--
+			} else {
+				m.environmentFieldIndex = 0 // Move to checkbox
+			}
+		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex > 0 {
+			m.environmentFieldIndex--
+		} else if m.environmentFocusIndex == 0 && m.localEnv.Selected && m.environmentFieldIndex > 0 {
+			m.environmentFieldIndex--
+		} else if m.environmentFieldIndex == 0 && m.environmentFocusIndex > 0 {
 			m.environmentFocusIndex--
-			m.environmentFieldIndex = 0 // Reset field index when switching environments
 		}
 		m.updateEnvironmentFocus()
 		return m, nil
+
 	case keyDown:
-		if m.environmentFocusIndex < 1 {
+		if m.environmentFocusIndex == 0 && m.localEnv.Selected {
+			if m.environmentFieldIndex < 3 {
+				m.environmentFieldIndex++
+			} else {
+				m.environmentFocusIndex++
+				m.environmentFieldIndex = 0
+			}
+		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected {
+			if m.environmentFieldIndex == 0 {
+				m.environmentFieldIndex = 1 // Move to kubeconfig selection
+			} else if m.environmentFieldIndex == 1 {
+				// In kubeconfig selection
+				maxVisualIndex := m.getMaxKubeconfigVisualIndex()
+				if m.existingEnv.KubeconfigFocusedIndex < maxVisualIndex {
+					m.existingEnv.KubeconfigFocusedIndex++
+				} else {
+					m.environmentFieldIndex++ // Move to next field
+				}
+			} else if m.environmentFieldIndex < 4 {
+				m.environmentFieldIndex++
+			}
+		} else if m.environmentFieldIndex == 0 {
 			m.environmentFocusIndex++
-			m.environmentFieldIndex = 0 // Reset field index when switching environments
 		}
 		m.updateEnvironmentFocus()
 		return m, nil
+
 	case keyTab:
-		// Move focus forward through fields within the selected environment
+		// Tab moves forward, same as down but without wrapping
 		if m.environmentFocusIndex == 0 && m.localEnv.Selected {
-			if m.environmentFieldIndex < 3 { // 3 fields (1, 2, 3)
+			if m.environmentFieldIndex < 3 {
 				m.environmentFieldIndex++
 			}
 		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected {
-			if m.environmentFieldIndex < 4 { // 4 fields (1, 2, 3, 4)
+			if m.environmentFieldIndex < 4 {
 				m.environmentFieldIndex++
 			}
 		}
 		m.updateEnvironmentFocus()
 		return m, nil
+
 	case keyShiftTab:
-		// Move focus backward through fields within the selected environment
 		if m.environmentFieldIndex > 0 {
 			m.environmentFieldIndex--
 		}
 		m.updateEnvironmentFocus()
 		return m, nil
+
 	case keyEnter:
 		// Validate and proceed if an environment is selected
 		if m.localEnv.Selected && m.validateLocalEnvironment() {
@@ -103,28 +137,74 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.stage = stageReleaseSelection
 		}
 		return m, nil
+
 	case keySpace:
-		// Toggle selection based on focused index (only when on the checkbox)
 		if m.environmentFieldIndex == 0 {
+			// Toggle environment checkbox
 			if m.environmentFocusIndex == 0 {
 				m.localEnv.Selected = !m.localEnv.Selected
 				if m.localEnv.Selected {
 					m.existingEnv.Selected = false
-					m.environmentFieldIndex = 1 // Move to first input field
+					m.environmentFieldIndex = 1
 				}
-			} else {
+			} else if m.environmentFocusIndex == 1 {
 				m.existingEnv.Selected = !m.existingEnv.Selected
 				if m.existingEnv.Selected {
 					m.localEnv.Selected = false
-					m.environmentFieldIndex = 1 // Move to first input field
+					m.environmentFieldIndex = 1
+				}
+			}
+		} else if m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 {
+			// Check if we're on a section header
+			sectionType := m.getKubeconfigSectionAtIndex(m.existingEnv.KubeconfigFocusedIndex)
+			if sectionType != "" {
+				// Don't toggle selection on section headers with space
+				return m, nil
+			}
+
+			// Get the actual option index from the visual index
+			optionIndex := m.getKubeconfigOptionIndexFromVisualIndex(m.existingEnv.KubeconfigFocusedIndex)
+			if optionIndex >= 0 && optionIndex < len(m.existingEnv.KubeconfigOptions) {
+				// Toggle kubeconfig option selection
+				for i := range m.existingEnv.KubeconfigOptions {
+					m.existingEnv.KubeconfigOptions[i].Selected = (i == optionIndex)
+				}
+
+				// If custom is selected, focus the custom input
+				if m.existingEnv.KubeconfigOptions[optionIndex].Type == "custom" {
+					m.existingEnv.CustomKubeconfigPath.Focus()
+				} else {
+					m.existingEnv.CustomKubeconfigPath.Blur()
 				}
 			}
 		}
 		m.updateEnvironmentFocus()
 		return m, nil
+
+	case keyLeft:
+		// Collapse kubeconfig section if on section header
+		if m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 {
+			sectionType := m.getKubeconfigSectionAtIndex(m.existingEnv.KubeconfigFocusedIndex)
+			if sectionType != "" {
+				m.existingEnv.KubeconfigExpandedSections[sectionType] = false
+			}
+		}
+		return m, nil
+
+	case keyRight:
+		// Expand kubeconfig section if on section header
+		if m.environmentFocusIndex == 1 && m.environmentFieldIndex == 1 {
+			sectionType := m.getKubeconfigSectionAtIndex(m.existingEnv.KubeconfigFocusedIndex)
+			if sectionType != "" {
+				m.existingEnv.KubeconfigExpandedSections[sectionType] = true
+			}
+		}
+		return m, nil
+
 	case keyEsc:
 		m.stage = stageWelcome
 		return m, nil
+
 	default:
 		// Update the focused text input
 		if m.environmentFocusIndex == 0 && m.localEnv.Selected && m.environmentFieldIndex > 0 {
@@ -136,16 +216,26 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case 3:
 				m.localEnv.MLAValuesPath, cmd = m.localEnv.MLAValuesPath.Update(msg)
 			}
-		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected && m.environmentFieldIndex > 0 {
-			switch m.environmentFieldIndex {
-			case 1:
-				m.existingEnv.KubeconfigPath, cmd = m.existingEnv.KubeconfigPath.Update(msg)
-			case 2:
-				m.existingEnv.SeedName, cmd = m.existingEnv.SeedName.Update(msg)
-			case 3:
-				m.existingEnv.PresetName, cmd = m.existingEnv.PresetName.Update(msg)
-			case 4:
-				m.existingEnv.ProjectName, cmd = m.existingEnv.ProjectName.Update(msg)
+		} else if m.environmentFocusIndex == 1 && m.existingEnv.Selected {
+			if m.environmentFieldIndex == 1 {
+				// Handle custom kubeconfig path input
+				// Convert visual index to actual option index
+				optionIndex := m.getKubeconfigOptionIndexFromVisualIndex(m.existingEnv.KubeconfigFocusedIndex)
+				if optionIndex >= 0 && optionIndex < len(m.existingEnv.KubeconfigOptions) {
+					selectedOption := m.existingEnv.KubeconfigOptions[optionIndex]
+					if selectedOption.Type == "custom" && selectedOption.Selected {
+						m.existingEnv.CustomKubeconfigPath, cmd = m.existingEnv.CustomKubeconfigPath.Update(msg)
+					}
+				}
+			} else {
+				switch m.environmentFieldIndex {
+				case 2:
+					m.existingEnv.SeedName, cmd = m.existingEnv.SeedName.Update(msg)
+				case 3:
+					m.existingEnv.PresetName, cmd = m.existingEnv.PresetName.Update(msg)
+				case 4:
+					m.existingEnv.ProjectName, cmd = m.existingEnv.ProjectName.Update(msg)
+				}
 			}
 		}
 		return m, cmd
@@ -1000,8 +1090,18 @@ func (m Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea
 		return m, nil
 
 	case keyEnter:
-		// Initialize cluster settings for the next stage
-		m.clusterSettingsSelection = initializeClusterSettingsSelection()
+		// Get all selected providers to initialize cluster settings
+		var selectedProviders []string
+		for _, provider := range m.providers {
+			if provider.Selected {
+				selectedProviders = append(selectedProviders, provider.DisplayName)
+			}
+		}
+
+		// Initialize cluster settings for the selected providers
+		if len(selectedProviders) > 0 {
+			m.clusterSettingsSelection = initializeClusterSettingsSelection(selectedProviders)
+		}
 
 		// Move to next stage
 		m.stage = stageClusterSettingsSelection
@@ -1109,15 +1209,45 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 		}
 		return m, nil
 
+	case keyRight:
+		// Expand provider
+		provider, groupIdx := m.getClusterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - expand provider
+			m.clusterSettingsSelection.ExpandedProviders[provider] = true
+		}
+		return m, nil
+
+	case keyLeft:
+		// Collapse provider
+		provider, groupIdx := m.getClusterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - collapse provider
+			m.clusterSettingsSelection.ExpandedProviders[provider] = false
+		}
+		return m, nil
+
 	case keySpace:
-		// Check if focused on setting group or option
-		groupIdx, optionIdx := m.getClusterFocusedOption()
-		if groupIdx < 0 || groupIdx >= len(m.clusterSettingsSelection.SettingGroups) {
+		// Check if focused on provider header
+		provider, groupIdx := m.getClusterFocusedItem()
+		if provider != "" && groupIdx == -1 {
+			// Focused on provider header - ignore
 			return m, nil
 		}
 
-		group := m.clusterSettingsSelection.SettingGroups[groupIdx]
-		groupKey := group.Key
+		// Check if focused on setting group or option
+		provider, groupIdx, optionIdx := m.getClusterFocusedOption()
+		if provider == "" {
+			return m, nil
+		}
+
+		groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+		if groupIdx >= len(groups) {
+			return m, nil
+		}
+
+		group := groups[groupIdx]
+		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
 
 		if optionIdx == -1 {
 			// Focused on setting group - toggle all options
@@ -1141,13 +1271,13 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 			if optionIdx >= len(group.Options) {
 				return m, nil
 			}
-			optionKey := fmt.Sprintf("%s:%s", groupKey, group.Options[optionIdx])
+			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
 			m.clusterSettingsSelection.Selected[optionKey] = !m.clusterSettingsSelection.Selected[optionKey]
 
 			// Update group selection state
 			allSelected := true
 			for _, option := range group.Options {
-				optKey := fmt.Sprintf("%s:%s", groupKey, option)
+				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
 				if !m.clusterSettingsSelection.Selected[optKey] {
 					allSelected = false
 					break
@@ -1160,11 +1290,17 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 	case keySelectAll:
 		// Check if all options are selected
 		allSelected := true
-		for _, group := range m.clusterSettingsSelection.SettingGroups {
-			for _, option := range group.Options {
-				selectionKey := fmt.Sprintf("%s:%s", group.Key, option)
-				if !m.clusterSettingsSelection.Selected[selectionKey] {
-					allSelected = false
+		for _, provider := range m.clusterSettingsSelection.Providers {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					if !m.clusterSettingsSelection.Selected[selectionKey] {
+						allSelected = false
+						break
+					}
+				}
+				if !allSelected {
 					break
 				}
 			}
@@ -1174,13 +1310,16 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 		}
 
 		// Toggle all options and groups
-		for _, group := range m.clusterSettingsSelection.SettingGroups {
-			groupKey := group.Key
-			for _, option := range group.Options {
-				selectionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				m.clusterSettingsSelection.Selected[selectionKey] = !allSelected
+		for _, provider := range m.clusterSettingsSelection.Providers {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
+				for _, option := range group.Options {
+					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
+					m.clusterSettingsSelection.Selected[selectionKey] = !allSelected
+				}
+				m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 			}
-			m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 		}
 		return m, nil
 
@@ -1214,33 +1353,76 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 // getClusterMaxFocusIndex returns the maximum focus index for cluster settings.
 func (m Model) getClusterMaxFocusIndex() int {
 	count := 0
-	for _, group := range m.clusterSettingsSelection.SettingGroups {
-		count++                     // Setting group header
-		count += len(group.Options) // Options (always shown)
+	for _, provider := range m.clusterSettingsSelection.Providers {
+		count++ // Provider header
+		if m.clusterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for _, group := range groups {
+				count++                     // Setting group header
+				count += len(group.Options) // Options (always shown)
+			}
+		}
 	}
 	return count - 1
 }
 
-// getClusterFocusedOption returns (groupIdx, optionIdx) for the focused item.
-// Returns (groupIdx, -1) if focused on group header.
-func (m Model) getClusterFocusedOption() (int, int) {
+// getClusterFocusedItem returns (provider, groupIdx) for the focused item.
+// Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
+// (provider, groupIdx) if on setting group.
+func (m Model) getClusterFocusedItem() (string, int) {
 	currentIndex := 0
-	for groupIdx, group := range m.clusterSettingsSelection.SettingGroups {
-		// Group header
+	for _, provider := range m.clusterSettingsSelection.Providers {
 		if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-			return groupIdx, -1 // On setting group
+			return provider, -1 // On provider header
 		}
 		currentIndex++
 
-		// Options (always shown since IsExpanded is always true)
-		for optionIdx := range group.Options {
-			if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-				return groupIdx, optionIdx
+		if m.clusterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+					return provider, groupIdx // On setting group
+				}
+				currentIndex++
+
+				currentIndex += len(group.Options) // Skip options
 			}
-			currentIndex++
 		}
 	}
-	return -1, -1
+	return "", -1
+}
+
+// getClusterFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
+// Returns ("", -1, -1) if not focused on an option.
+func (m Model) getClusterFocusedOption() (string, int, int) {
+	currentIndex := 0
+	for _, provider := range m.clusterSettingsSelection.Providers {
+		// Provider header
+		if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+			return provider, -1, -1 // On provider header
+		}
+		currentIndex++
+
+		if m.clusterSettingsSelection.ExpandedProviders[provider] {
+			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
+			for groupIdx, group := range groups {
+				// Group header
+				if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+					return provider, groupIdx, -1 // On setting group
+				}
+				currentIndex++
+
+				// Options (always shown since IsExpanded is always true)
+				for optionIdx := range group.Options {
+					if currentIndex == m.clusterSettingsSelection.FocusedIndex {
+						return provider, groupIdx, optionIdx
+					}
+					currentIndex++
+				}
+			}
+		}
+	}
+	return "", -1, -1
 }
 
 // handleMachineDeploymentSettingsSelection handles input for the machine deployment settings selection stage.
@@ -1374,8 +1556,11 @@ func (m Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Mod
 		return m, nil
 
 	case keyEnter:
+		// Initialize cluster configuration for the next stage
+		m.clusterConfiguration = initializeClusterConfiguration()
+
 		// Move to next stage
-		m.stage++
+		m.stage = stageClusterConfiguration
 		return m, nil
 
 	case keyEsc:
@@ -1565,4 +1750,383 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 		return true, tea.Quit
 	}
 	return false, nil
+}
+
+// handleClusterConfiguration handles input for the cluster configuration stage.
+func (m Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.clusterConfiguration.EditMode {
+		return m.handleClusterConfigurationEdit(msg)
+	}
+
+	maxIndex := m.getClusterConfigMaxFocusIndex()
+
+	switch msg.String() {
+	case keyUp:
+		if m.clusterConfiguration.FocusedIndex > 0 {
+			m.clusterConfiguration.FocusedIndex--
+		}
+		return m, nil
+
+	case keyLeft:
+		// Collapse category if focused on a category header
+		catIdx, _, itemType := m.getClusterConfigFocusedItem()
+		if itemType == "category" && catIdx >= 0 && catIdx < len(m.clusterConfiguration.Categories) {
+			categoryName := m.clusterConfiguration.Categories[catIdx].Name
+			m.clusterConfiguration.ExpandedCategories[categoryName] = false
+		}
+		return m, nil
+
+	case keyRight:
+		// Expand category if focused on a category header
+		catIdx, _, itemType := m.getClusterConfigFocusedItem()
+		if itemType == "category" && catIdx >= 0 && catIdx < len(m.clusterConfiguration.Categories) {
+			categoryName := m.clusterConfiguration.Categories[catIdx].Name
+			m.clusterConfiguration.ExpandedCategories[categoryName] = true
+		}
+		return m, nil
+
+	case keyDown:
+		if m.clusterConfiguration.FocusedIndex < maxIndex {
+			m.clusterConfiguration.FocusedIndex++
+		}
+		return m, nil
+
+	case keySpace:
+		categoryIdx, settingIdx, itemType := m.getClusterConfigFocusedItem()
+		if itemType == "setting" {
+			setting := &m.clusterConfiguration.Categories[categoryIdx].Settings[settingIdx]
+
+			switch setting.Type {
+			case ConfigTypeBool:
+				// Toggle boolean value
+				setting.Value = !setting.Value.(bool)
+			case ConfigTypeString, ConfigTypeInt, ConfigTypeIntArray, ConfigTypeStringArray:
+				// Enter edit mode
+				m.clusterConfiguration.EditMode = true
+				m.clusterConfiguration.EditingBuffer = m.formatConfigValue(setting)
+			}
+		}
+		return m, nil
+
+	case keyEnter:
+		// Move to next stage
+		m.stage++
+		return m, nil
+
+	case keyEsc:
+		// Move to previous stage
+		m.stage = stageMachineDeploymentSettingsSelection
+		return m, nil
+	}
+
+	return m, nil
+}
+
+// handleClusterConfigurationEdit handles input when editing a configuration value.
+func (m Model) handleClusterConfigurationEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	categoryIdx, settingIdx, _ := m.getClusterConfigFocusedItem()
+	setting := &m.clusterConfiguration.Categories[categoryIdx].Settings[settingIdx]
+
+	switch msg.String() {
+	case keyEnter:
+		// Save the edited value
+		if err := m.parseConfigValue(setting, m.clusterConfiguration.EditingBuffer); err == nil {
+			m.clusterConfiguration.EditMode = false
+			m.clusterConfiguration.EditingBuffer = ""
+		}
+		return m, nil
+
+	case keyEsc:
+		// Cancel editing
+		m.clusterConfiguration.EditMode = false
+		m.clusterConfiguration.EditingBuffer = ""
+		return m, nil
+
+	case "backspace":
+		if len(m.clusterConfiguration.EditingBuffer) > 0 {
+			m.clusterConfiguration.EditingBuffer = m.clusterConfiguration.EditingBuffer[:len(m.clusterConfiguration.EditingBuffer)-1]
+		}
+		return m, nil
+
+	default:
+		// Add character to buffer (allow alphanumeric, comma, space, and Gi/Mi suffixes)
+		if len(msg.String()) == 1 {
+			m.clusterConfiguration.EditingBuffer += msg.String()
+		}
+		return m, nil
+	}
+}
+
+// getClusterConfigMaxFocusIndex returns the maximum valid focus index.
+func (m Model) getClusterConfigMaxFocusIndex() int {
+	count := -1
+	for _, category := range m.clusterConfiguration.Categories {
+		count++                         // Category header
+		count += len(category.Settings) // Settings
+	}
+	return count
+}
+
+// getClusterConfigFocusedItem returns the currently focused item.
+// Returns: category index, setting index, item type ("category" or "setting")
+func (m Model) getClusterConfigFocusedItem() (int, int, string) {
+	currentIndex := 0
+	for catIdx, category := range m.clusterConfiguration.Categories {
+		if currentIndex == m.clusterConfiguration.FocusedIndex {
+			return catIdx, -1, "category"
+		}
+		currentIndex++
+
+		for setIdx := range category.Settings {
+			if currentIndex == m.clusterConfiguration.FocusedIndex {
+				return catIdx, setIdx, "setting"
+			}
+			currentIndex++
+		}
+	}
+	return 0, 0, "category"
+}
+
+// formatConfigValue formats a configuration value as a string for editing.
+func (m Model) formatConfigValue(setting *ConfigSetting) string {
+	switch setting.Type {
+	case ConfigTypeString:
+		return setting.Value.(string)
+	case ConfigTypeInt:
+		return fmt.Sprintf("%d", setting.Value.(int))
+	case ConfigTypeIntArray:
+		values := setting.Value.([]int)
+		strs := make([]string, len(values))
+		for i, v := range values {
+			strs[i] = fmt.Sprintf("%d", v)
+		}
+		return strings.Join(strs, ", ")
+	case ConfigTypeStringArray:
+		return strings.Join(setting.Value.([]string), ", ")
+	case ConfigTypeBool:
+		if setting.Value.(bool) {
+			return "Yes"
+		}
+		return "No"
+	}
+	return ""
+}
+
+// parseConfigValue parses a string into the appropriate type and updates the setting.
+func (m Model) parseConfigValue(setting *ConfigSetting, value string) error {
+	value = strings.TrimSpace(value)
+
+	switch setting.Type {
+	case ConfigTypeString:
+		setting.Value = value
+	case ConfigTypeInt:
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return err
+		}
+		setting.Value = parsed
+	case ConfigTypeIntArray:
+		parts := strings.Split(value, ",")
+		ints := make([]int, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			parsed, err := strconv.Atoi(part)
+			if err != nil {
+				return err
+			}
+			ints = append(ints, parsed)
+		}
+		if len(ints) == 0 {
+			return fmt.Errorf("at least one value required")
+		}
+		setting.Value = ints
+	case ConfigTypeStringArray:
+		parts := strings.Split(value, ",")
+		strs := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				strs = append(strs, part)
+			}
+		}
+		if len(strs) == 0 {
+			return fmt.Errorf("at least one value required")
+		}
+		setting.Value = strs
+	}
+	return nil
+}
+
+// getKubeconfigSectionAtIndex returns the section type ("env", "file", "custom") if the given index
+// is a section header, otherwise returns empty string
+func (m Model) getKubeconfigSectionAtIndex(index int) string {
+	currentIndex := 0
+
+	// Count env options
+	var envOptions, fileOptions, customOptions []KubeconfigOption
+	for _, option := range m.existingEnv.KubeconfigOptions {
+		switch option.Type {
+		case "env":
+			envOptions = append(envOptions, option)
+		case "file":
+			fileOptions = append(fileOptions, option)
+		case "custom":
+			customOptions = append(customOptions, option)
+		}
+	}
+
+	// Check if index is env section header
+	if len(envOptions) > 0 {
+		if index == currentIndex {
+			return "env"
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections["env"] {
+			currentIndex += len(envOptions)
+		}
+	}
+
+	// Check if index is file section header
+	if len(fileOptions) > 0 {
+		if index == currentIndex {
+			return "file"
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections["file"] {
+			currentIndex += len(fileOptions)
+		}
+	}
+
+	// Check if index is custom section header
+	if len(customOptions) > 0 {
+		if index == currentIndex {
+			return "custom"
+		}
+	}
+
+	return ""
+}
+
+// getKubeconfigOptionIndexFromVisualIndex converts a visual index (including headers) to an actual option index
+// Returns -1 if the visual index is a header
+func (m Model) getKubeconfigOptionIndexFromVisualIndex(visualIndex int) int {
+	currentIndex := 0
+	optionIndex := 0
+
+	// Count env options
+	var envOptions, fileOptions, customOptions []KubeconfigOption
+	for _, option := range m.existingEnv.KubeconfigOptions {
+		switch option.Type {
+		case "env":
+			envOptions = append(envOptions, option)
+		case "file":
+			fileOptions = append(fileOptions, option)
+		case "custom":
+			customOptions = append(customOptions, option)
+		}
+	}
+
+	// Process env section
+	if len(envOptions) > 0 {
+		if visualIndex == currentIndex {
+			return -1 // This is the header
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections["env"] {
+			for i := 0; i < len(envOptions); i++ {
+				if visualIndex == currentIndex {
+					return optionIndex
+				}
+				currentIndex++
+				optionIndex++
+			}
+		} else {
+			optionIndex += len(envOptions)
+		}
+	}
+
+	// Process file section
+	if len(fileOptions) > 0 {
+		if visualIndex == currentIndex {
+			return -1 // This is the header
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections["file"] {
+			for i := 0; i < len(fileOptions); i++ {
+				if visualIndex == currentIndex {
+					return optionIndex
+				}
+				currentIndex++
+				optionIndex++
+			}
+		} else {
+			optionIndex += len(fileOptions)
+		}
+	}
+
+	// Process custom section
+	if len(customOptions) > 0 {
+		if visualIndex == currentIndex {
+			return -1 // This is the header
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections["custom"] {
+			for i := 0; i < len(customOptions); i++ {
+				if visualIndex == currentIndex {
+					return optionIndex
+				}
+				currentIndex++
+				optionIndex++
+			}
+		}
+	}
+
+	return -1
+}
+
+// getMaxKubeconfigVisualIndex returns the maximum visual index (including headers)
+func (m Model) getMaxKubeconfigVisualIndex() int {
+	count := 0
+
+	// Count env options
+	var envOptions, fileOptions, customOptions []KubeconfigOption
+	for _, option := range m.existingEnv.KubeconfigOptions {
+		switch option.Type {
+		case "env":
+			envOptions = append(envOptions, option)
+		case "file":
+			fileOptions = append(fileOptions, option)
+		case "custom":
+			customOptions = append(customOptions, option)
+		}
+	}
+
+	// Count env section
+	if len(envOptions) > 0 {
+		count++ // Header
+		if m.existingEnv.KubeconfigExpandedSections["env"] {
+			count += len(envOptions)
+		}
+	}
+
+	// Count file section
+	if len(fileOptions) > 0 {
+		count++ // Header
+		if m.existingEnv.KubeconfigExpandedSections["file"] {
+			count += len(fileOptions)
+		}
+	}
+
+	// Count custom section
+	if len(customOptions) > 0 {
+		count++ // Header
+		if m.existingEnv.KubeconfigExpandedSections["custom"] {
+			count += len(customOptions)
+		}
+	}
+
+	return count - 1 // Convert count to max index
 }
