@@ -220,6 +220,8 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Select Preset
 			if len(m.existingEnv.AvailablePresets) > 0 {
 				m.existingEnv.SelectedPresetIndex = m.existingEnv.PresetFocusedIndex
+				// Fetch preset details to populate provider credentials
+				cmd = m.fetchPresetDetails()
 			}
 		}
 		m.updateEnvironmentFocus()
@@ -415,33 +417,35 @@ func (m Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch msg.String() {
 	case keyUp:
-		if m.providerFocusIndex > 0 {
+		// Move up through fields
+		if m.providerFieldIndex > 0 {
+			// Move to previous field in current provider
+			m.providerFieldIndex--
+		} else if m.providerFocusIndex > 0 {
+			// Move to previous provider's last field
 			m.providerFocusIndex--
-			m.providerFieldIndex = 0 // Reset field index when switching providers
-		}
-		m.updateProviderFocus()
-		return m, nil
-	case keyDown:
-		if m.providerFocusIndex < len(m.providers)-1 {
-			m.providerFocusIndex++
-			m.providerFieldIndex = 0 // Reset field index when switching providers
-		}
-		m.updateProviderFocus()
-		return m, nil
-	case keyTab:
-		// Move focus forward through fields within the selected provider
-		if m.providers[m.providerFocusIndex].Selected {
-			maxField := m.getMaxFieldIndexForProvider(m.providers[m.providerFocusIndex])
-			if m.providerFieldIndex < maxField {
-				m.providerFieldIndex++
+			if m.providers[m.providerFocusIndex].Selected {
+				m.providerFieldIndex = m.getMaxFieldIndexForProvider(m.providers[m.providerFocusIndex])
+			} else {
+				m.providerFieldIndex = 0
 			}
 		}
 		m.updateProviderFocus()
 		return m, nil
-	case keyShiftTab:
-		// Move focus backward through fields within the selected provider
-		if m.providerFieldIndex > 0 {
-			m.providerFieldIndex--
+	case keyDown:
+		// Move down through fields
+		maxField := 0
+		if m.providers[m.providerFocusIndex].Selected {
+			maxField = m.getMaxFieldIndexForProvider(m.providers[m.providerFocusIndex])
+		}
+
+		if m.providerFieldIndex < maxField {
+			// Move to next field in current provider
+			m.providerFieldIndex++
+		} else if m.providerFocusIndex < len(m.providers)-1 {
+			// Move to next provider's first field
+			m.providerFocusIndex++
+			m.providerFieldIndex = 0
 		}
 		m.updateProviderFocus()
 		return m, nil
@@ -466,18 +470,49 @@ func (m Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.providerFieldIndex == 0 {
 			m.providers[m.providerFocusIndex].Selected = !m.providers[m.providerFocusIndex].Selected
 			if m.providers[m.providerFocusIndex].Selected {
-				m.providerFieldIndex = 1 // Move to first credential field
+				m.providerFieldIndex = 1 // Move to first field after checkbox
+			}
+		} else if m.providerFieldIndex == 1 || m.providerFieldIndex == 2 {
+			// Select the option at the current field index
+			if m.providers[m.providerFocusIndex].HasPresetCredentials {
+				if m.providerFieldIndex == 1 {
+					// Pressing space on "From Preset" selects preset
+					m.providers[m.providerFocusIndex].CredentialSource = CredentialSourcePreset
+				} else if m.providerFieldIndex == 2 {
+					// Pressing space on "Enter Custom Credentials" selects custom
+					m.providers[m.providerFocusIndex].CredentialSource = CredentialSourceCustom
+				}
 			}
 		}
 		m.updateProviderFocus()
 		return m, nil
 	case keyEsc:
-		m.stage = stageEnvironmentSelection
+		m.stage = stageReleaseSelection
 		return m, nil
 	default:
-		// Update the focused text input
+		// Update the focused text input (only for custom credentials)
 		if m.providers[m.providerFocusIndex].Selected && m.providerFieldIndex > 0 {
-			m.providers[m.providerFocusIndex], cmd = m.updateProviderCredentialField(m.providers[m.providerFocusIndex], m.providerFieldIndex, msg)
+			// Skip text input if using preset credentials
+			if m.providers[m.providerFocusIndex].HasPresetCredentials &&
+				m.providers[m.providerFocusIndex].CredentialSource == CredentialSourcePreset {
+				return m, nil
+			}
+			// Calculate the actual credential field index
+			credentialFieldIndex := m.providerFieldIndex
+			if m.providers[m.providerFocusIndex].HasPresetCredentials {
+				// With preset: Field 0 = checkbox, Field 1 = "From Preset", Field 2 = "Enter Custom Credentials", Field 3+ = credentials
+				// So credential field 1 starts at providerFieldIndex 3
+				// Skip fields 1 and 2 (credential source selectors)
+				if m.providerFieldIndex > 2 {
+					credentialFieldIndex = m.providerFieldIndex - 2
+				} else {
+					// On fields 1 or 2 (credential source selectors), no text input
+					return m, nil
+				}
+			}
+			// Without preset: Field 0 = checkbox, Field 1+ = credentials
+			// credentialFieldIndex is 1-based for credential fields
+			m.providers[m.providerFocusIndex], cmd = m.updateProviderCredentialField(m.providers[m.providerFocusIndex], credentialFieldIndex, msg)
 		}
 		return m, cmd
 	}
@@ -485,22 +520,36 @@ func (m Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // getMaxFieldIndexForProvider returns the maximum field index for a provider based on its credential type.
 func (m Model) getMaxFieldIndexForProvider(provider Provider) int {
+	baseFields := 0
 	switch provider.Credentials.(type) {
 	case GCPCredentials, AnexiaCredentials, DigitalOceanCredentials, HetznerCredentials, KubeVirtCredentials:
-		return 1
+		baseFields = 1
 	case AlibabaCredentials, VSphereCredentials:
-		return 2
+		baseFields = 2
 	case AWSCredentials, AzureCredentials:
-		return 4
+		baseFields = 4
 	case VMwareCloudDirectorCredentials:
-		return 5
+		baseFields = 5
 	case NutanixCredentials:
-		return 7
+		baseFields = 7
 	case OpenStackCredentials:
-		return 8
+		baseFields = 8
 	default:
-		return 1
+		baseFields = 1
 	}
+
+	// Add fields for credential source selector if preset is available
+	if provider.HasPresetCredentials {
+		// Field 1 = "From Preset", Field 2 = "Enter Custom Credentials"
+		if provider.CredentialSource == CredentialSourcePreset {
+			// Only show preset fields (no custom credential inputs)
+			return 2
+		}
+		// If custom is selected, add the credential source selectors + custom fields
+		return baseFields + 2
+	}
+
+	return baseFields
 }
 
 // updateProviderCredentialField updates a specific credential field for a provider.
@@ -650,7 +699,19 @@ func (m *Model) updateProviderFocus() {
 
 	// Focus the current field in the currently focused provider
 	if m.providers[m.providerFocusIndex].Selected && m.providerFieldIndex > 0 {
-		m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], m.providerFieldIndex)
+		// Only focus credential input fields, not radio buttons
+		credentialFieldIndex := m.providerFieldIndex
+		if m.providers[m.providerFocusIndex].HasPresetCredentials {
+			// Fields 1 and 2 are radio buttons, fields 3+ are credential inputs
+			if m.providerFieldIndex > 2 {
+				credentialFieldIndex = m.providerFieldIndex - 2
+				m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], credentialFieldIndex)
+			}
+			// Fields 1 and 2 are radio buttons, no text input focus needed
+		} else {
+			// No preset: Field 1+ are credential inputs
+			m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], credentialFieldIndex)
+		}
 	}
 }
 

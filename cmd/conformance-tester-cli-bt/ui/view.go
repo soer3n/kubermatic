@@ -182,7 +182,7 @@ func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 }
 
 // renderWelcome displays the initial welcome screen.
-func (m Model) renderWelcome(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderWelcome(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 15
 	title := styleHeader.Render(welcomeTitleText)
 	disclaimer := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(welcomeDisclaimerText)
@@ -199,7 +199,7 @@ func (m Model) renderWelcome(helpWithBorder string, uiWidth, uiInnerWidth int) s
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 30 // Increased height for kubeconfig options
 	title := styleHeader.Render("Select Deployment Environment")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(environmentSelectionText)
@@ -213,7 +213,7 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 	if m.localEnv.Selected {
 		localCheckbox = "[x]"
 	}
-	localOption := fmt.Sprintf("%s Local Environment", lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(localCheckbox))
+	localOption := fmt.Sprintf("%s Local Environment (WIP)", lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(localCheckbox))
 
 	// Highlight if focused on the checkbox
 	if m.environmentFocusIndex == 0 && m.environmentFieldIndex == 0 {
@@ -572,7 +572,8 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 		)
 		b.WriteString(projectLine + "\n")
 		if m.existingEnv.Errors.ProjectName != "" {
-			b.WriteString(styleError.Width(uiWidth-4).Render(m.existingEnv.Errors.ProjectName) + "\n")
+			inlineError := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(m.existingEnv.Errors.ProjectName)
+			b.WriteString("\t\t\t\t\t\t" + inlineError + "\n")
 		}
 		b.WriteString("\n")
 	}
@@ -583,7 +584,7 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth, uiInne
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 30
 	title := styleHeader.Render("Select Kubernetes Release")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(releaseSelectionText)
@@ -651,7 +652,7 @@ func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth, uiInnerWid
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
-func (m Model) renderProviderSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderProviderSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 15
 	title := styleHeader.Render("Select Infrastructure Provider")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(providerSelectionText)
@@ -694,84 +695,231 @@ func (m Model) renderProviderCredentials(provider Provider, providerIndex int, u
 	var b strings.Builder
 	b.WriteString("\n")
 
-	renderField := func(label string, input textinput.Model, error string, fieldIndex int) {
-		if providerIndex == m.providerFocusIndex && fieldIndex == m.providerFieldIndex {
-			b.WriteString(styleFocusHighlight.Render("  "+label) + " " + input.View() + "\n")
+	// If provider has preset credentials, show credential source selector
+	if provider.HasPresetCredentials {
+		// Radio button for "From Preset"
+		presetRadio := "( )"
+		if provider.CredentialSource == CredentialSourcePreset {
+			presetRadio = "(•)"
+		}
+
+		presetLine := fmt.Sprintf("  %s From Preset",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(presetRadio))
+
+		isFocused := providerIndex == m.providerFocusIndex && m.providerFieldIndex == 1
+		if isFocused {
+			presetLine = styleFocusHighlight.Render(presetLine)
+		} else if provider.CredentialSource == CredentialSourcePreset {
+			presetLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(presetLine)
 		} else {
-			b.WriteString("  " + label + " " + input.View() + "\n")
+			presetLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(presetLine)
 		}
-		if error != "" {
-			b.WriteString(styleError.Width(uiWidth-4).Render("    "+error) + "\n")
+		b.WriteString(presetLine + "\n")
+
+		// Show preset credential values (masked/read-only)
+		if provider.CredentialSource == CredentialSourcePreset {
+			b.WriteString(m.renderPresetCredentialsSummary(provider))
 		}
+
+		// Radio button for "Enter Custom Credentials"
+		customRadio := "( )"
+		if provider.CredentialSource == CredentialSourceCustom {
+			customRadio = "(•)"
+		}
+
+		customLine := fmt.Sprintf("  %s Enter Custom Credentials",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(customRadio))
+
+		customFocused := providerIndex == m.providerFocusIndex && m.providerFieldIndex == 2
+		if customFocused {
+			customLine = styleFocusHighlight.Render(customLine)
+		} else if provider.CredentialSource == CredentialSourceCustom {
+			customLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(customLine)
+		} else {
+			customLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(customLine)
+		}
+		b.WriteString(customLine + "\n\n")
 	}
 
-	switch creds := provider.Credentials.(type) {
-	case AWSCredentials:
-		renderField("Access Key ID:", creds.AccessKeyID, provider.Errors.Fields["AccessKeyID"], 1)
-		renderField("Secret Access Key:", creds.SecretAccessKey, provider.Errors.Fields["SecretAccessKey"], 2)
-		renderField("Assume Role ARN:", creds.AssumeRoleARN, provider.Errors.Fields["AssumeRoleARN"], 3)
-		renderField("External ID:", creds.AssumeRoleExternalID, provider.Errors.Fields["AssumeRoleExternalID"], 4)
+	// Show custom credential fields if selected or if no preset available
+	if !provider.HasPresetCredentials || provider.CredentialSource == CredentialSourceCustom {
+		fieldOffset := 3 // Offset for field index if preset is available
+		if !provider.HasPresetCredentials {
+			fieldOffset = 1
+		}
 
-	case AzureCredentials:
-		renderField("Tenant ID:", creds.TenantID, provider.Errors.Fields["TenantID"], 1)
-		renderField("Subscription ID:", creds.SubscriptionID, provider.Errors.Fields["SubscriptionID"], 2)
-		renderField("Client ID:", creds.ClientID, provider.Errors.Fields["ClientID"], 3)
-		renderField("Client Secret:", creds.ClientSecret, provider.Errors.Fields["ClientSecret"], 4)
+		renderField := func(label string, input textinput.Model, error string, fieldIndex int) {
+			actualFieldIndex := fieldOffset + fieldIndex - 1
+			if providerIndex == m.providerFocusIndex && actualFieldIndex == m.providerFieldIndex {
+				b.WriteString(styleFocusHighlight.Render("    "+label) + " " + input.View() + "\n")
+			} else {
+				b.WriteString("    " + label + " " + input.View() + "\n")
+			}
+			if error != "" {
+				errorMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(error)
+				b.WriteString("      " + errorMsg + "\n")
+			}
+		}
 
-	case GCPCredentials:
-		renderField("Service Account JSON:", creds.ServiceAccount, provider.Errors.Fields["ServiceAccount"], 1)
+		switch creds := provider.Credentials.(type) {
+		case AWSCredentials:
+			renderField("Access Key ID:", creds.AccessKeyID, provider.Errors.Fields["AccessKeyID"], 1)
+			renderField("Secret Access Key:", creds.SecretAccessKey, provider.Errors.Fields["SecretAccessKey"], 2)
+			renderField("Assume Role ARN:", creds.AssumeRoleARN, provider.Errors.Fields["AssumeRoleARN"], 3)
+			renderField("External ID:", creds.AssumeRoleExternalID, provider.Errors.Fields["AssumeRoleExternalID"], 4)
 
-	case AlibabaCredentials:
-		renderField("Access Key ID:", creds.AccessKeyID, provider.Errors.Fields["AccessKeyID"], 1)
-		renderField("Access Key Secret:", creds.AccessKeySecret, provider.Errors.Fields["AccessKeySecret"], 2)
+		case AzureCredentials:
+			renderField("Tenant ID:", creds.TenantID, provider.Errors.Fields["TenantID"], 1)
+			renderField("Subscription ID:", creds.SubscriptionID, provider.Errors.Fields["SubscriptionID"], 2)
+			renderField("Client ID:", creds.ClientID, provider.Errors.Fields["ClientID"], 3)
+			renderField("Client Secret:", creds.ClientSecret, provider.Errors.Fields["ClientSecret"], 4)
 
-	case AnexiaCredentials:
-		renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
+		case GCPCredentials:
+			renderField("Service Account JSON:", creds.ServiceAccount, provider.Errors.Fields["ServiceAccount"], 1)
 
-	case DigitalOceanCredentials:
-		renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
+		case AlibabaCredentials:
+			renderField("Access Key ID:", creds.AccessKeyID, provider.Errors.Fields["AccessKeyID"], 1)
+			renderField("Access Key Secret:", creds.AccessKeySecret, provider.Errors.Fields["AccessKeySecret"], 2)
 
-	case HetznerCredentials:
-		renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
+		case AnexiaCredentials:
+			renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
 
-	case KubeVirtCredentials:
-		renderField("Kubeconfig Path:", creds.Kubeconfig, provider.Errors.Fields["Kubeconfig"], 1)
+		case DigitalOceanCredentials:
+			renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
 
-	case NutanixCredentials:
-		renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
-		renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
-		renderField("Cluster Name:", creds.ClusterName, provider.Errors.Fields["ClusterName"], 3)
-		renderField("Proxy URL:", creds.ProxyURL, provider.Errors.Fields["ProxyURL"], 4)
-		renderField("CSI Username:", creds.CSIUsername, provider.Errors.Fields["CSIUsername"], 5)
-		renderField("CSI Password:", creds.CSIPassword, provider.Errors.Fields["CSIPassword"], 6)
-		renderField("CSI Endpoint:", creds.CSIEndpoint, provider.Errors.Fields["CSIEndpoint"], 7)
+		case HetznerCredentials:
+			renderField("API Token:", creds.Token, provider.Errors.Fields["Token"], 1)
 
-	case OpenStackCredentials:
-		renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
-		renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
-		renderField("Project:", creds.Project, provider.Errors.Fields["Project"], 3)
-		renderField("Project ID:", creds.ProjectID, provider.Errors.Fields["ProjectID"], 4)
-		renderField("Domain:", creds.Domain, provider.Errors.Fields["Domain"], 5)
-		renderField("App Credential ID:", creds.ApplicationCredentialID, provider.Errors.Fields["ApplicationCredentialID"], 6)
-		renderField("App Credential Secret:", creds.ApplicationCredentialSecret, provider.Errors.Fields["ApplicationCredentialSecret"], 7)
-		renderField("Token:", creds.Token, provider.Errors.Fields["Token"], 8)
+		case KubeVirtCredentials:
+			renderField("Kubeconfig Path:", creds.Kubeconfig, provider.Errors.Fields["Kubeconfig"], 1)
 
-	case VSphereCredentials:
-		renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
-		renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
+		case NutanixCredentials:
+			renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
+			renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
+			renderField("Cluster Name:", creds.ClusterName, provider.Errors.Fields["ClusterName"], 3)
+			renderField("Proxy URL:", creds.ProxyURL, provider.Errors.Fields["ProxyURL"], 4)
+			renderField("CSI Username:", creds.CSIUsername, provider.Errors.Fields["CSIUsername"], 5)
+			renderField("CSI Password:", creds.CSIPassword, provider.Errors.Fields["CSIPassword"], 6)
+			renderField("CSI Endpoint:", creds.CSIEndpoint, provider.Errors.Fields["CSIEndpoint"], 7)
 
-	case VMwareCloudDirectorCredentials:
-		renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
-		renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
-		renderField("API Token:", creds.APIToken, provider.Errors.Fields["APIToken"], 3)
-		renderField("Organization:", creds.Organization, provider.Errors.Fields["Organization"], 4)
-		renderField("VDC:", creds.VDC, provider.Errors.Fields["VDC"], 5)
+		case OpenStackCredentials:
+			renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
+			renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
+			renderField("Project:", creds.Project, provider.Errors.Fields["Project"], 3)
+			renderField("Project ID:", creds.ProjectID, provider.Errors.Fields["ProjectID"], 4)
+			renderField("Domain:", creds.Domain, provider.Errors.Fields["Domain"], 5)
+			renderField("App Credential ID:", creds.ApplicationCredentialID, provider.Errors.Fields["ApplicationCredentialID"], 6)
+			renderField("App Credential Secret:", creds.ApplicationCredentialSecret, provider.Errors.Fields["ApplicationCredentialSecret"], 7)
+			renderField("Token:", creds.Token, provider.Errors.Fields["Token"], 8)
+
+		case VSphereCredentials:
+			renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
+			renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
+
+		case VMwareCloudDirectorCredentials:
+			renderField("Username:", creds.Username, provider.Errors.Fields["Username"], 1)
+			renderField("Password:", creds.Password, provider.Errors.Fields["Password"], 2)
+			renderField("API Token:", creds.APIToken, provider.Errors.Fields["APIToken"], 3)
+			renderField("Organization:", creds.Organization, provider.Errors.Fields["Organization"], 4)
+			renderField("VDC:", creds.VDC, provider.Errors.Fields["VDC"], 5)
+		}
 	}
 
 	return b.String()
 }
 
-func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+// renderPresetCredentialsSummary shows a summary of preset credentials (masked).
+func (m Model) renderPresetCredentialsSummary(provider Provider) string {
+	var b strings.Builder
+
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colorMainWhite)).
+		Faint(true)
+
+	switch creds := provider.PresetCredentials.(type) {
+	case AWSCredentials:
+		b.WriteString(style.Render("      Access Key ID: "+creds.AccessKeyID.Value()) + "\n")
+		b.WriteString(style.Render("      Secret Access Key: "+creds.SecretAccessKey.Value()) + "\n")
+		if creds.AssumeRoleARN.Value() != "" {
+			b.WriteString(style.Render("      Assume Role ARN: "+creds.AssumeRoleARN.Value()) + "\n")
+		}
+		if creds.AssumeRoleExternalID.Value() != "" {
+			b.WriteString(style.Render("      External ID: "+creds.AssumeRoleExternalID.Value()) + "\n")
+		}
+
+	case AzureCredentials:
+		b.WriteString(style.Render("      Tenant ID: "+creds.TenantID.Value()) + "\n")
+		b.WriteString(style.Render("      Subscription ID: "+creds.SubscriptionID.Value()) + "\n")
+		b.WriteString(style.Render("      Client ID: "+creds.ClientID.Value()) + "\n")
+		b.WriteString(style.Render("      Client Secret: "+creds.ClientSecret.Value()) + "\n")
+
+	case GCPCredentials:
+		b.WriteString(style.Render("      Service Account: "+creds.ServiceAccount.Value()) + "\n")
+
+	case AlibabaCredentials:
+		b.WriteString(style.Render("      Access Key ID: "+creds.AccessKeyID.Value()) + "\n")
+		b.WriteString(style.Render("      Access Key Secret: "+creds.AccessKeySecret.Value()) + "\n")
+
+	case AnexiaCredentials:
+		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+
+	case DigitalOceanCredentials:
+		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+
+	case HetznerCredentials:
+		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+
+	case KubeVirtCredentials:
+		b.WriteString(style.Render("      Kubeconfig: "+creds.Kubeconfig.Value()) + "\n")
+
+	case NutanixCredentials:
+		b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
+		b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
+		b.WriteString(style.Render("      Cluster Name: "+creds.ClusterName.Value()) + "\n")
+		if creds.ProxyURL.Value() != "" {
+			b.WriteString(style.Render("      Proxy URL: "+creds.ProxyURL.Value()) + "\n")
+		}
+		if creds.CSIUsername.Value() != "" {
+			b.WriteString(style.Render("      CSI Username: "+creds.CSIUsername.Value()) + "\n")
+		}
+
+	case OpenStackCredentials:
+		if creds.Username.Value() != "" {
+			b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
+		}
+		if creds.Password.Value() != "" {
+			b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
+		}
+		if creds.Project.Value() != "" {
+			b.WriteString(style.Render("      Project: "+creds.Project.Value()) + "\n")
+		}
+		if creds.Domain.Value() != "" {
+			b.WriteString(style.Render("      Domain: "+creds.Domain.Value()) + "\n")
+		}
+
+	case VSphereCredentials:
+		b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
+		b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
+
+	case VMwareCloudDirectorCredentials:
+		if creds.Username.Value() != "" {
+			b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
+		}
+		if creds.Password.Value() != "" {
+			b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
+		}
+		if creds.APIToken.Value() != "" {
+			b.WriteString(style.Render("      API Token: "+creds.APIToken.Value()) + "\n")
+		}
+		b.WriteString(style.Render("      Organization: "+creds.Organization.Value()) + "\n")
+		b.WriteString(style.Render("      VDC: "+creds.VDC.Value()) + "\n")
+	}
+
+	b.WriteString("\n")
+	return b.String()
+}
+
+func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 20
 	title := styleHeader.Render("Select Operating System Distributions")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(distributionSelectionText)
@@ -873,7 +1021,7 @@ func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth, uiInn
 }
 
 // renderDatacenterSettingsSelection renders the datacenter settings selection stage.
-func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 20
 
 	// Build title based on number of providers
@@ -1010,7 +1158,7 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth,
 }
 
 // renderClusterSettingsSelection renders the cluster settings selection stage.
-func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 20
 
 	// Build title based on number of providers
@@ -1147,7 +1295,7 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth, ui
 }
 
 // renderMachineDeploymentSettingsSelection renders the machine deployment settings selection stage.
-func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 20
 
 	// Build title based on number of providers
@@ -1284,7 +1432,7 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 }
 
 // renderClusterConfiguration renders the cluster configuration stage.
-func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth int) string {
 	const boxHeight = 20
 
 	title := styleHeader.Render("Cluster Configuration")
@@ -1381,7 +1529,7 @@ func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth, uiInne
 }
 
 // renderExecuting displays logs during the configuration application process.
-func (m Model) renderExecuting(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderExecuting(helpWithBorder string, uiWidth int) string {
 	header := styleHeader.Render("Applying Configuration")
 
 	// Build the main content
@@ -1397,7 +1545,7 @@ func (m Model) renderExecuting(helpWithBorder string, uiWidth, uiInnerWidth int)
 }
 
 // renderDone displays the final success message.
-func (m Model) renderDone(helpWithBorder string, uiWidth, uiInnerWidth int) string {
+func (m Model) renderDone(helpWithBorder string, uiWidth int) string {
 	header := styleHeader.Render("Congratulations!")
 	var message string
 	if m.executionError != "" {
@@ -1432,7 +1580,7 @@ func helpBar(stage int) string {
 		stageWelcome:                            "Press Enter to continue.",
 		stageEnvironmentSelection:               "↑/↓ to navigate, ←/→ to collapse/expand, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
 		stageReleaseSelection:                   "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
-		stageProviderSelection:                  "↑/↓ to navigate, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
+		stageProviderSelection:                  "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
 		stageDistributionSelection:              "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageDatacenterSettingsSelection:        "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageClusterSettingsSelection:           "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",

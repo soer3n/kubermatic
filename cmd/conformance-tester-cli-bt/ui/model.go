@@ -616,7 +616,7 @@ func discoverKubeconfigOptions() []KubeconfigOption {
 			Type:        "env",
 			DisplayName: "Environment Variable (KUBECONFIG)",
 			Path:        envPath,
-			Selected:    true, // Default selection
+			Selected:    false, // Don't select by default
 		})
 	}
 
@@ -655,25 +655,12 @@ func discoverKubeconfigOptions() []KubeconfigOption {
 		Selected:    false,
 	})
 
-	// If no env variable, select first available option
-	if len(options) > 0 && options[0].Type != "env" {
-		options[0].Selected = true
-	}
+	// Don't select any option by default - let user choose
+	// Removed: if len(options) > 0 && options[0].Type != "env" {
+	//     options[0].Selected = true
+	// }
 
 	return options
-}
-
-// getSelectedKubeconfigPath returns the currently selected kubeconfig path.
-func (m Model) getSelectedKubeconfigPath() string {
-	for _, option := range m.existingEnv.KubeconfigOptions {
-		if option.Selected {
-			if option.Type == "custom" {
-				return m.existingEnv.CustomKubeconfigPath.Value()
-			}
-			return option.Path
-		}
-	}
-	return ""
 }
 
 func initialModel() Model {
@@ -734,20 +721,24 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
+// getSelectedKubeconfigPath returns the path of the selected kubeconfig.
+func (m *Model) getSelectedKubeconfigPath() string {
+	for _, option := range m.existingEnv.KubeconfigOptions {
+		if option.Selected {
+			if option.Type == "custom" {
+				return m.existingEnv.CustomKubeconfigPath.Value()
+			}
+			return option.Path
+		}
+	}
+	return ""
+}
+
 // fetchSeedsAndPresets fetches Seeds and Presets from the Kubernetes cluster.
 func (m *Model) fetchSeedsAndPresets() tea.Cmd {
 	return func() tea.Msg {
 		// Get the selected kubeconfig path
-		kubeconfigPath := ""
-		optionIndex := m.getKubeconfigOptionIndexFromVisualIndex(m.existingEnv.KubeconfigFocusedIndex)
-		if optionIndex >= 0 && optionIndex < len(m.existingEnv.KubeconfigOptions) {
-			selectedOption := m.existingEnv.KubeconfigOptions[optionIndex]
-			if selectedOption.Type == "custom" {
-				kubeconfigPath = m.existingEnv.CustomKubeconfigPath.Value()
-			} else {
-				kubeconfigPath = selectedOption.Path
-			}
-		}
+		kubeconfigPath := m.getSelectedKubeconfigPath()
 
 		if kubeconfigPath == "" {
 			return seedsPresetsLoadedMsg{
@@ -831,6 +822,424 @@ func (m *Model) fetchSeedsAndPresets() tea.Cmd {
 	}
 }
 
+// fetchPresetDetails fetches the full preset details from the cluster.
+func (m *Model) fetchPresetDetails() tea.Cmd {
+	return func() tea.Msg {
+		if m.existingEnv.SelectedPresetIndex < 0 || m.existingEnv.SelectedPresetIndex >= len(m.existingEnv.AvailablePresets) {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("No preset selected"),
+			}
+		}
+
+		presetName := m.existingEnv.AvailablePresets[m.existingEnv.SelectedPresetIndex]
+
+		// Get the selected kubeconfig path
+		kubeconfigPath := m.getSelectedKubeconfigPath()
+
+		if kubeconfigPath == "" {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("No kubeconfig selected"),
+			}
+		}
+
+		// Expand path if needed
+		if strings.HasPrefix(kubeconfigPath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return presetDetailsLoadedMsg{
+					err: fmt.Errorf("Unable to access home directory"),
+				}
+			}
+			kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
+		}
+
+		// Build config
+		config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("Invalid kubeconfig file or cluster is not accessible"),
+			}
+		}
+
+		// Create dynamic client
+		dynamicClient, err := dynamic.NewForConfig(config)
+		if err != nil {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("Unable to connect to the cluster. Please check your kubeconfig"),
+			}
+		}
+
+		ctx := context.Background()
+
+		// Fetch the specific preset
+		presetGVR := schema.GroupVersionResource{
+			Group:    "kubermatic.k8c.io",
+			Version:  "v1",
+			Resource: "presets",
+		}
+
+		presetObj, err := dynamicClient.Resource(presetGVR).Get(ctx, presetName, metav1.GetOptions{})
+		if err != nil {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("Unable to fetch preset details. Ensure this is a Kubermatic cluster"),
+			}
+		}
+
+		// Parse the preset spec
+		spec, found := presetObj.Object["spec"].(map[string]interface{})
+		if !found {
+			return presetDetailsLoadedMsg{
+				err: fmt.Errorf("Invalid preset format"),
+			}
+		}
+
+		return presetDetailsLoadedMsg{
+			presetName: presetName,
+			spec:       spec,
+		}
+	}
+}
+
+// updateProvidersWithPresetCredentials updates provider structs with credentials from the preset.
+func (m *Model) updateProvidersWithPresetCredentials(presetSpec map[string]interface{}) {
+	providerNameMap := map[string]string{
+		"AWS":                   "aws",
+		"Azure":                 "azure",
+		"GCP":                   "gcp",
+		"Alibaba":               "alibaba",
+		"Anexia":                "anexia",
+		"DigitalOcean":          "digitalocean",
+		"Hetzner":               "hetzner",
+		"KubeVirt":              "kubevirt",
+		"Nutanix":               "nutanix",
+		"OpenStack":             "openstack",
+		"vSphere":               "vsphere",
+		"VMware Cloud Director": "vmwareclouddirector",
+	}
+
+	for i := range m.providers {
+		provider := &m.providers[i]
+		presetKey, ok := providerNameMap[provider.DisplayName]
+		if !ok {
+			continue
+		}
+
+		// Check if preset has credentials for this provider
+		if providerSpec, found := presetSpec[presetKey]; found && providerSpec != nil {
+			specMap, ok := providerSpec.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Parse credentials based on provider type
+			var presetCreds interface{}
+			switch provider.DisplayName {
+			case "AWS":
+				presetCreds = m.parseAWSPresetCredentials(specMap)
+			case "Azure":
+				presetCreds = m.parseAzurePresetCredentials(specMap)
+			case "GCP":
+				presetCreds = m.parseGCPPresetCredentials(specMap)
+			case "Alibaba":
+				presetCreds = m.parseAlibabaPresetCredentials(specMap)
+			case "Anexia":
+				presetCreds = m.parseAnexiaPresetCredentials(specMap)
+			case "DigitalOcean":
+				presetCreds = m.parseDigitalOceanPresetCredentials(specMap)
+			case "Hetzner":
+				presetCreds = m.parseHetznerPresetCredentials(specMap)
+			case "KubeVirt":
+				presetCreds = m.parseKubeVirtPresetCredentials(specMap)
+			case "Nutanix":
+				presetCreds = m.parseNutanixPresetCredentials(specMap)
+			case "OpenStack":
+				presetCreds = m.parseOpenStackPresetCredentials(specMap)
+			case "vSphere":
+				presetCreds = m.parseVSpherePresetCredentials(specMap)
+			case "VMware Cloud Director":
+				presetCreds = m.parseVMwareCloudDirectorPresetCredentials(specMap)
+			}
+
+			provider.HasPresetCredentials = true
+			provider.PresetCredentials = presetCreds
+			provider.CredentialSource = CredentialSourcePreset
+		} else {
+			provider.HasPresetCredentials = false
+			provider.PresetCredentials = nil
+			provider.CredentialSource = CredentialSourceCustom
+		}
+	}
+}
+
+// Parse functions for each provider
+func (m *Model) parseAWSPresetCredentials(spec map[string]interface{}) AWSCredentials {
+	accessKeyID := ""
+	if val, ok := spec["accessKeyID"].(string); ok {
+		accessKeyID = val
+	}
+	secretAccessKey := ""
+	if val, ok := spec["secretAccessKey"].(string); ok {
+		secretAccessKey = val
+	}
+
+	creds := AWSCredentials{
+		AccessKeyID:          newTextInputReadOnly(accessKeyID, 200),
+		SecretAccessKey:      newTextInputReadOnly(secretAccessKey, 200),
+		AssumeRoleARN:        newTextInputReadOnly("", 200),
+		AssumeRoleExternalID: newTextInputReadOnly("", 200),
+	}
+
+	if val, ok := spec["assumeRoleARN"].(string); ok && val != "" {
+		creds.AssumeRoleARN = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["assumeRoleExternalID"].(string); ok && val != "" {
+		creds.AssumeRoleExternalID = newTextInputReadOnly(val, 200)
+	}
+
+	return creds
+}
+
+func (m *Model) parseAzurePresetCredentials(spec map[string]interface{}) AzureCredentials {
+	tenantID := ""
+	if val, ok := spec["tenantID"].(string); ok {
+		tenantID = val
+	}
+	subscriptionID := ""
+	if val, ok := spec["subscriptionID"].(string); ok {
+		subscriptionID = val
+	}
+	clientID := ""
+	if val, ok := spec["clientID"].(string); ok {
+		clientID = val
+	}
+	clientSecret := ""
+	if val, ok := spec["clientSecret"].(string); ok {
+		clientSecret = val
+	}
+
+	return AzureCredentials{
+		TenantID:       newTextInputReadOnly(tenantID, 200),
+		SubscriptionID: newTextInputReadOnly(subscriptionID, 200),
+		ClientID:       newTextInputReadOnly(clientID, 200),
+		ClientSecret:   newTextInputReadOnly(clientSecret, 200),
+	}
+}
+
+func (m *Model) parseGCPPresetCredentials(spec map[string]interface{}) GCPCredentials {
+	serviceAccount := ""
+	if val, ok := spec["serviceAccount"].(string); ok {
+		serviceAccount = val
+	}
+
+	return GCPCredentials{
+		ServiceAccount: newTextInputReadOnly(serviceAccount, 500),
+	}
+}
+
+func (m *Model) parseAlibabaPresetCredentials(spec map[string]interface{}) AlibabaCredentials {
+	accessKeyID := ""
+	if val, ok := spec["accessKeyID"].(string); ok {
+		accessKeyID = val
+	}
+	accessKeySecret := ""
+	if val, ok := spec["accessKeySecret"].(string); ok {
+		accessKeySecret = val
+	}
+
+	return AlibabaCredentials{
+		AccessKeyID:     newTextInputReadOnly(accessKeyID, 200),
+		AccessKeySecret: newTextInputReadOnly(accessKeySecret, 200),
+	}
+}
+
+func (m *Model) parseAnexiaPresetCredentials(spec map[string]interface{}) AnexiaCredentials {
+	token := ""
+	if val, ok := spec["token"].(string); ok {
+		token = val
+	}
+
+	return AnexiaCredentials{
+		Token: newTextInputReadOnly(token, 200),
+	}
+}
+
+func (m *Model) parseDigitalOceanPresetCredentials(spec map[string]interface{}) DigitalOceanCredentials {
+	token := ""
+	if val, ok := spec["token"].(string); ok {
+		token = val
+	}
+
+	return DigitalOceanCredentials{
+		Token: newTextInputReadOnly(token, 200),
+	}
+}
+
+func (m *Model) parseHetznerPresetCredentials(spec map[string]interface{}) HetznerCredentials {
+	token := ""
+	if val, ok := spec["token"].(string); ok {
+		token = val
+	}
+
+	return HetznerCredentials{
+		Token: newTextInputReadOnly(token, 200),
+	}
+}
+
+func (m *Model) parseKubeVirtPresetCredentials(spec map[string]interface{}) KubeVirtCredentials {
+	kubeconfig := ""
+	if val, ok := spec["kubeconfig"].(string); ok {
+		kubeconfig = val
+	}
+
+	return KubeVirtCredentials{
+		Kubeconfig: newTextInputReadOnly(kubeconfig, 500),
+	}
+}
+
+func (m *Model) parseNutanixPresetCredentials(spec map[string]interface{}) NutanixCredentials {
+	username := ""
+	if val, ok := spec["username"].(string); ok {
+		username = val
+	}
+	password := ""
+	if val, ok := spec["password"].(string); ok {
+		password = val
+	}
+	clusterName := ""
+	if val, ok := spec["clusterName"].(string); ok {
+		clusterName = val
+	}
+
+	creds := NutanixCredentials{
+		Username:    newTextInputReadOnly(username, 200),
+		Password:    newTextInputReadOnly(password, 200),
+		ClusterName: newTextInputReadOnly(clusterName, 200),
+		ProxyURL:    newTextInputReadOnly("", 200),
+		CSIUsername: newTextInputReadOnly("", 200),
+		CSIPassword: newTextInputReadOnly("", 200),
+		CSIEndpoint: newTextInputReadOnly("", 200),
+	}
+
+	if val, ok := spec["proxyURL"].(string); ok && val != "" {
+		creds.ProxyURL = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["csiUsername"].(string); ok && val != "" {
+		creds.CSIUsername = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["csiPassword"].(string); ok && val != "" {
+		creds.CSIPassword = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["csiEndpoint"].(string); ok && val != "" {
+		creds.CSIEndpoint = newTextInputReadOnly(val, 200)
+	}
+
+	return creds
+}
+
+func (m *Model) parseOpenStackPresetCredentials(spec map[string]interface{}) OpenStackCredentials {
+	creds := OpenStackCredentials{
+		Username:                    newTextInputReadOnly("", 200),
+		Password:                    newTextInputReadOnly("", 200),
+		Project:                     newTextInputReadOnly("", 200),
+		ProjectID:                   newTextInputReadOnly("", 200),
+		Domain:                      newTextInputReadOnly("", 200),
+		ApplicationCredentialID:     newTextInputReadOnly("", 200),
+		ApplicationCredentialSecret: newTextInputReadOnly("", 200),
+		Token:                       newTextInputReadOnly("", 200),
+	}
+
+	if val, ok := spec["username"].(string); ok && val != "" {
+		creds.Username = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["password"].(string); ok && val != "" {
+		creds.Password = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["project"].(string); ok && val != "" {
+		creds.Project = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["projectID"].(string); ok && val != "" {
+		creds.ProjectID = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["domain"].(string); ok && val != "" {
+		creds.Domain = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["applicationCredentialID"].(string); ok && val != "" {
+		creds.ApplicationCredentialID = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["applicationCredentialSecret"].(string); ok && val != "" {
+		creds.ApplicationCredentialSecret = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["token"].(string); ok && val != "" {
+		creds.Token = newTextInputReadOnly(val, 200)
+	}
+
+	return creds
+}
+
+func (m *Model) parseVSpherePresetCredentials(spec map[string]interface{}) VSphereCredentials {
+	username := ""
+	if val, ok := spec["username"].(string); ok {
+		username = val
+	}
+	password := ""
+	if val, ok := spec["password"].(string); ok {
+		password = val
+	}
+
+	return VSphereCredentials{
+		Username: newTextInputReadOnly(username, 200),
+		Password: newTextInputReadOnly(password, 200),
+	}
+}
+
+func (m *Model) parseVMwareCloudDirectorPresetCredentials(spec map[string]interface{}) VMwareCloudDirectorCredentials {
+	organization := ""
+	if val, ok := spec["organization"].(string); ok {
+		organization = val
+	}
+	vdc := ""
+	if val, ok := spec["vdc"].(string); ok {
+		vdc = val
+	}
+
+	creds := VMwareCloudDirectorCredentials{
+		Username:     newTextInputReadOnly("", 200),
+		Password:     newTextInputReadOnly("", 200),
+		APIToken:     newTextInputReadOnly("", 200),
+		Organization: newTextInputReadOnly(organization, 200),
+		VDC:          newTextInputReadOnly(vdc, 200),
+	}
+
+	if val, ok := spec["username"].(string); ok && val != "" {
+		creds.Username = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["password"].(string); ok && val != "" {
+		creds.Password = newTextInputReadOnly(val, 200)
+	}
+	if val, ok := spec["apiToken"].(string); ok && val != "" {
+		creds.APIToken = newTextInputReadOnly(val, 200)
+	}
+
+	return creds
+}
+
+// newTextInputReadOnly creates a read-only text input with a preset value.
+// If HIDE_PRESET_CREDENTIALS environment variable is set to "true", the value is masked.
+func newTextInputReadOnly(value string, width int) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = ""
+	ti.Width = width
+
+	// Check if preset credentials should be hidden
+	hideCredentials := os.Getenv("HIDE_PRESET_CREDENTIALS") == "true"
+	if hideCredentials && value != "" {
+		ti.SetValue("***preset-value***")
+	} else {
+		ti.SetValue(value)
+	}
+	return ti
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -905,6 +1314,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.existingEnv.PresetFocusedIndex = 0
 			m.existingEnv.SelectedPresetIndex = -1
 		}
+	case presetDetailsLoadedMsg:
+		if msg.err != nil {
+			m.existingEnv.FetchError = msg.err.Error()
+		} else {
+			// Update providers with preset credentials
+			m.updateProvidersWithPresetCredentials(msg.spec)
+			m.existingEnv.FetchError = ""
+		}
 	}
 
 	return m, cmd
@@ -957,30 +1374,30 @@ func (m Model) View() string {
 	var content string
 	switch m.stage {
 	case stageWelcome:
-		content = m.renderWelcome(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderWelcome(helpWithBorder, uiWidth)
 	case stageEnvironmentSelection:
-		content = m.renderEnvironmentSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderEnvironmentSelection(helpWithBorder, uiWidth)
 	case stageReleaseSelection:
-		content = m.renderReleaseSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderReleaseSelection(helpWithBorder, uiWidth)
 	case stageProviderSelection:
-		content = m.renderProviderSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderProviderSelection(helpWithBorder, uiWidth)
 	case stageDistributionSelection:
-		content = m.renderDistributionSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderDistributionSelection(helpWithBorder, uiWidth)
 	case stageDatacenterSettingsSelection:
-		content = m.renderDatacenterSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderDatacenterSettingsSelection(helpWithBorder, uiWidth)
 	case stageClusterSettingsSelection:
-		content = m.renderClusterSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderClusterSettingsSelection(helpWithBorder, uiWidth)
 	case stageMachineDeploymentSettingsSelection:
-		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth)
 	case stageClusterConfiguration:
-		content = m.renderClusterConfiguration(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderClusterConfiguration(helpWithBorder, uiWidth)
 
 	// case stageReview:
 	// 	content = m.renderReview(helpWithBorder)
 	case stageExecuting:
-		content = m.renderExecuting(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderExecuting(helpWithBorder, uiWidth)
 	case stageDone:
-		content = m.renderDone(helpWithBorder, uiWidth, uiInnerWidth)
+		content = m.renderDone(helpWithBorder, uiWidth)
 	default:
 		// Render nothing for unknown stages
 		os.Exit(0)

@@ -23,35 +23,14 @@
 package ui
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
-	"time"
-
-	"k8c.io/kubermatic/v2/pkg/test/e2e/utils"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 // Constants for error messages.
 const (
-	ErrCIDRRequired             = "Network CIDR is required"
-	ErrInvalidCIDRFormat        = "Invalid CIDR format (e.g., 10.244.0.0/16)"
-	ErrCIDRDefaultServiceSubnet = "Invalid Range: cannot use the default service subnet"
-	ErrDNSServerRequired        = "DNS Server is required"
-	ErrInvalidDNSServerFormat   = "Invalid IP address format"
-	ErrGatewayIPRequired        = "Gateway IP is required"
-	ErrInvalidGatewayIPFormat   = "Invalid IP address format"
-	ErrRegistryEndpointRequired = "Registry endpoint is required"
-	// Node count validation errors.
-	ErrNodeCountRequired             = "Node count is required"
-	ErrNodeCountOutOfRange           = "Node count must be between 1 and %d"
-	ErrControlPlaneCountRequired     = "Control plane count is required"
-	ErrControlPlaneCountInvalid      = "Control plane count must be at least 1"
-	ErrControlPlaneCountExceedsNodes = "Control plane count cannot exceed total node count"
+// Define error message constants here if needed
 )
 
 // updateEnvironmentFocus updates the focus state of environment input fields
@@ -148,11 +127,6 @@ func (m *Model) validateExistingEnvironment() bool {
 		return false
 	}
 
-	if err := m.isValidKubeConfig(kubeconfigPath); err != nil {
-		m.existingEnv.Errors.KubeconfigPath = fmt.Sprintf("Invalid kubeconfig: %v", err)
-		return false
-	}
-
 	// Validate Seed selection
 	if m.existingEnv.SelectedSeedIndex < 0 || m.existingEnv.SelectedSeedIndex >= len(m.existingEnv.AvailableSeeds) {
 		m.existingEnv.Errors.Fields["SeedName"] = "Please select a Seed"
@@ -172,39 +146,6 @@ func (m *Model) validateExistingEnvironment() bool {
 	}
 
 	return true
-}
-
-func (m *Model) isValidKubeConfig(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("path is empty")
-	}
-
-	// Check if file exists
-	if _, err := os.Stat(strings.TrimSpace(path)); os.IsNotExist(err) {
-		return fmt.Errorf("file does not exist")
-	}
-
-	// Temporarily set KUBECONFIG environment variable
-	oldKubeconfig := os.Getenv("KUBECONFIG")
-	os.Setenv("KUBECONFIG", strings.TrimSpace(path))
-	defer os.Setenv("KUBECONFIG", oldKubeconfig)
-
-	// Try to create a client using the kubeconfig
-	client, _, err := utils.GetClients()
-	if err != nil {
-		return err
-	}
-
-	// Test a simple API call to verify connectivity with a 2-second timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	err = client.Get(ctx, types.NamespacedName{Name: "default"}, &corev1.Namespace{})
-	if err != nil {
-		return fmt.Errorf("Cluster unreachable")
-	}
-
-	return nil
 }
 
 func mustAtoi(s string) int {

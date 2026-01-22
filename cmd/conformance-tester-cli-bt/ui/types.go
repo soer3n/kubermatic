@@ -42,6 +42,19 @@ type (
 		presets []string
 		err     error
 	}
+	presetDetailsLoadedMsg struct {
+		presetName string
+		spec       map[string]interface{}
+		err        error
+	}
+)
+
+// CredentialSource indicates whether credentials come from a preset or are custom.
+type CredentialSource string
+
+const (
+	CredentialSourcePreset CredentialSource = "preset"
+	CredentialSourceCustom CredentialSource = "custom"
 )
 
 // App stages.
@@ -114,12 +127,15 @@ type EnvironmentExistingErrors struct {
 
 // Provider holds configuration for a single cloud provider.
 type Provider struct {
-	CloudProvider providerconfig.CloudProvider
-	DisplayName   string
-	Selected      bool
-	CurrentField  int
-	Credentials   interface{} // Will hold provider-specific credentials
-	Errors        ProviderErrors
+	CloudProvider        providerconfig.CloudProvider
+	DisplayName          string
+	Selected             bool
+	CurrentField         int
+	CredentialSource     CredentialSource // "preset" or "custom"
+	PresetCredentials    interface{}      // Credentials from preset (read-only)
+	HasPresetCredentials bool             // Whether preset has credentials for this provider
+	Credentials          interface{}      // Custom credentials or working copy
+	Errors               ProviderErrors
 }
 
 type ProviderErrors struct {
