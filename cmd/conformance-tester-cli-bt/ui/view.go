@@ -1528,6 +1528,105 @@ func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth int) st
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
+// renderReviewSettings displays the configuration review stage.
+func (m Model) renderReviewSettings(helpWithBorder string, uiWidth int) string {
+	const boxHeight = 30
+
+	header := styleHeader.Render("Review Configuration")
+	description := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colorMainWhite)).
+		Render("Review your configuration before proceeding with test execution. Use ←/→ or Space to expand/collapse sections.")
+
+	// Generate YAML sections per provider
+	providerReviews := m.generateReviewYAML()
+
+	var content strings.Builder
+	currentIndex := 0
+
+	for _, providerReview := range providerReviews {
+		// Provider header
+		isProviderFocused := currentIndex == m.Review.FocusedIndex
+		isProviderExpanded := m.Review.ExpandedProviders[providerReview.ProviderName]
+
+		providerIndicator := "▼"
+		if !isProviderExpanded {
+			providerIndicator = "▶"
+		}
+
+		providerHeader := fmt.Sprintf("%s %s", providerIndicator, providerReview.ProviderName)
+
+		if isProviderFocused {
+			content.WriteString(styleFocusHighlight.Render(providerHeader) + "\n")
+		} else {
+			content.WriteString(lipgloss.NewStyle().
+				Foreground(lipgloss.Color(colorMainBlue)).
+				Bold(true).
+				Render(providerHeader) + "\n")
+		}
+		currentIndex++
+
+		// Show sections if provider is expanded
+		if isProviderExpanded {
+			for _, section := range providerReview.Sections {
+				isSectionFocused := currentIndex == m.Review.FocusedIndex
+				sectionKey := fmt.Sprintf("%s:%s", providerReview.ProviderName, section.Name)
+				isSectionExpanded := m.Review.ExpandedSections[sectionKey]
+
+				// Section header with expand/collapse indicator
+				sectionIndicator := "▼"
+				if !isSectionExpanded {
+					sectionIndicator = "▶"
+				}
+
+				sectionHeader := fmt.Sprintf("  %s %s", sectionIndicator, section.Name)
+
+				if isSectionFocused {
+					content.WriteString(styleFocusHighlight.Render(sectionHeader) + "\n")
+				} else {
+					content.WriteString(styleItem.Render(sectionHeader) + "\n")
+				}
+				currentIndex++
+
+				// Show content if section is expanded
+				if isSectionExpanded {
+					// Indent the content (4 spaces total - 2 for provider + 2 for content)
+					lines := strings.Split(section.Content, "\n")
+					for _, line := range lines {
+						if line != "" {
+							content.WriteString("    " + line + "\n")
+						}
+					}
+				}
+			}
+		}
+
+		content.WriteString("\n")
+	}
+
+	// Add save to file checkbox
+	isSaveCheckboxFocused := currentIndex == m.Review.FocusedIndex
+	checkbox := "[ ]"
+	if m.Review.SaveToFile {
+		checkbox = "[✓]"
+	}
+	saveOption := fmt.Sprintf("%s Save configurations to files", checkbox)
+	if isSaveCheckboxFocused {
+		content.WriteString(styleFocusHighlight.Render(saveOption) + "\n")
+	} else {
+		content.WriteString(styleItem.Render(saveOption) + "\n")
+	}
+
+	var b strings.Builder
+	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, header) + "\n\n")
+	b.WriteString(description + "\n\n")
+	b.WriteString(content.String())
+
+	// Pad content to ensure help bar is at the bottom
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+}
+
 // renderExecuting displays logs during the configuration application process.
 func (m Model) renderExecuting(helpWithBorder string, uiWidth int) string {
 	header := styleHeader.Render("Applying Configuration")
@@ -1586,7 +1685,7 @@ func helpBar(stage int) string {
 		stageClusterSettingsSelection:           "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageMachineDeploymentSettingsSelection: "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageClusterConfiguration:               "↑/↓ to navigate, ←/→ to collapse/expand categories, Space to edit/toggle, Enter to continue, Esc to go back.",
-		stageReviewSettings:                     "↑/↓ to scroll, PgUp/PgDn for faster scroll, Enter to confirm, ← to go back.",
+		stageReviewSettings:                     "↑/↓: Navigate • Space/←/→: Expand/Collapse • Enter: Execute • Esc: Back",
 		stageExecuting:                          "Logs will appear here. Press ctrl+c to cancel.",
 		stageDone:                               "Press q to quit.",
 	}

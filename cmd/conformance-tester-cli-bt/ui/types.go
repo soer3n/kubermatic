@@ -322,8 +322,23 @@ const (
 )
 
 type Review struct {
-	ConfigYAML string
-	Viewport   viewport.Model
+	ConfigYAML        string
+	Viewport          viewport.Model
+	ProviderReviews   []ProviderReview
+	ExpandedProviders map[string]bool // Tracks which providers are expanded
+	ExpandedSections  map[string]bool // Tracks which sections are expanded (key: "provider:section")
+	FocusedIndex      int             // Global index for navigation
+	SaveToFile        bool            // Whether to save configurations to files
+}
+
+type ProviderReview struct {
+	ProviderName string
+	Sections     []ReviewSection
+}
+
+type ReviewSection struct {
+	Name    string
+	Content string
 }
 
 type execOutputMsg struct {

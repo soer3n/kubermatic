@@ -1908,6 +1908,18 @@ func (m Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case keyEnter:
+		// Initialize review state before moving to next stage
+		m.Review.ExpandedProviders = make(map[string]bool)
+		m.Review.ExpandedSections = make(map[string]bool)
+		m.Review.FocusedIndex = 0
+
+		// Expand all providers by default
+		for _, provider := range m.providers {
+			if provider.Selected {
+				m.Review.ExpandedProviders[provider.DisplayName] = true
+			}
+		}
+
 		// Move to next stage
 		m.stage++
 		return m, nil
@@ -2228,4 +2240,89 @@ func (m Model) getMaxKubeconfigVisualIndex() int {
 	}
 
 	return count - 1 // Convert count to max index
+}
+
+// handleReviewSettings handles input for the review settings stage with nested provider structure.
+func (m Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	providerReviews := m.generateReviewYAML()
+
+	// Calculate total navigable items
+	totalItems := 0
+	for _, providerReview := range providerReviews {
+		totalItems++ // Provider header
+		if m.Review.ExpandedProviders[providerReview.ProviderName] {
+			totalItems += len(providerReview.Sections) // Section headers when provider is expanded
+		}
+	}
+	totalItems++ // Add the save checkbox
+	maxIndex := totalItems - 1
+
+	switch msg.String() {
+	case keyUp:
+		// Move focus up
+		if m.Review.FocusedIndex > 0 {
+			m.Review.FocusedIndex--
+		}
+		return m, nil
+
+	case keyDown:
+		// Move focus down
+		if m.Review.FocusedIndex < maxIndex {
+			m.Review.FocusedIndex++
+		}
+		return m, nil
+
+	case keyLeft, keyRight, keySpace:
+		// Toggle expand/collapse for focused item (provider or section)
+		currentIndex := 0
+		for _, providerReview := range providerReviews {
+			// Check if we're at the provider level
+			if currentIndex == m.Review.FocusedIndex {
+				// Toggle provider expansion
+				m.Review.ExpandedProviders[providerReview.ProviderName] = !m.Review.ExpandedProviders[providerReview.ProviderName]
+				return m, nil
+			}
+			currentIndex++
+
+			// Check sections if provider is expanded
+			if m.Review.ExpandedProviders[providerReview.ProviderName] {
+				for _, section := range providerReview.Sections {
+					if currentIndex == m.Review.FocusedIndex {
+						// Toggle section expansion
+						sectionKey := fmt.Sprintf("%s:%s", providerReview.ProviderName, section.Name)
+						m.Review.ExpandedSections[sectionKey] = !m.Review.ExpandedSections[sectionKey]
+						return m, nil
+					}
+					currentIndex++
+				}
+			}
+		}
+		// Check if we're at the save checkbox
+		if currentIndex == m.Review.FocusedIndex {
+			// Toggle save checkbox
+			m.Review.SaveToFile = !m.Review.SaveToFile
+			return m, nil
+		}
+		return m, nil
+
+	case keyEnter:
+		// Save provider configurations if checkbox is enabled
+		if m.Review.SaveToFile {
+			if err := m.saveProviderConfigurations(); err != nil {
+				// Log error but continue
+				m.executionError = fmt.Sprintf("Warning: Failed to save configuration files: %v", err)
+			}
+		}
+
+		// Move to execution stage
+		m.stage = stageExecuting
+		return m, nil
+
+	case keyEsc:
+		// Go back to cluster configuration
+		m.stage = stageClusterConfiguration
+		return m, nil
+	}
+
+	return m, nil
 }

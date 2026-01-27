@@ -24,6 +24,7 @@ package ui
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -405,10 +406,11 @@ func initializeClusterSettingsSelection(providers []string) ClusterSettingsSelec
 // initializeClusterConfiguration creates the cluster configuration structure.
 func initializeClusterConfiguration() ClusterConfigurationSettings {
 	expandedCategories := map[string]bool{
-		"Cluster Naming":      true,
-		"Machine Deployment":  true,
-		"Resource Allocation": true,
-		"Test Options":        true,
+		"Cluster Naming":       true,
+		"Machine Deployment":   true,
+		"Resource Allocation":  true,
+		"Test Options":         true,
+		"Output Configuration": true,
 	}
 
 	return ClusterConfigurationSettings{
@@ -476,6 +478,30 @@ func initializeClusterConfiguration() ClusterConfigurationSettings {
 						Description: "Enable IPv4/IPv6 dual-stack networking for created clusters",
 						Type:        ConfigTypeBool,
 						Value:       false,
+					},
+				},
+			},
+			{
+				Name:        "Output Configuration",
+				Description: "Configure paths for test results, reports, and logs",
+				Settings: []ConfigSetting{
+					{
+						Name:        "Results File",
+						Description: "File to write test results to (relative to current directory)",
+						Type:        ConfigTypeString,
+						Value:       "results.json",
+					},
+					{
+						Name:        "Reports Directory",
+						Description: "Path to save test reports (relative to current directory)",
+						Type:        ConfigTypeString,
+						Value:       "_reports",
+					},
+					{
+						Name:        "Log Directory",
+						Description: "Path to save execution logs (relative to current directory)",
+						Type:        ConfigTypeString,
+						Value:       "_logs",
 					},
 				},
 			},
@@ -704,6 +730,11 @@ func initialModel() Model {
 		distributionSelection: initializeDistributionSelection([]string{}), // Will be reinitialized after provider selection
 		providerFocusIndex:    0,
 		providerFieldIndex:    0,
+		Review: Review{
+			ExpandedProviders: make(map[string]bool),
+			ExpandedSections:  make(map[string]bool),
+			FocusedIndex:      0,
+		},
 	}
 
 	return model
@@ -1285,6 +1316,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleMachineDeploymentSettingsSelection(msg)
 		case stageClusterConfiguration:
 			return m.handleClusterConfiguration(msg)
+		case stageReviewSettings:
+			return m.handleReviewSettings(msg)
 		}
 
 	case tea.WindowSizeMsg:
@@ -1391,9 +1424,8 @@ func (m Model) View() string {
 		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth)
 	case stageClusterConfiguration:
 		content = m.renderClusterConfiguration(helpWithBorder, uiWidth)
-
-	// case stageReview:
-	// 	content = m.renderReview(helpWithBorder)
+	case stageReviewSettings:
+		content = m.renderReviewSettings(helpWithBorder, uiWidth)
 	case stageExecuting:
 		content = m.renderExecuting(helpWithBorder, uiWidth)
 	case stageDone:
@@ -1420,4 +1452,829 @@ func (m Model) View() string {
 	}
 
 	return base
+}
+
+// generateReviewYAML generates the YAML configuration from all selected settings, organized by provider.
+func (m *Model) generateReviewYAML() []ProviderReview {
+	providerReviews := []ProviderReview{}
+
+	// Get selected providers
+	selectedProviders := []Provider{}
+	for _, provider := range m.providers {
+		if provider.Selected {
+			selectedProviders = append(selectedProviders, provider)
+		}
+	}
+
+	// Generate review for each selected provider
+	for _, provider := range selectedProviders {
+		sections := []ReviewSection{}
+
+		// Generate all sections for this provider
+		sections = append(sections, m.generateConfigurationSectionForProvider(provider)...)
+		sections = append(sections, m.generateEnvironmentSectionForProvider(provider))
+		sections = append(sections, m.generateSecretsSectionForProvider(provider))
+		sections = append(sections, m.generateReleasesSectionForProvider(provider))
+		sections = append(sections, m.generateDistributionsSectionForProvider(provider))
+		sections = append(sections, m.generateResourcesSectionForProvider(provider))
+		sections = append(sections, m.generateIncludedSectionForProvider(provider))
+
+		providerReviews = append(providerReviews, ProviderReview{
+			ProviderName: provider.DisplayName,
+			Sections:     sections,
+		})
+	}
+
+	return providerReviews
+}
+
+// generateConfigurationSectionForProvider generates the configuration section for a specific provider.
+func (m *Model) generateConfigurationSectionForProvider(provider Provider) []ReviewSection {
+	var b strings.Builder
+
+	// Get configuration values
+	var (
+		namePrefix           = "conformance-tester"
+		resultsFile          = "results.json"
+		reportsRoot          = "_reports"
+		logDirectory         = "_logs"
+		retryFailedScenarios = false
+		keepFailedClusters   = true
+		nodeCount            = 2
+	)
+
+	// Extract values from cluster configuration
+	for _, category := range m.clusterConfiguration.Categories {
+		for _, setting := range category.Settings {
+			switch setting.Name {
+			case "Name Prefix":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					namePrefix = val
+				}
+			case "Results File":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					resultsFile = val
+				}
+			case "Reports Directory":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					reportsRoot = val
+				}
+			case "Log Directory":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					logDirectory = val
+				}
+			case "Node Count":
+				if val, ok := setting.Value.(int); ok {
+					nodeCount = val
+				}
+			}
+		}
+	}
+
+	// Build configuration sections
+	sections := []ReviewSection{}
+
+	// Basic configuration
+	b.WriteString(fmt.Sprintf("namePrefix: \"%s\"\n", namePrefix))
+	b.WriteString(fmt.Sprintf("resultsFile: \"%s\"\n", resultsFile))
+	b.WriteString(fmt.Sprintf("retryFailedScenarios: %v\n", retryFailedScenarios))
+	b.WriteString(fmt.Sprintf("keepFailedClustersAfterTests: %v\n", keepFailedClusters))
+	b.WriteString(fmt.Sprintf("nodeCount: %d\n", nodeCount))
+	b.WriteString(fmt.Sprintf("reportsRoot: \"%s\"\n", reportsRoot))
+	b.WriteString(fmt.Sprintf("logDirectory: \"%s\"\n", logDirectory))
+
+	sections = append(sections, ReviewSection{
+		Name:    "Configuration",
+		Content: b.String(),
+	})
+
+	return sections
+}
+
+// generateEnvironmentSectionForProvider generates the environment section for a specific provider.
+func (m *Model) generateEnvironmentSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	if m.existingEnv.Selected {
+		if m.existingEnv.SelectedSeedIndex >= 0 && m.existingEnv.SelectedSeedIndex < len(m.existingEnv.AvailableSeeds) {
+			b.WriteString(fmt.Sprintf("kubermaticSeedName: \"%s\"\n",
+				m.existingEnv.AvailableSeeds[m.existingEnv.SelectedSeedIndex]))
+		}
+		if m.existingEnv.ProjectName.Value() != "" {
+			b.WriteString(fmt.Sprintf("kubermaticProject: \"%s\"\n",
+				m.existingEnv.ProjectName.Value()))
+		} else {
+			b.WriteString("kubermaticProject: \"\"\n")
+		}
+	} else {
+		b.WriteString("kubermaticSeedName: \"\"\n")
+		b.WriteString("kubermaticProject: \"\"\n")
+	}
+
+	return ReviewSection{
+		Name:    "Environment",
+		Content: b.String(),
+	}
+}
+
+// generateSecretsSectionForProvider generates the secrets section for a specific provider.
+func (m *Model) generateSecretsSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	b.WriteString("secrets:\n")
+	b.WriteString(fmt.Sprintf("  %s:\n", strings.ToLower(provider.DisplayName)))
+
+	// Add datacenter if available
+	for _, provName := range m.datacenterSettingsSelection.Providers {
+		if provName == provider.DisplayName {
+			for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provName] {
+				groupKey := fmt.Sprintf("%s:%s", provName, group.Key)
+				if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
+					b.WriteString(fmt.Sprintf("    kkpDatacenter: \"%s\"\n", group.Key))
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Add credentials
+	if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
+		// Credentials come from preset - use PresetCredentials
+		if provider.PresetCredentials != nil {
+			// Create a temporary provider with Credentials set to PresetCredentials
+			tempProvider := Provider{
+				DisplayName: provider.DisplayName,
+				Credentials: provider.PresetCredentials,
+			}
+			m.addProviderCredentialsToSecretsYAML(&b, &tempProvider)
+		}
+	} else {
+		m.addProviderCredentialsToSecretsYAML(&b, &provider)
+	}
+
+	return ReviewSection{
+		Name:    "Secrets",
+		Content: b.String(),
+	}
+}
+
+// generateReleasesSectionForProvider generates the releases section for a specific provider.
+func (m *Model) generateReleasesSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	selectedReleases := []string{}
+	for major := range m.releaseSelection.SelectedMajor {
+		for _, minor := range m.releaseSelection.MinorVersions[major] {
+			if m.releaseSelection.SelectedMinor[minor] {
+				selectedReleases = append(selectedReleases, minor)
+			}
+		}
+	}
+
+	if len(selectedReleases) == 0 {
+		selectedReleases = []string{"1.29.0"}
+	}
+
+	b.WriteString("releases:\n")
+	for _, release := range selectedReleases {
+		b.WriteString(fmt.Sprintf("- \"%s\"\n", release))
+	}
+
+	return ReviewSection{
+		Name:    "Releases",
+		Content: b.String(),
+	}
+}
+
+// generateDistributionsSectionForProvider generates the distributions section for a specific provider.
+func (m *Model) generateDistributionsSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	selectedDistributions := []string{}
+	// Only get distributions for this specific provider
+	for _, dist := range m.distributionSelection.DistributionsByProvider[provider.DisplayName] {
+		key := fmt.Sprintf("%s:%s", provider.DisplayName, dist)
+		if m.distributionSelection.Selected[key] {
+			selectedDistributions = append(selectedDistributions, string(dist))
+		}
+	}
+
+	if len(selectedDistributions) == 0 {
+		selectedDistributions = []string{"ubuntu"}
+	}
+
+	b.WriteString("enableDistributions:\n")
+	for _, dist := range selectedDistributions {
+		b.WriteString(fmt.Sprintf("- %s\n", dist))
+	}
+
+	return ReviewSection{
+		Name:    "Distributions",
+		Content: b.String(),
+	}
+}
+
+// generateResourcesSectionForProvider generates the resources section for a specific provider.
+func (m *Model) generateResourcesSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	var (
+		cpuResources      []string
+		memoryResources   []string
+		diskSizeResources []string
+	)
+
+	// Extract resources from cluster configuration
+	for _, category := range m.clusterConfiguration.Categories {
+		for _, setting := range category.Settings {
+			switch setting.Name {
+			case "CPU Cores":
+				if val, ok := setting.Value.([]int); ok {
+					for _, cpu := range val {
+						cpuResources = append(cpuResources, fmt.Sprintf("%dm", cpu*1000))
+					}
+				}
+			case "Memory":
+				if val, ok := setting.Value.([]string); ok {
+					memoryResources = val
+				}
+			case "Disk Size":
+				if val, ok := setting.Value.([]string); ok {
+					diskSizeResources = val
+				}
+			}
+		}
+	}
+
+	// Default values
+	if len(cpuResources) == 0 {
+		cpuResources = []string{"2000m"}
+	}
+	if len(memoryResources) == 0 {
+		memoryResources = []string{"4Gi"}
+	}
+	if len(diskSizeResources) == 0 {
+		diskSizeResources = []string{"25Gi"}
+	}
+
+	b.WriteString("resources:\n")
+	b.WriteString("  cpu: [")
+	for i, cpu := range cpuResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", cpu))
+	}
+	b.WriteString("]\n")
+
+	b.WriteString("  memory: [")
+	for i, mem := range memoryResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", mem))
+	}
+	b.WriteString("]\n")
+
+	b.WriteString("  diskSize: [")
+	for i, disk := range diskSizeResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", disk))
+	}
+	b.WriteString("]\n")
+
+	return ReviewSection{
+		Name:    "Resources",
+		Content: b.String(),
+	}
+}
+
+// generateIncludedSectionForProvider generates the included section for a specific provider.
+func (m *Model) generateIncludedSectionForProvider(provider Provider) ReviewSection {
+	var b strings.Builder
+
+	b.WriteString("included:\n")
+
+	// Datacenter descriptions
+	datacenterDescriptions := m.generateDatacenterDescriptionsForProvider(provider)
+	if len(datacenterDescriptions) > 0 {
+		b.WriteString("  datacenterDescriptions:\n")
+		for _, desc := range datacenterDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	// Cluster descriptions
+	clusterDescriptions := m.generateClusterDescriptionsForProvider(provider)
+	if len(clusterDescriptions) > 0 {
+		b.WriteString("  clusterDescriptions:\n")
+		for _, desc := range clusterDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	// Machine descriptions
+	machineDescriptions := m.generateMachineDescriptionsForProvider(provider)
+	if len(machineDescriptions) > 0 {
+		b.WriteString("  machineDescriptions:\n")
+		for _, desc := range machineDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	return ReviewSection{
+		Name:    "Included",
+		Content: b.String(),
+	}
+}
+
+// processKubeVirtKubeconfig handles KubeVirt kubeconfig - if it's base64 encoded content,
+// decode it and save to a temporary file, returning the file path.
+// If it's already a file path, return it as-is.
+func (m *Model) processKubeVirtKubeconfig(kubeconfigValue string) (string, error) {
+	// Check if the value looks like a file path
+	if strings.HasPrefix(kubeconfigValue, "/") || strings.HasPrefix(kubeconfigValue, "./") || strings.HasPrefix(kubeconfigValue, "~/") {
+		// It's already a file path
+		return kubeconfigValue, nil
+	}
+
+	// Try to decode as base64
+	decodedData, err := base64.StdEncoding.DecodeString(kubeconfigValue)
+	if err != nil {
+		// Not base64, might be raw kubeconfig content or short value
+		// If it contains typical kubeconfig content, treat it as raw YAML
+		if strings.Contains(kubeconfigValue, "apiVersion") || strings.Contains(kubeconfigValue, "clusters:") {
+			decodedData = []byte(kubeconfigValue)
+		} else {
+			// It's a short value, return as-is
+			return kubeconfigValue, nil
+		}
+	}
+
+	// Create a temporary file
+	tmpFile, err := os.CreateTemp("", "kubevirt-kubeconfig-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tmpFile.Close()
+
+	// Write decoded content to file
+	if _, err := tmpFile.Write(decodedData); err != nil {
+		os.Remove(tmpFile.Name())
+		return "", fmt.Errorf("failed to write kubeconfig to temp file: %w", err)
+	}
+
+	return tmpFile.Name(), nil
+}
+
+// addProviderCredentialsToSecretsYAML adds provider credentials to the secrets section.
+func (m *Model) addProviderCredentialsToSecretsYAML(b *strings.Builder, provider *Provider) {
+	switch creds := provider.Credentials.(type) {
+	case AWSCredentials:
+		b.WriteString(fmt.Sprintf("    accessKeyID: \"%s\"\n", creds.AccessKeyID.Value()))
+		b.WriteString(fmt.Sprintf("    secretAccessKey: \"%s\"\n", creds.SecretAccessKey.Value()))
+		if creds.AssumeRoleARN.Value() != "" {
+			b.WriteString(fmt.Sprintf("    assumeRoleARN: \"%s\"\n", creds.AssumeRoleARN.Value()))
+		}
+		if creds.AssumeRoleExternalID.Value() != "" {
+			b.WriteString(fmt.Sprintf("    assumeRoleExternalID: \"%s\"\n", creds.AssumeRoleExternalID.Value()))
+		}
+	case AzureCredentials:
+		b.WriteString(fmt.Sprintf("    tenantID: \"%s\"\n", creds.TenantID.Value()))
+		b.WriteString(fmt.Sprintf("    subscriptionID: \"%s\"\n", creds.SubscriptionID.Value()))
+		b.WriteString(fmt.Sprintf("    clientID: \"%s\"\n", creds.ClientID.Value()))
+		b.WriteString(fmt.Sprintf("    clientSecret: \"%s\"\n", creds.ClientSecret.Value()))
+	case GCPCredentials:
+		b.WriteString(fmt.Sprintf("    serviceAccount: \"%s\"\n", creds.ServiceAccount.Value()))
+	case AlibabaCredentials:
+		b.WriteString(fmt.Sprintf("    accessKeyID: \"%s\"\n", creds.AccessKeyID.Value()))
+		b.WriteString(fmt.Sprintf("    accessKeySecret: \"%s\"\n", creds.AccessKeySecret.Value()))
+	case AnexiaCredentials:
+		b.WriteString(fmt.Sprintf("    token: \"%s\"\n", creds.Token.Value()))
+	case DigitalOceanCredentials:
+		b.WriteString(fmt.Sprintf("    token: \"%s\"\n", creds.Token.Value()))
+	case HetznerCredentials:
+		b.WriteString(fmt.Sprintf("    token: \"%s\"\n", creds.Token.Value()))
+	case KubeVirtCredentials:
+		// Process kubeconfig - if it's base64 encoded, decode and save to temp file
+		kubeconfigPath := creds.Kubeconfig.Value()
+		if processedPath, err := m.processKubeVirtKubeconfig(kubeconfigPath); err == nil {
+			kubeconfigPath = processedPath
+		}
+		b.WriteString(fmt.Sprintf("    kubeconfigFile: \"%s\"\n", kubeconfigPath))
+	case NutanixCredentials:
+		b.WriteString(fmt.Sprintf("    username: \"%s\"\n", creds.Username.Value()))
+		b.WriteString(fmt.Sprintf("    password: \"%s\"\n", creds.Password.Value()))
+		b.WriteString(fmt.Sprintf("    clusterName: \"%s\"\n", creds.ClusterName.Value()))
+		if creds.ProxyURL.Value() != "" {
+			b.WriteString(fmt.Sprintf("    proxyURL: \"%s\"\n", creds.ProxyURL.Value()))
+		}
+		if creds.CSIUsername.Value() != "" {
+			b.WriteString(fmt.Sprintf("    csiUsername: \"%s\"\n", creds.CSIUsername.Value()))
+		}
+		if creds.CSIPassword.Value() != "" {
+			b.WriteString(fmt.Sprintf("    csiPassword: \"%s\"\n", creds.CSIPassword.Value()))
+		}
+		if creds.CSIEndpoint.Value() != "" {
+			b.WriteString(fmt.Sprintf("    csiEndpoint: \"%s\"\n", creds.CSIEndpoint.Value()))
+		}
+	case OpenStackCredentials:
+		if creds.Username.Value() != "" {
+			b.WriteString(fmt.Sprintf("    username: \"%s\"\n", creds.Username.Value()))
+		}
+		if creds.Password.Value() != "" {
+			b.WriteString(fmt.Sprintf("    password: \"%s\"\n", creds.Password.Value()))
+		}
+		if creds.Project.Value() != "" {
+			b.WriteString(fmt.Sprintf("    project: \"%s\"\n", creds.Project.Value()))
+		}
+		if creds.ProjectID.Value() != "" {
+			b.WriteString(fmt.Sprintf("    projectID: \"%s\"\n", creds.ProjectID.Value()))
+		}
+		if creds.Domain.Value() != "" {
+			b.WriteString(fmt.Sprintf("    domain: \"%s\"\n", creds.Domain.Value()))
+		}
+		if creds.ApplicationCredentialID.Value() != "" {
+			b.WriteString(fmt.Sprintf("    applicationCredentialID: \"%s\"\n", creds.ApplicationCredentialID.Value()))
+		}
+		if creds.ApplicationCredentialSecret.Value() != "" {
+			b.WriteString(fmt.Sprintf("    applicationCredentialSecret: \"%s\"\n", creds.ApplicationCredentialSecret.Value()))
+		}
+		if creds.Token.Value() != "" {
+			b.WriteString(fmt.Sprintf("    token: \"%s\"\n", creds.Token.Value()))
+		}
+	case VSphereCredentials:
+		b.WriteString(fmt.Sprintf("    username: \"%s\"\n", creds.Username.Value()))
+		b.WriteString(fmt.Sprintf("    password: \"%s\"\n", creds.Password.Value()))
+	case VMwareCloudDirectorCredentials:
+		if creds.Username.Value() != "" {
+			b.WriteString(fmt.Sprintf("    username: \"%s\"\n", creds.Username.Value()))
+		}
+		if creds.Password.Value() != "" {
+			b.WriteString(fmt.Sprintf("    password: \"%s\"\n", creds.Password.Value()))
+		}
+		if creds.APIToken.Value() != "" {
+			b.WriteString(fmt.Sprintf("    apiToken: \"%s\"\n", creds.APIToken.Value()))
+		}
+		b.WriteString(fmt.Sprintf("    organization: \"%s\"\n", creds.Organization.Value()))
+		b.WriteString(fmt.Sprintf("    vdc: \"%s\"\n", creds.VDC.Value()))
+	}
+}
+
+// generateDatacenterDescriptionsForProvider generates descriptions for selected datacenter settings for a specific provider.
+func (m *Model) generateDatacenterDescriptionsForProvider(provider Provider) []string {
+	var descriptions []string
+
+	// Only process settings for this specific provider
+	for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provider.DisplayName] {
+		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
+
+		// For each selected option in this group, generate both enabled and disabled entries
+		for _, option := range group.Options {
+			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+			if m.datacenterSettingsSelection.Selected[optionKey] {
+				// Generate description based on the option name
+				if option == "enabled" || option == "disabled" {
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				} else {
+					// For non-boolean options, include the actual option value
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				}
+			}
+		}
+	}
+
+	return descriptions
+}
+
+// generateClusterDescriptionsForProvider generates descriptions for selected cluster settings for a specific provider.
+func (m *Model) generateClusterDescriptionsForProvider(provider Provider) []string {
+	var descriptions []string
+
+	// Only process settings for this specific provider
+	for _, group := range m.clusterSettingsSelection.SettingsByProvider[provider.DisplayName] {
+		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
+
+		// For each selected option in this group
+		for _, option := range group.Options {
+			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+			if m.clusterSettingsSelection.Selected[optionKey] {
+				// Generate description based on the option name
+				if option == "enabled" || option == "disabled" {
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				} else {
+					// For non-boolean options, include the actual option value
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				}
+			}
+		}
+	}
+
+	return descriptions
+}
+
+// generateMachineDescriptionsForProvider generates descriptions for selected machine deployment settings for a specific provider.
+func (m *Model) generateMachineDescriptionsForProvider(provider Provider) []string {
+	var descriptions []string
+
+	// Only process settings for this specific provider
+	for _, group := range m.machineDeploymentSettingsSelection.SettingsByProvider[provider.DisplayName] {
+		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
+
+		// For each selected option in this group
+		for _, option := range group.Options {
+			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+			if m.machineDeploymentSettingsSelection.Selected[optionKey] {
+				// Generate description based on the option name
+				if option == "enabled" || option == "disabled" {
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				} else {
+					// For non-boolean options, include the actual option value
+					desc := fmt.Sprintf("with %s %s", group.Name, option)
+					descriptions = append(descriptions, desc)
+				}
+			}
+		}
+	}
+
+	return descriptions
+}
+
+// generateCompleteYAMLForProvider generates the complete YAML configuration for a provider in sample.yaml format.
+func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
+	var b strings.Builder
+
+	// Get configuration values
+	var (
+		namePrefix           = "conformance-tester"
+		resultsFile          = "results.json"
+		reportsRoot          = "_reports"
+		logDirectory         = "_logs"
+		retryFailedScenarios = false
+		keepFailedClusters   = true
+		nodeCount            = 2
+	)
+
+	// Extract values from cluster configuration
+	for _, category := range m.clusterConfiguration.Categories {
+		for _, setting := range category.Settings {
+			switch setting.Name {
+			case "Name Prefix":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					namePrefix = val
+				}
+			case "Results File":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					resultsFile = val
+				}
+			case "Reports Directory":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					reportsRoot = val
+				}
+			case "Log Directory":
+				if val, ok := setting.Value.(string); ok && val != "" {
+					logDirectory = val
+				}
+			case "Node Count":
+				if val, ok := setting.Value.(int); ok {
+					nodeCount = val
+				}
+			}
+		}
+	}
+
+	// Header
+	b.WriteString(fmt.Sprintf("namePrefix: \"%s\"\n\n", namePrefix))
+	b.WriteString("# The file to write the test results to.\n")
+	b.WriteString(fmt.Sprintf("resultsFile: \"%s\"\n\n", resultsFile))
+	b.WriteString("# If set, only scenarios that failed in a previous run will be executed.\n")
+	b.WriteString(fmt.Sprintf("retryFailedScenarios: %v\n\n", retryFailedScenarios))
+	b.WriteString("# Cluster settings\n")
+	b.WriteString(fmt.Sprintf("keepFailedClustersAfterTests: %v\n", keepFailedClusters))
+	b.WriteString(fmt.Sprintf("nodeCount: %d\n\n", nodeCount))
+	b.WriteString("# Paths\n")
+	b.WriteString(fmt.Sprintf("reportsRoot: \"%s\"\n", reportsRoot))
+	b.WriteString(fmt.Sprintf("logDirectory: \"%s\"\n\n", logDirectory))
+
+	// Environment
+	b.WriteString("# Kubermatic settings\n")
+	if m.existingEnv.Selected {
+		if m.existingEnv.SelectedSeedIndex >= 0 && m.existingEnv.SelectedSeedIndex < len(m.existingEnv.AvailableSeeds) {
+			b.WriteString(fmt.Sprintf("kubermaticSeedName: \"%s\"\n",
+				m.existingEnv.AvailableSeeds[m.existingEnv.SelectedSeedIndex]))
+		} else {
+			b.WriteString("kubermaticSeedName: \"\"\n")
+		}
+		if m.existingEnv.ProjectName.Value() != "" {
+			b.WriteString(fmt.Sprintf("kubermaticProject: \"%s\"\n\n",
+				m.existingEnv.ProjectName.Value()))
+		} else {
+			b.WriteString("kubermaticProject: \"\"\n\n")
+		}
+	} else {
+		b.WriteString("kubermaticSeedName: \"\"\n")
+		b.WriteString("kubermaticProject: \"\"\n\n")
+	}
+
+	// Secrets
+	b.WriteString("secrets:\n")
+	b.WriteString(fmt.Sprintf("  %s:\n", strings.ToLower(provider.DisplayName)))
+
+	// Add datacenter
+	for _, provName := range m.datacenterSettingsSelection.Providers {
+		if provName == provider.DisplayName {
+			for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provName] {
+				groupKey := fmt.Sprintf("%s:%s", provName, group.Key)
+				if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
+					b.WriteString(fmt.Sprintf("    kkpDatacenter: \"%s\"\n", group.Key))
+					break
+				}
+			}
+			break
+		}
+	}
+
+	// Add credentials
+	if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
+		// Credentials come from preset - use PresetCredentials
+		if provider.PresetCredentials != nil {
+			// Create a temporary provider with Credentials set to PresetCredentials
+			tempProvider := Provider{
+				DisplayName: provider.DisplayName,
+				Credentials: provider.PresetCredentials,
+			}
+			m.addProviderCredentialsToSecretsYAML(&b, &tempProvider)
+		}
+	} else {
+		m.addProviderCredentialsToSecretsYAML(&b, &provider)
+	}
+
+	b.WriteString("\n")
+
+	// Releases
+	selectedReleases := []string{}
+	for major, selected := range m.releaseSelection.SelectedMajor {
+		if selected {
+			for _, minor := range m.releaseSelection.MinorVersions[major] {
+				if m.releaseSelection.SelectedMinor[minor] {
+					selectedReleases = append(selectedReleases, minor)
+				}
+			}
+		}
+	}
+	if len(selectedReleases) == 0 {
+		selectedReleases = []string{"1.29.0"}
+	}
+
+	b.WriteString("# A list of Kubernetes releases to test.\n")
+	b.WriteString("releases:\n")
+	for _, release := range selectedReleases {
+		b.WriteString(fmt.Sprintf("- \"%s\"\n", release))
+	}
+	b.WriteString("\n")
+
+	// Distributions
+	selectedDistributions := []string{}
+	for _, dist := range m.distributionSelection.DistributionsByProvider[provider.DisplayName] {
+		key := fmt.Sprintf("%s:%s", provider.DisplayName, dist)
+		if m.distributionSelection.Selected[key] {
+			selectedDistributions = append(selectedDistributions, string(dist))
+		}
+	}
+	if len(selectedDistributions) == 0 {
+		selectedDistributions = []string{"ubuntu"}
+	}
+
+	b.WriteString("# A list of enabled operating system distributions.\n")
+	b.WriteString("enableDistributions:\n")
+	for _, dist := range selectedDistributions {
+		b.WriteString(fmt.Sprintf("- %s\n", dist))
+	}
+	b.WriteString("\n")
+
+	// Resources
+	var (
+		cpuResources      []string
+		memoryResources   []string
+		diskSizeResources []string
+	)
+
+	for _, category := range m.clusterConfiguration.Categories {
+		for _, setting := range category.Settings {
+			switch setting.Name {
+			case "CPU Cores":
+				if val, ok := setting.Value.([]int); ok {
+					for _, cpu := range val {
+						cpuResources = append(cpuResources, fmt.Sprintf("%dm", cpu))
+					}
+				}
+			case "Memory":
+				if val, ok := setting.Value.([]string); ok {
+					memoryResources = val
+				}
+			case "Disk Size":
+				if val, ok := setting.Value.([]string); ok {
+					diskSizeResources = val
+				}
+			}
+		}
+	}
+
+	if len(cpuResources) == 0 {
+		cpuResources = []string{"2000m"}
+	}
+	if len(memoryResources) == 0 {
+		memoryResources = []string{"4Gi"}
+	}
+	if len(diskSizeResources) == 0 {
+		diskSizeResources = []string{"25Gi"}
+	}
+
+	b.WriteString("resources:\n")
+	b.WriteString("  cpu: [")
+	for i, cpu := range cpuResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", cpu))
+	}
+	b.WriteString("]\n")
+
+	b.WriteString("  memory: [")
+	for i, mem := range memoryResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", mem))
+	}
+	b.WriteString("]\n")
+
+	b.WriteString("  diskSize: [")
+	for i, disk := range diskSizeResources {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(fmt.Sprintf("\"%s\"", disk))
+	}
+	b.WriteString("]\n\n")
+
+	// Included
+	b.WriteString("included:\n")
+
+	datacenterDescriptions := m.generateDatacenterDescriptionsForProvider(provider)
+	if len(datacenterDescriptions) > 0 {
+		b.WriteString("  datacenterDescriptions:\n")
+		for _, desc := range datacenterDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	clusterDescriptions := m.generateClusterDescriptionsForProvider(provider)
+	if len(clusterDescriptions) > 0 {
+		b.WriteString("  clusterDescriptions:\n")
+		for _, desc := range clusterDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	machineDescriptions := m.generateMachineDescriptionsForProvider(provider)
+	if len(machineDescriptions) > 0 {
+		b.WriteString("  machineDescriptions:\n")
+		for _, desc := range machineDescriptions {
+			b.WriteString(fmt.Sprintf("    - \"%s\"\n", desc))
+		}
+	}
+
+	return b.String()
+}
+
+// saveProviderConfigurations saves YAML configuration files for all selected providers.
+func (m *Model) saveProviderConfigurations() error {
+	for _, provider := range m.providers {
+		if !provider.Selected {
+			continue
+		}
+
+		// Generate YAML content
+		yamlContent := m.generateCompleteYAMLForProvider(provider)
+
+		// Create filename (lowercase provider name + .yaml)
+		filename := strings.ToLower(provider.DisplayName) + ".yaml"
+		filename = strings.ReplaceAll(filename, " ", "-") // Replace spaces with dashes
+
+		// Save to file in current directory
+		if err := os.WriteFile(filename, []byte(yamlContent), 0644); err != nil {
+			return fmt.Errorf("failed to save %s: %w", filename, err)
+		}
+	}
+
+	return nil
 }
