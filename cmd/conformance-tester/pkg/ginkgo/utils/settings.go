@@ -21,6 +21,9 @@ func GetClusterDescriptions() map[string]k8cginkgo.Description {
 
 	for group, descs := range groupedSettingsDesc {
 		strippedDescs := stripPrefix(descs)
+		if len(strippedDescs) == len(descs) {
+			strippedDescs = nil
+		}
 		groupedSettings[group] = k8cginkgo.Description{
 			Name:    longestCommonPrefixTokens(descs, " "),
 			Options: strippedDescs,
