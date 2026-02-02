@@ -1,0 +1,32 @@
+# =========================
+# Build stage
+# =========================
+FROM golang:1.24 AS builder
+
+WORKDIR /workspace
+
+# Cache deps
+COPY . .
+RUN go mod download
+
+# Install ginkgo
+RUN go install github.com/onsi/ginkgo/v2/ginkgo@v2.26.0
+
+# Copy source
+COPY cmd/conformance-tester/pkg/ginkgo/ .
+
+# Build the ginkgo test binary
+RUN ginkgo build -o ./cmd/e2e/e2e.test ./cmd/conformance-tester/pkg/ginkgo/... 
+
+# =========================
+# Runtime stage
+# =========================
+FROM gcr.io/distroless/base-debian12
+
+WORKDIR /tests
+
+# Copy test binary
+COPY --from=builder /workspace/cmd/e2e/e2e.test .
+
+# Run tests
+ENTRYPOINT ["/tests/e2e.test"]
