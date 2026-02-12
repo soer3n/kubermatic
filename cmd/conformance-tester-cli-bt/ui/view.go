@@ -32,9 +32,10 @@ import (
 
 // Color definitions for consistent theming.
 const (
-	colorMainBlue  = "#2196F3"
-	colorMainWhite = "#FFFFFF"
-	colorErrorRed  = "#FF5252"
+	colorMainBlue      = "#2196F3"
+	colorMainWhite     = "#FFFFFF"
+	colorErrorRed      = "#FF5252"
+	colorWarningYellow = "#FFC107"
 )
 
 // Application-wide style configuration.
@@ -127,8 +128,12 @@ func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 	titleContent := "Confirm Quit"
 	warningContent := "Are you sure you want to quit? Unsaved progress will be lost."
 	if m.stage == stageExecuting {
-		titleContent = "Caution: Interrupting Installation"
-		warningContent = executionWarning
+		if m.executionCancelling {
+			// Already cancelling - don't show confirmation
+			return ""
+		}
+		titleContent = "Cancel Test Execution"
+		warningContent = "This will stop all running tests and clean up created resources (namespace, PVC, jobs, configmaps, secrets).\n\nAre you sure you want to cancel?"
 	}
 	var b strings.Builder
 
@@ -1038,6 +1043,48 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth 
 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
 	b.WriteString(description + "\n\n")
 
+	// Check if any provider is loading or has errors
+	anyLoading := false
+	var loadingProviders []string
+	var errorProviders []string
+	for _, provider := range m.datacenterSettingsSelection.Providers {
+		if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
+			if ps.LoadingSettings {
+				anyLoading = true
+				loadingProviders = append(loadingProviders, provider)
+			}
+			if ps.SettingsFetchError != "" {
+				errorProviders = append(errorProviders, provider)
+			}
+		}
+	}
+
+	// Show loading indicators
+	if anyLoading {
+		loadingMsg := "⏳ Loading settings"
+		if len(loadingProviders) > 0 {
+			loadingMsg += " for " + strings.Join(loadingProviders, ", ")
+		}
+		loadingMsg += "..."
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(loadingMsg))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
+
+	// Show errors if any
+	if len(errorProviders) > 0 {
+		for _, provider := range errorProviders {
+			if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
+				errorMsg := fmt.Sprintf("⚠ Error loading settings for %s: %s", provider, ps.SettingsFetchError)
+				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(errorMsg))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	// Check if no settings are available
 	hasSettings := false
 	for _, provider := range m.datacenterSettingsSelection.Providers {
@@ -1114,7 +1161,8 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth 
 				b.WriteString(groupHeader + "\n")
 				currentIndex++
 
-				// Render options for this group (always shown)
+				// Render options for this group (only if options exist)
+				// If no options, the group itself acts as a boolean flag
 				for optionIdx, option := range group.Options {
 					isOptionFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
 					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
@@ -1251,7 +1299,8 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth int
 				b.WriteString(groupHeader + "\n")
 				currentIndex++
 
-				// Render options for this group (always shown)
+				// Render options for this group (only if options exist)
+				// If no options, the group itself acts as a boolean flag
 				for optionIdx, option := range group.Options {
 					isOptionFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
 					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
@@ -1311,6 +1360,48 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 	var b strings.Builder
 	b.WriteString(lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, title) + "\n\n")
 	b.WriteString(description + "\n\n")
+
+	// Check if any provider is loading or has errors
+	anyLoading := false
+	var loadingProviders []string
+	var errorProviders []string
+	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
+		if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
+			if ps.LoadingSettings {
+				anyLoading = true
+				loadingProviders = append(loadingProviders, provider)
+			}
+			if ps.SettingsFetchError != "" {
+				errorProviders = append(errorProviders, provider)
+			}
+		}
+	}
+
+	// Show loading indicators
+	if anyLoading {
+		loadingMsg := "⏳ Loading settings"
+		if len(loadingProviders) > 0 {
+			loadingMsg += " for " + strings.Join(loadingProviders, ", ")
+		}
+		loadingMsg += "..."
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(loadingMsg))
+		b.WriteString("\n\n")
+		lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+		contentBody := strings.Join(lines, "\n")
+		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	}
+
+	// Show errors if any
+	if len(errorProviders) > 0 {
+		for _, provider := range errorProviders {
+			if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
+				errorMsg := fmt.Sprintf("⚠ Error loading settings for %s: %s", provider, ps.SettingsFetchError)
+				b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Render(errorMsg))
+				b.WriteString("\n")
+			}
+		}
+		b.WriteString("\n")
+	}
 
 	// Check if no settings are available
 	hasSettings := false
@@ -1388,7 +1479,8 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 				b.WriteString(groupHeader + "\n")
 				currentIndex++
 
-				// Render options for this group (always shown)
+				// Render options for this group (only if options exist)
+				// If no options, the group itself acts as a boolean flag
 				for optionIdx, option := range group.Options {
 					isOptionFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
 					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
@@ -1629,14 +1721,22 @@ func (m Model) renderReviewSettings(helpWithBorder string, uiWidth int) string {
 
 // renderExecuting displays logs during the configuration application process.
 func (m Model) renderExecuting(helpWithBorder string, uiWidth int) string {
-	header := styleHeader.Render("Applying Configuration")
+	var header string
+	if m.executionCancelling {
+		header = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colorWarningYellow)).
+			Bold(true).
+			Render("⚠ Cancelling Test Execution and Cleaning Up...")
+	} else {
+		header = styleHeader.Render("Applying Configuration")
+	}
 
 	// Build the main content
 	var b strings.Builder
 	b.WriteString(header + "\n\n") // Extra line after header
 	b.WriteString(m.Review.Viewport.View())
 
-	if m.executionError != "" {
+	if m.executionError != "" && !m.executionCancelling {
 		b.WriteString("\n" + styleError.Render(m.executionError))
 	}
 

@@ -28,14 +28,20 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
 // Message types for execution.
 type (
-	logMsg                struct{ line string }
-	errMsg                struct{ err error }
-	doneMsg               struct{ success bool }
+	logMsg        struct{ line string }
+	errMsg        struct{ err error }
+	doneMsg       struct{ success bool }
+	execOutputMsg struct {
+		output  string
+		success bool
+		err     error
+	}
 	startMsg              struct{ ch <-chan tea.Msg }
 	seedsPresetsLoadedMsg struct {
 		seeds   []string
@@ -46,6 +52,21 @@ type (
 		presetName string
 		spec       map[string]interface{}
 		err        error
+	}
+	datacenterSettingsLoadedMsg struct {
+		provider     string
+		descriptions map[string]k8cginkgo.Description
+		err          error
+	}
+	machineSettingsLoadedMsg struct {
+		provider     string
+		descriptions map[string]k8cginkgo.Description
+		err          error
+	}
+	cleanupProgressMsg struct {
+		message string
+		done    bool
+		err     error
 	}
 )
 
@@ -246,24 +267,33 @@ type SettingGroup struct {
 	IsExpanded bool     // Whether options are visible
 }
 
+// ProviderSettingsState holds loading state and data for a provider's settings.
+type ProviderSettingsState struct {
+	LoadingSettings    bool                             // Tracks if settings are being loaded
+	SettingsFetchError string                           // Tracks fetch errors
+	Descriptions       map[string]k8cginkgo.Description // Loaded descriptions
+}
+
 // DatacenterSettingsSelection holds the state for datacenter settings selection stage.
 type DatacenterSettingsSelection struct {
-	Providers          []string                  // List of provider names
-	SettingsByProvider map[string][]SettingGroup // Settings grouped by provider
-	Selected           map[string]bool           // Selected options (key: "provider:groupKey:option")
-	SelectedGroups     map[string]bool           // Selected groups (key: "provider:groupKey")
-	FocusedIndex       int                       // Currently focused item index
-	ExpandedProviders  map[string]bool           // Tracks which providers are expanded
+	Providers          []string                          // List of provider names
+	SettingsByProvider map[string][]SettingGroup         // Settings grouped by provider
+	Selected           map[string]bool                   // Selected options (key: "provider:groupKey:option")
+	SelectedGroups     map[string]bool                   // Selected groups (key: "provider:groupKey")
+	FocusedIndex       int                               // Currently focused item index
+	ExpandedProviders  map[string]bool                   // Tracks which providers are expanded
+	ProviderSettings   map[string]*ProviderSettingsState // Per-provider loading state and data
 }
 
 // MachineDeploymentSettingsSelection holds the state for machine deployment settings selection stage.
 type MachineDeploymentSettingsSelection struct {
-	Providers          []string                  // List of provider names
-	SettingsByProvider map[string][]SettingGroup // Settings grouped by provider
-	Selected           map[string]bool           // Selected options (key: "provider:groupKey:option")
-	SelectedGroups     map[string]bool           // Selected groups (key: "provider:groupKey")
-	FocusedIndex       int                       // Currently focused item index
-	ExpandedProviders  map[string]bool           // Tracks which providers are expanded
+	Providers          []string                          // List of provider names
+	SettingsByProvider map[string][]SettingGroup         // Settings grouped by provider
+	Selected           map[string]bool                   // Selected options (key: "provider:groupKey:option")
+	SelectedGroups     map[string]bool                   // Selected groups (key: "provider:groupKey")
+	FocusedIndex       int                               // Currently focused item index
+	ExpandedProviders  map[string]bool                   // Tracks which providers are expanded
+	ProviderSettings   map[string]*ProviderSettingsState // Per-provider loading state and data
 }
 
 // ClusterSettingsSelection holds the state for cluster settings selection stage.
@@ -339,11 +369,6 @@ type ProviderReview struct {
 type ReviewSection struct {
 	Name    string
 	Content string
-}
-
-type execOutputMsg struct {
-	output  string
-	success bool
 }
 
 // Add tuiLogWriter type.

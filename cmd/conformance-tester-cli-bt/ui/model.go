@@ -35,8 +35,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/go-logr/logr"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
-	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/kubevirt"
 	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	"k8c.io/kubermatic/v2/pkg/defaulting"
 	"k8c.io/machine-controller/sdk/providerconfig"
@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/tools/clientcmd"
+	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Model holds the state of the app.
@@ -73,11 +74,16 @@ type Model struct {
 
 	Review  Review
 	cmdChan <-chan tea.Msg
+	program *tea.Program // Reference to the program for sending messages from goroutines
 
 	// Execution state
-	logs           []string
-	executionError string
-	executionDone  bool
+	logs                []string
+	executionError      string
+	executionDone       bool
+	runningJobs         []string          // Track job names currently running
+	jobConfigMaps       map[string]string // Map job name to configmap name
+	jobSecrets          map[string]string // Map job name to secret name
+	executionCancelling bool              // Track if cancellation is in progress
 
 	// Quit confirmation modal state
 	quitConfirmVisible bool
@@ -86,6 +92,10 @@ type Model struct {
 	// Terminal dimensions for dynamic sizing
 	terminalWidth  int
 	terminalHeight int
+
+	// Content viewport for scrolling (used by stages without their own viewport)
+	contentViewport viewport.Model
+	lastContent     string // Track last rendered content to avoid unnecessary updates
 }
 
 func newTextInput(placeholder string, charLimit int) textinput.Model {
@@ -252,47 +262,25 @@ func initializeDistributionSelection(providers []string) DistributionSelection {
 }
 
 // initializeDatacenterSettingsSelection creates the datacenter settings selection structure.
+// Settings will be fetched lazily when entering this stage.
 func initializeDatacenterSettingsSelection(providers []string) DatacenterSettingsSelection {
 	settingsByProvider := make(map[string][]SettingGroup)
 
-	// Gather settings from all selected providers
+	// Initialize empty settings for all providers - will be populated later via lazy loading
 	for _, provider := range providers {
-		var descriptionsMap map[string]k8cginkgo.Description
-
-		// Provider-specific datacenter settings retrieval
-		switch strings.ToLower(provider) {
-		case "kubevirt":
-			descriptionsMap = kubevirt.GetDatacenterDescriptions()
-		// Add more providers here as they become available
-		// case "aws":
-		// 	descriptionsMap = aws.GetDatacenterDescriptions()
-		default:
-			descriptionsMap = make(map[string]k8cginkgo.Description)
-		}
-
-		// Convert map to SettingGroup slice
-		var groups []SettingGroup
-		for key, desc := range descriptionsMap {
-			groups = append(groups, SettingGroup{
-				Key:        key,
-				Name:       desc.Name,
-				Options:    desc.Options,
-				IsExpanded: true, // Always show options
-			})
-		}
-
-		// Sort groups by key for consistent display
-		sort.Slice(groups, func(i, j int) bool {
-			return groups[i].Key < groups[j].Key
-		})
-
-		settingsByProvider[provider] = groups
+		settingsByProvider[provider] = []SettingGroup{}
 	}
 
 	// Initialize all providers as expanded by default
 	expandedProviders := make(map[string]bool)
+	providerSettings := make(map[string]*ProviderSettingsState)
 	for _, provider := range providers {
 		expandedProviders[provider] = true
+		providerSettings[provider] = &ProviderSettingsState{
+			LoadingSettings:    false,
+			SettingsFetchError: "",
+			Descriptions:       make(map[string]k8cginkgo.Description),
+		}
 	}
 
 	return DatacenterSettingsSelection{
@@ -302,51 +290,30 @@ func initializeDatacenterSettingsSelection(providers []string) DatacenterSetting
 		SelectedGroups:     make(map[string]bool),
 		FocusedIndex:       0,
 		ExpandedProviders:  expandedProviders,
+		ProviderSettings:   providerSettings,
 	}
 }
 
 // initializeMachineDeploymentSettingsSelection creates the machine deployment settings selection structure.
+// Settings will be fetched lazily when entering this stage.
 func initializeMachineDeploymentSettingsSelection(providers []string) MachineDeploymentSettingsSelection {
 	settingsByProvider := make(map[string][]SettingGroup)
 
-	// Gather settings from all selected providers
+	// Initialize empty settings for all providers - will be populated later via lazy loading
 	for _, provider := range providers {
-		var descriptionsMap map[string]k8cginkgo.Description
-
-		// Provider-specific machine deployment settings retrieval
-		switch strings.ToLower(provider) {
-		case "kubevirt":
-			descriptionsMap = kubevirt.GetMachineDescriptions()
-		// Add more providers here as they become available
-		// case "aws":
-		// 	descriptionsMap = aws.GetMachineDescriptions()
-		default:
-			descriptionsMap = make(map[string]k8cginkgo.Description)
-		}
-
-		// Convert map to SettingGroup slice
-		var groups []SettingGroup
-		for key, desc := range descriptionsMap {
-			groups = append(groups, SettingGroup{
-				Key:        key,
-				Name:       desc.Name,
-				Options:    desc.Options,
-				IsExpanded: true, // Always show options
-			})
-		}
-
-		// Sort groups by key for consistent display
-		sort.Slice(groups, func(i, j int) bool {
-			return groups[i].Key < groups[j].Key
-		})
-
-		settingsByProvider[provider] = groups
+		settingsByProvider[provider] = []SettingGroup{}
 	}
 
 	// Initialize all providers as expanded by default
 	expandedProviders := make(map[string]bool)
+	providerSettings := make(map[string]*ProviderSettingsState)
 	for _, provider := range providers {
 		expandedProviders[provider] = true
+		providerSettings[provider] = &ProviderSettingsState{
+			LoadingSettings:    false,
+			SettingsFetchError: "",
+			Descriptions:       make(map[string]k8cginkgo.Description),
+		}
 	}
 
 	return MachineDeploymentSettingsSelection{
@@ -356,6 +323,7 @@ func initializeMachineDeploymentSettingsSelection(providers []string) MachineDep
 		SelectedGroups:     make(map[string]bool),
 		FocusedIndex:       0,
 		ExpandedProviders:  expandedProviders,
+		ProviderSettings:   providerSettings,
 	}
 }
 
@@ -720,7 +688,7 @@ func initialModel() Model {
 			LoadingSeeds:         false,
 			LoadingPresets:       false,
 			FetchError:           "",
-			ProjectName:          newTextInput("e.g., my-project", 64),
+			ProjectName:          newTextInput("Leave empty for a new project", 64),
 			Errors:               EnvironmentExistingErrors{Fields: make(map[string]string)},
 		},
 		environmentFocusIndex: 0,
@@ -735,6 +703,12 @@ func initialModel() Model {
 			ExpandedSections:  make(map[string]bool),
 			FocusedIndex:      0,
 		},
+		runningJobs:         []string{},
+		jobConfigMaps:       make(map[string]string),
+		jobSecrets:          make(map[string]string),
+		executionCancelling: false,
+		contentViewport:     viewport.New(80, 24), // Initialize with reasonable defaults
+		lastContent:         "",
 	}
 
 	return model
@@ -1274,6 +1248,9 @@ func newTextInputReadOnly(value string, width int) textinput.Model {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
+	// Track stage changes to reset viewport scroll
+	oldStage := m.stage
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		// Global quit confirmation handler
@@ -1295,8 +1272,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.stage == stageDone {
 				return m, tea.Quit
 			}
+		// Handle page up/down for scrolling (except during execution/review with own viewport)
+		case "pgup":
+			if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
+				m.contentViewport.ViewUp()
+				return m, nil
+			}
+		case "pgdown":
+			if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
+				m.contentViewport.ViewDown()
+				return m, nil
+			}
 		}
 
+		// Handle stage-specific key events
 		switch m.stage {
 		case stageWelcome:
 			return m.handleWelcomePage(msg)
@@ -1318,9 +1307,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleClusterConfiguration(msg)
 		case stageReviewSettings:
 			return m.handleReviewSettings(msg)
+		case stageExecuting:
+			return m.handleExecuting(msg)
+		case stageDone:
+			return m.handleDone(msg)
 		}
 
+	// Handle mouse wheel events for scrolling
+	case tea.MouseMsg:
+		if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
+			switch msg.Type {
+			case tea.MouseWheelUp:
+				m.contentViewport.LineUp(3)
+				return m, nil
+			case tea.MouseWheelDown:
+				m.contentViewport.LineDown(3)
+				return m, nil
+			}
+		}
+		// Mouse events not used for scrolling are ignored
+		return m, nil
+
 	case tea.WindowSizeMsg:
+		m.terminalWidth = msg.Width
+		m.terminalHeight = msg.Height
+
+		// Recreate content viewport with new dimensions
+		// Leave room for help bar (approximately 3 lines: border + content + spacing)
+		helpBarHeight := 3
+		m.contentViewport = viewport.New(msg.Width, msg.Height-helpBarHeight)
+
+		// Update execution viewport if it exists
+		if m.stage == stageExecuting || m.stage == stageReviewSettings {
+			if m.Review.Viewport.Width == 0 {
+				m.Review.Viewport = viewport.New(m.getUIInnerWidth(), m.terminalHeight-12)
+				m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+			} else {
+				m.Review.Viewport.Width = m.getUIInnerWidth()
+				m.Review.Viewport.Height = m.terminalHeight - 12
+			}
+		}
 		cmd = m.handleWindowSize(msg)
 	case startMsg:
 		cmd = m.handleStart(msg)
@@ -1329,9 +1355,77 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// case errMsg:
 	// 	cmd = m.handleError(msg)
 	case doneMsg:
-		cmd = m.handleDone(msg)
+		cmd = m.handleDoneMessage(msg)
 	case execOutputMsg:
 		cmd = m.handleExecOutput(msg)
+	case cleanupProgressMsg:
+		// Append cleanup messages to logs
+		lines := strings.Split(msg.message, "\n")
+		for _, line := range lines {
+			if line != "" {
+				m.logs = append(m.logs, line)
+			}
+		}
+
+		// Update viewport
+		if m.Review.Viewport.Width > 0 {
+			m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+			m.Review.Viewport.GotoBottom()
+		}
+
+		if msg.done {
+			m.executionCancelling = false
+			m.executionDone = true
+			if msg.err != nil {
+				m.executionError = msg.err.Error()
+			}
+			m.stage = stageDone
+		}
+		return m, nil
+	case datacenterSettingsLoadedMsg:
+		// Update datacenter settings for the provider
+		if ps, ok := m.datacenterSettingsSelection.ProviderSettings[msg.provider]; ok {
+			ps.LoadingSettings = false
+			if msg.err != nil {
+				ps.SettingsFetchError = msg.err.Error()
+			} else {
+				ps.SettingsFetchError = ""
+				ps.Descriptions = msg.descriptions
+				// Convert descriptions to SettingGroup structures
+				var settingGroups []SettingGroup
+				for key, desc := range msg.descriptions {
+					settingGroups = append(settingGroups, SettingGroup{
+						Key:     key,
+						Name:    desc.Name,
+						Options: desc.Options,
+					})
+				}
+				m.datacenterSettingsSelection.SettingsByProvider[msg.provider] = settingGroups
+			}
+			m.datacenterSettingsSelection.ProviderSettings[msg.provider] = ps
+		}
+	case machineSettingsLoadedMsg:
+		// Update machine settings for the provider
+		if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[msg.provider]; ok {
+			ps.LoadingSettings = false
+			if msg.err != nil {
+				ps.SettingsFetchError = msg.err.Error()
+			} else {
+				ps.SettingsFetchError = ""
+				ps.Descriptions = msg.descriptions
+				// Convert descriptions to SettingGroup structures
+				var settingGroups []SettingGroup
+				for key, desc := range msg.descriptions {
+					settingGroups = append(settingGroups, SettingGroup{
+						Key:     key,
+						Name:    desc.Name,
+						Options: desc.Options,
+					})
+				}
+				m.machineDeploymentSettingsSelection.SettingsByProvider[msg.provider] = settingGroups
+			}
+			m.machineDeploymentSettingsSelection.ProviderSettings[msg.provider] = ps
+		}
 	case seedsPresetsLoadedMsg:
 		m.existingEnv.LoadingSeeds = false
 		m.existingEnv.LoadingPresets = false
@@ -1355,6 +1449,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateProvidersWithPresetCredentials(msg.spec)
 			m.existingEnv.FetchError = ""
 		}
+	}
+
+	// Reset viewport scroll position when stage changes
+	if oldStage != m.stage && m.stage != stageExecuting && m.stage != stageReviewSettings {
+		m.contentViewport.GotoTop()
 	}
 
 	return m, cmd
@@ -1382,20 +1481,41 @@ func (m Model) getUIInnerWidth() int {
 	return m.getUIWidth() - 8
 }
 
+// SetProgram sets the tea.Program reference for sending messages from goroutines.
+func (m *Model) SetProgram(p *tea.Program) {
+	m.program = p
+}
+
 func ConformanceTester() (tea.Model, error) {
-	m, err := tea.NewProgram(initialModel()).Run()
+	// Set up a no-op logger for controller-runtime to suppress warnings
+	// This is needed because some provider settings code tries to connect to k8s clusters
+	ctrlruntimelog.SetLogger(logr.Discard())
+
+	initialMdl := initialModel()
+	// Create program with AltScreen enabled for full-screen TUI
+	p := tea.NewProgram(
+		&initialMdl,
+		tea.WithAltScreen(),       // Enable alternate screen buffer (full-screen mode like Vim)
+		tea.WithMouseCellMotion(), // Optional: enable mouse support
+	)
+
+	// Set the program reference in the model so goroutines can send messages
+	initialMdl.SetProgram(p)
+
+	m, err := p.Run()
 	if err != nil {
 		return nil, err
 	}
-	// if myModel, ok := m.(Model); ok {
-	// 	return myModel.Nodes.Configs, nil
-	// }
 	return m, nil
 }
 
 // --- View Entry Point ---
 // View renders the entire UI based on the current application stage.
 func (m Model) View() string {
+	if m.terminalWidth == 0 || m.terminalHeight == 0 {
+		return "Initializing..."
+	}
+
 	// Get dynamic UI dimensions
 	uiWidth := m.getUIWidth()
 	uiInnerWidth := m.getUIInnerWidth()
@@ -1407,25 +1527,25 @@ func (m Model) View() string {
 	var content string
 	switch m.stage {
 	case stageWelcome:
-		content = m.renderWelcome(helpWithBorder, uiWidth)
+		content = m.renderWelcome("", uiWidth) // Don't include help bar in scrollable content
 	case stageEnvironmentSelection:
-		content = m.renderEnvironmentSelection(helpWithBorder, uiWidth)
+		content = m.renderEnvironmentSelection("", uiWidth)
 	case stageReleaseSelection:
-		content = m.renderReleaseSelection(helpWithBorder, uiWidth)
+		content = m.renderReleaseSelection("", uiWidth)
 	case stageProviderSelection:
-		content = m.renderProviderSelection(helpWithBorder, uiWidth)
+		content = m.renderProviderSelection("", uiWidth)
 	case stageDistributionSelection:
-		content = m.renderDistributionSelection(helpWithBorder, uiWidth)
+		content = m.renderDistributionSelection("", uiWidth)
 	case stageDatacenterSettingsSelection:
-		content = m.renderDatacenterSettingsSelection(helpWithBorder, uiWidth)
+		content = m.renderDatacenterSettingsSelection("", uiWidth)
 	case stageClusterSettingsSelection:
-		content = m.renderClusterSettingsSelection(helpWithBorder, uiWidth)
+		content = m.renderClusterSettingsSelection("", uiWidth)
 	case stageMachineDeploymentSettingsSelection:
-		content = m.renderMachineDeploymentSettingsSelection(helpWithBorder, uiWidth)
+		content = m.renderMachineDeploymentSettingsSelection("", uiWidth)
 	case stageClusterConfiguration:
-		content = m.renderClusterConfiguration(helpWithBorder, uiWidth)
+		content = m.renderClusterConfiguration("", uiWidth)
 	case stageReviewSettings:
-		content = m.renderReviewSettings(helpWithBorder, uiWidth)
+		content = m.renderReviewSettings(helpWithBorder, uiWidth) // Keep help bar for execution/review stages
 	case stageExecuting:
 		content = m.renderExecuting(helpWithBorder, uiWidth)
 	case stageDone:
@@ -1449,6 +1569,19 @@ func (m Model) View() string {
 		bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
 
 		return lipgloss.Place(uiWidth+8, 0, lipgloss.Center, lipgloss.Center, bannerContent+"\n"+modal)
+	}
+
+	// Use content viewport for scrolling on stages without their own viewport
+	if m.stage != stageExecuting && m.stage != stageReviewSettings {
+		// Only update content if it has changed
+		if base != m.lastContent {
+			m.contentViewport.SetContent(base)
+			m.lastContent = base
+		}
+		scrollableContent := m.contentViewport.View()
+
+		// Add help bar below the scrollable content
+		return scrollableContent + "\n" + helpWithBorder
 	}
 
 	return base
@@ -1932,17 +2065,20 @@ func (m *Model) generateDatacenterDescriptionsForProvider(provider Provider) []s
 	for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provider.DisplayName] {
 		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
 
-		// For each selected option in this group, generate both enabled and disabled entries
-		for _, option := range group.Options {
-			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-			if m.datacenterSettingsSelection.Selected[optionKey] {
-				// Generate description based on the option name
-				if option == "enabled" || option == "disabled" {
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
-					descriptions = append(descriptions, desc)
-				} else {
-					// For non-boolean options, include the actual option value
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
+		// Check if this is a boolean flag group (no options)
+		if len(group.Options) == 0 {
+			// Check if the group itself is selected
+			if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
+				// group.Name already includes "with" prefix
+				descriptions = append(descriptions, group.Name)
+			}
+		} else {
+			// For each selected option in this group, generate both enabled and disabled entries
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if m.datacenterSettingsSelection.Selected[optionKey] {
+					// group.Name already includes "with" prefix and proper spacing
+					desc := fmt.Sprintf("%s%s", group.Name, option)
 					descriptions = append(descriptions, desc)
 				}
 			}
@@ -1960,17 +2096,20 @@ func (m *Model) generateClusterDescriptionsForProvider(provider Provider) []stri
 	for _, group := range m.clusterSettingsSelection.SettingsByProvider[provider.DisplayName] {
 		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
 
-		// For each selected option in this group
-		for _, option := range group.Options {
-			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-			if m.clusterSettingsSelection.Selected[optionKey] {
-				// Generate description based on the option name
-				if option == "enabled" || option == "disabled" {
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
-					descriptions = append(descriptions, desc)
-				} else {
-					// For non-boolean options, include the actual option value
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
+		// Check if this is a boolean flag group (no options)
+		if len(group.Options) == 0 {
+			// Check if the group itself is selected
+			if m.clusterSettingsSelection.SelectedGroups[groupKey] {
+				// group.Name already includes "with" prefix
+				descriptions = append(descriptions, group.Name)
+			}
+		} else {
+			// For each selected option in this group
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if m.clusterSettingsSelection.Selected[optionKey] {
+					// group.Name already includes "with" prefix and proper spacing
+					desc := fmt.Sprintf("%s%s", group.Name, option)
 					descriptions = append(descriptions, desc)
 				}
 			}
@@ -1988,17 +2127,20 @@ func (m *Model) generateMachineDescriptionsForProvider(provider Provider) []stri
 	for _, group := range m.machineDeploymentSettingsSelection.SettingsByProvider[provider.DisplayName] {
 		groupKey := fmt.Sprintf("%s:%s", provider.DisplayName, group.Key)
 
-		// For each selected option in this group
-		for _, option := range group.Options {
-			optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-			if m.machineDeploymentSettingsSelection.Selected[optionKey] {
-				// Generate description based on the option name
-				if option == "enabled" || option == "disabled" {
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
-					descriptions = append(descriptions, desc)
-				} else {
-					// For non-boolean options, include the actual option value
-					desc := fmt.Sprintf("with %s %s", group.Name, option)
+		// Check if this is a boolean flag group (no options)
+		if len(group.Options) == 0 {
+			// Check if the group itself is selected
+			if m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] {
+				// group.Name already includes "with" prefix
+				descriptions = append(descriptions, group.Name)
+			}
+		} else {
+			// For each selected option in this group
+			for _, option := range group.Options {
+				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+				if m.machineDeploymentSettingsSelection.Selected[optionKey] {
+					// group.Name already includes "with" prefix and proper spacing
+					desc := fmt.Sprintf("%s%s", group.Name, option)
 					descriptions = append(descriptions, desc)
 				}
 			}

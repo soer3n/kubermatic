@@ -139,12 +139,6 @@ func (m *Model) validateExistingEnvironment() bool {
 		return false
 	}
 
-	// Validate Project Name
-	if strings.TrimSpace(m.existingEnv.ProjectName.Value()) == "" {
-		m.existingEnv.Errors.ProjectName = "Project name is required"
-		return false
-	}
-
 	return true
 }
 

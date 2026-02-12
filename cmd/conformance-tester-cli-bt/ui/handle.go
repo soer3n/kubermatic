@@ -996,7 +996,21 @@ func (m Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			if len(selectedProviders) > 0 {
 				m.datacenterSettingsSelection = initializeDatacenterSettingsSelection(selectedProviders)
 
+				// Trigger lazy loading for all providers
+				var cmds []tea.Cmd
+				for _, provider := range selectedProviders {
+					// Set loading state
+					if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
+						ps.LoadingSettings = true
+						ps.SettingsFetchError = ""
+						m.datacenterSettingsSelection.ProviderSettings[provider] = ps
+					}
+					// Trigger fetch
+					cmds = append(cmds, m.fetchDatacenterSettingsForProvider(provider))
+				}
+
 				m.stage = stageDatacenterSettingsSelection // Move to next stage
+				return m, tea.Batch(cmds...)
 			}
 		}
 		return m, nil
@@ -1115,22 +1129,29 @@ func (m Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea
 		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
 
 		if optionIdx == -1 {
-			// Focused on setting group - toggle all options
-			allSelected := true
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				if !m.datacenterSettingsSelection.Selected[optionKey] {
-					allSelected = false
-					break
+			// Focused on setting group
+			if len(group.Options) == 0 {
+				// No options - toggle the group itself as a boolean flag
+				currentState := m.datacenterSettingsSelection.SelectedGroups[groupKey]
+				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !currentState
+			} else {
+				// Has options - toggle all options
+				allSelected := true
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					if !m.datacenterSettingsSelection.Selected[optionKey] {
+						allSelected = false
+						break
+					}
 				}
-			}
 
-			// Toggle all options
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				m.datacenterSettingsSelection.Selected[optionKey] = !allSelected
+				// Toggle all options
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					m.datacenterSettingsSelection.Selected[optionKey] = !allSelected
+				}
+				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 			}
-			m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 		} else {
 			// Focused on individual option - toggle it
 			if optionIdx >= len(group.Options) {
@@ -1349,22 +1370,29 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
 
 		if optionIdx == -1 {
-			// Focused on setting group - toggle all options
-			allSelected := true
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				if !m.clusterSettingsSelection.Selected[optionKey] {
-					allSelected = false
-					break
+			// Focused on setting group
+			if len(group.Options) == 0 {
+				// No options - toggle the group itself as a boolean flag
+				currentState := m.clusterSettingsSelection.SelectedGroups[groupKey]
+				m.clusterSettingsSelection.SelectedGroups[groupKey] = !currentState
+			} else {
+				// Has options - toggle all options
+				allSelected := true
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					if !m.clusterSettingsSelection.Selected[optionKey] {
+						allSelected = false
+						break
+					}
 				}
-			}
 
-			// Toggle all options
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				m.clusterSettingsSelection.Selected[optionKey] = !allSelected
+				// Toggle all options
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					m.clusterSettingsSelection.Selected[optionKey] = !allSelected
+				}
+				m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 			}
-			m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
 		} else {
 			// Focused on individual option - toggle it
 			if optionIdx >= len(group.Options) {
@@ -1434,6 +1462,23 @@ func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cm
 		// Initialize machine deployment settings for the selected providers
 		if len(selectedProviders) > 0 {
 			m.machineDeploymentSettingsSelection = initializeMachineDeploymentSettingsSelection(selectedProviders)
+
+			// Trigger lazy loading for all providers
+			var cmds []tea.Cmd
+			for _, provider := range selectedProviders {
+				// Set loading state
+				if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
+					ps.LoadingSettings = true
+					ps.SettingsFetchError = ""
+					m.machineDeploymentSettingsSelection.ProviderSettings[provider] = ps
+				}
+				// Trigger fetch
+				cmds = append(cmds, m.fetchMachineSettingsForProvider(provider))
+			}
+
+			// Move to next stage
+			m.stage = stageMachineDeploymentSettingsSelection
+			return m, tea.Batch(cmds...)
 		}
 
 		// Move to next stage
@@ -1581,22 +1626,29 @@ func (m Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Mod
 		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
 
 		if optionIdx == -1 {
-			// Focused on setting group - toggle all options
-			allSelected := true
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				if !m.machineDeploymentSettingsSelection.Selected[optionKey] {
-					allSelected = false
-					break
+			// Focused on setting group
+			if len(group.Options) == 0 {
+				// No options - toggle the group itself as a boolean flag
+				currentState := m.machineDeploymentSettingsSelection.SelectedGroups[groupKey]
+				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !currentState
+			} else {
+				// Has options - toggle all options
+				allSelected := true
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					if !m.machineDeploymentSettingsSelection.Selected[optionKey] {
+						allSelected = false
+						break
+					}
 				}
-			}
 
-			// Toggle all options
-			for _, option := range group.Options {
-				optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-				m.machineDeploymentSettingsSelection.Selected[optionKey] = !allSelected
+				// Toggle all options
+				for _, option := range group.Options {
+					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
+					m.machineDeploymentSettingsSelection.Selected[optionKey] = !allSelected
+				}
+				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
 			}
-			m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
 		} else {
 			// Focused on individual option - toggle it
 			if optionIdx >= len(group.Options) {
@@ -1783,8 +1835,43 @@ func (m *Model) handleLog(msg logMsg) tea.Cmd {
 // 	return nil
 // }
 
-// handleDone processes completion messages.
-func (m *Model) handleDone(_ doneMsg) tea.Cmd {
+// handleDone processes key input in the done stage.
+func (m Model) handleDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyQuit:
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleExecuting processes key input in the executing stage.
+func (m Model) handleExecuting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyControlC:
+		// Don't show quit confirmation if already cancelling
+		if !m.executionCancelling {
+			m.quitConfirmVisible = true
+			m.quitConfirmIndex = 0 // Default to "No"
+		}
+		return m, nil
+	}
+
+	// Allow user to scroll through logs if viewport is present
+	if m.Review.Viewport.TotalLineCount() > 0 {
+		switch msg.String() {
+		case keyUp:
+			m.Review.Viewport.LineUp(1)
+			return m, nil
+		case keyDown:
+			m.Review.Viewport.LineDown(1)
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// handleDoneMessage processes completion messages from doneMsg.
+func (m *Model) handleDoneMessage(_ doneMsg) tea.Cmd {
 	// Only mark success if no prior error was recorded
 	if m.executionError == "" {
 		m.executionDone = true
@@ -1805,11 +1892,17 @@ func (m *Model) handleExecOutput(msg execOutputMsg) tea.Cmd {
 			m.logs = append(m.logs, line)
 		}
 	}
+
+	// Update viewport with new logs
+	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+	m.Review.Viewport.GotoBottom()
+
 	if msg.success {
 		m.executionDone = true
-		m.executionError = msg.output
-		m.logs = append(m.logs, "Successfully applied configuration!")
 		m.stage = stageDone
+	}
+	if msg.err != nil {
+		m.executionError = msg.err.Error()
 	}
 	return nil
 }
@@ -1838,6 +1931,23 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 		return true, nil
 	case keyEnter:
 		if m.quitConfirmIndex == 1 { // Yes
+			if m.stage == stageExecuting && !m.executionCancelling {
+				// Cancel execution and cleanup
+				m.executionCancelling = true
+				m.executionError = "Test execution cancelled by user"
+				m.quitConfirmVisible = false
+
+				// Add cancellation message to logs
+				m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
+				if m.Review.Viewport.Width > 0 {
+					m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+					m.Review.Viewport.GotoBottom()
+				}
+
+				// Start cleanup
+				return true, m.cleanupTestExecution()
+			}
+			// Regular quit for other stages
 			return true, tea.Quit
 		}
 		m.quitConfirmVisible = false
@@ -1846,6 +1956,22 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 		m.quitConfirmVisible = false
 		return true, nil
 	case keyYes:
+		if m.stage == stageExecuting && !m.executionCancelling {
+			// Cancel execution and cleanup
+			m.executionCancelling = true
+			m.executionError = "Test execution cancelled by user"
+			m.quitConfirmVisible = false
+
+			// Add cancellation message to logs
+			m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
+			if m.Review.Viewport.Width > 0 {
+				m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+				m.Review.Viewport.GotoBottom()
+			}
+
+			// Start cleanup
+			return true, m.cleanupTestExecution()
+		}
 		return true, tea.Quit
 	}
 	return false, nil
@@ -2314,9 +2440,14 @@ func (m Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Move to execution stage
+		// Initialize viewport for log display
+		m.Review.Viewport = viewport.New(100, 30)
+		m.Review.Viewport.SetContent("")
+		m.logs = []string{}
+
+		// Move to execution stage and start execution
 		m.stage = stageExecuting
-		return m, nil
+		return m, m.executeConformanceTests()
 
 	case keyEsc:
 		// Go back to cluster configuration
