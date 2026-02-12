@@ -122,7 +122,7 @@ const (
 
 // renderQuitConfirm draws the quit confirmation dialog.
 func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
-	const boxHeight = 15
+	boxHeight := m.getUIHeight()
 
 	// Dynamic content based on stage
 	titleContent := "Confirm Quit"
@@ -188,7 +188,7 @@ func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 
 // renderWelcome displays the initial welcome screen.
 func (m Model) renderWelcome(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 15
+	boxHeight := m.getUIHeight()
 	title := styleHeader.Render(welcomeTitleText)
 	disclaimer := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(welcomeDisclaimerText)
 
@@ -205,7 +205,7 @@ func (m Model) renderWelcome(helpWithBorder string, uiWidth int) string {
 }
 
 func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 30 // Increased height for kubeconfig options
+	boxHeight := m.getUIHeight()
 	title := styleHeader.Render("Select Deployment Environment")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(environmentSelectionText)
 
@@ -590,7 +590,7 @@ func (m Model) renderEnvironmentSelection(helpWithBorder string, uiWidth int) st
 }
 
 func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 30
+	boxHeight := m.getUIHeight()
 	title := styleHeader.Render("Select Kubernetes Release")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(releaseSelectionText)
 
@@ -658,7 +658,7 @@ func (m Model) renderReleaseSelection(helpWithBorder string, uiWidth int) string
 }
 
 func (m Model) renderProviderSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 15
+	boxHeight := m.getUIHeight()
 	title := styleHeader.Render("Select Infrastructure Provider")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(providerSelectionText)
 
@@ -925,7 +925,7 @@ func (m Model) renderPresetCredentialsSummary(provider Provider) string {
 }
 
 func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 20
+	boxHeight := m.getUIHeight()
 	title := styleHeader.Render("Select Operating System Distributions")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(distributionSelectionText)
 
@@ -1027,7 +1027,7 @@ func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth int) s
 
 // renderDatacenterSettingsSelection renders the datacenter settings selection stage.
 func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 20
+	boxHeight := m.getUIHeight()
 
 	// Build title based on number of providers
 	var title string
@@ -1207,7 +1207,7 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth 
 
 // renderClusterSettingsSelection renders the cluster settings selection stage.
 func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 20
+	boxHeight := m.getUIHeight()
 
 	// Build title based on number of providers
 	var title string
@@ -1345,7 +1345,7 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth int
 
 // renderMachineDeploymentSettingsSelection renders the machine deployment settings selection stage.
 func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 20
+	boxHeight := m.getUIHeight()
 
 	// Build title based on number of providers
 	var title string
@@ -1525,7 +1525,7 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 
 // renderClusterConfiguration renders the cluster configuration stage.
 func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 20
+	boxHeight := m.getUIHeight()
 
 	title := styleHeader.Render("Cluster Configuration")
 	description := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(
@@ -1622,7 +1622,7 @@ func (m Model) renderClusterConfiguration(helpWithBorder string, uiWidth int) st
 
 // renderReviewSettings displays the configuration review stage.
 func (m Model) renderReviewSettings(helpWithBorder string, uiWidth int) string {
-	const boxHeight = 30
+	boxHeight := m.getUIHeight()
 
 	header := styleHeader.Render("Review Configuration")
 	description := lipgloss.NewStyle().
@@ -1716,11 +1716,12 @@ func (m Model) renderReviewSettings(helpWithBorder string, uiWidth int) string {
 	// Pad content to ensure help bar is at the bottom
 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
 	contentBody := strings.Join(lines, "\n")
-	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody)
 }
 
 // renderExecuting displays logs during the configuration application process.
 func (m Model) renderExecuting(helpWithBorder string, uiWidth int) string {
+	boxHeight := m.getUIHeight()
 	var header string
 	if m.executionCancelling {
 		header = lipgloss.NewStyle().
@@ -1740,18 +1741,19 @@ func (m Model) renderExecuting(helpWithBorder string, uiWidth int) string {
 		b.WriteString("\n" + styleError.Render(m.executionError))
 	}
 
-	return styleBox.Width(uiWidth).Render(b.String() + "\n" + helpWithBorder)
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(b.String())
 }
 
 // renderDone displays the final success message.
 func (m Model) renderDone(helpWithBorder string, uiWidth int) string {
+	boxHeight := m.getUIHeight()
 	header := styleHeader.Render("Congratulations!")
 	var message string
 	if m.executionError != "" {
 		header = styleHeader.Render("Execution Finished With Errors")
 		message = styleError.Render(m.executionError)
 	} else {
-		message = styleItem.Render(successInstallationText)
+		message = styleItem.Render(successTestsText)
 	}
 
 	// Build the main content
@@ -1759,7 +1761,7 @@ func (m Model) renderDone(helpWithBorder string, uiWidth int) string {
 	b.WriteString(header + "\n\n") // Extra line after header
 	b.WriteString(message)
 
-	return styleBox.Width(uiWidth).Render(b.String() + "\n" + helpWithBorder)
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(b.String())
 }
 
 // bannerText returns the application banner/logo.
@@ -1878,6 +1880,4 @@ const providerSelectionText = `Select the infrastructure provider where your Kub
 
 const distributionSelectionText = `Select one or more operating system distributions for your cluster nodes. Multiple distributions can be selected to test compatibility across different OS environments.`
 
-const successInstallationText = `Kubermatic Virtualization has been successfully installed! You can now proceed with configuring and using the virtualization features. If you encounter any issues, feel free to consult the documentation or support resources.`
-
-const executionWarning = `Exiting now will interrupt the kubev bootstrap process. Any partial setup will remain on your servers, and simply rerunning the installer will not clean it up—you'll need to reset the servers manually before trying again.`
+const successTestsText = "All tests executed successfully! Your cluster is compliant with the selected configurations."

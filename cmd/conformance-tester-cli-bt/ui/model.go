@@ -1465,8 +1465,8 @@ func (m Model) getUIWidth() int {
 	if m.terminalWidth == 0 {
 		return 150 // Default width
 	}
-	// Use 90% of terminal width, with minimum of 80 and maximum of 200
-	width := int(float64(m.terminalWidth) * 0.9)
+	// Use 95% of terminal width, with minimum of 80 and maximum of 200
+	width := int(float64(m.terminalWidth) * 0.95)
 	if width < 80 {
 		width = 80
 	}
@@ -1479,6 +1479,30 @@ func (m Model) getUIWidth() int {
 // getUIInnerWidth returns the inner width (accounting for box padding).
 func (m Model) getUIInnerWidth() int {
 	return m.getUIWidth() - 8
+}
+
+// getUIHeight returns the dynamic UI height based on terminal size.
+// Falls back to 40 if terminal height hasn't been detected yet.
+// This accounts for banner (5 lines) and help bar (3 lines) to fill the terminal.
+func (m Model) getUIHeight() int {
+	if m.terminalHeight == 0 {
+		return 40 // Default height
+	}
+	// Reserve space for:
+	// - Banner (~5 lines)
+	// - Help bar (~3 lines)
+	// - Borders, padding, and margins (~4 lines)
+	// Box height = terminal height - 12
+	height := m.terminalHeight - 12
+	if height < 20 {
+		height = 20
+	}
+	return height
+}
+
+// getUIInnerHeight returns the inner height (accounting for help bar and potential banner).
+func (m Model) getUIInnerHeight() int {
+	return m.getUIHeight() - 10 // Approximate space for banner and help bar
 }
 
 // SetProgram sets the tea.Program reference for sending messages from goroutines.
@@ -1521,7 +1545,7 @@ func (m Model) View() string {
 	uiInnerWidth := m.getUIInnerWidth()
 
 	helpText := helpBar(m.stage)
-	helpContent := styleHelpBar.Width(uiInnerWidth).Render(helpText)
+	helpContent := styleHelpBar.Width(m.terminalWidth).Render(helpText)
 	helpWithBorder := styleHelpBarBorder.Width(uiInnerWidth).Render("") + "\n" + helpContent
 
 	var content string
@@ -1545,11 +1569,11 @@ func (m Model) View() string {
 	case stageClusterConfiguration:
 		content = m.renderClusterConfiguration("", uiWidth)
 	case stageReviewSettings:
-		content = m.renderReviewSettings(helpWithBorder, uiWidth) // Keep help bar for execution/review stages
+		content = m.renderReviewSettings("", uiWidth)
 	case stageExecuting:
-		content = m.renderExecuting(helpWithBorder, uiWidth)
+		content = m.renderExecuting("", uiWidth)
 	case stageDone:
-		content = m.renderDone(helpWithBorder, uiWidth)
+		content = m.renderDone("", uiWidth)
 	default:
 		// Render nothing for unknown stages
 		os.Exit(0)
@@ -1568,11 +1592,31 @@ func (m Model) View() string {
 		modal := m.renderQuitConfirm(uiWidth, uiInnerWidth)
 		bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
 
-		return lipgloss.Place(uiWidth+8, 0, lipgloss.Center, lipgloss.Center, bannerContent+"\n"+modal)
+		// Combine banner and modal
+		fullContent := bannerContent + "\n" + modal
+
+		// Vertically center the content in available space (like other stages)
+		availableHeight := m.terminalHeight - lipgloss.Height(helpWithBorder)
+		centeredContent := lipgloss.Place(uiWidth+8, availableHeight, lipgloss.Center, lipgloss.Center, fullContent)
+
+		// Calculate spacing to push help bar to bottom
+		contentLines := lipgloss.Height(centeredContent)
+		helpBarLines := lipgloss.Height(helpWithBorder)
+		totalUsedLines := contentLines + helpBarLines
+
+		if m.terminalHeight > 0 && totalUsedLines < m.terminalHeight {
+			spacing := m.terminalHeight - totalUsedLines - 1
+			if spacing > 0 {
+				spacer := strings.Repeat("\n", spacing)
+				return centeredContent + spacer + helpWithBorder
+			}
+		}
+
+		return centeredContent + "\n" + helpWithBorder
 	}
 
 	// Use content viewport for scrolling on stages without their own viewport
-	if m.stage != stageExecuting && m.stage != stageReviewSettings {
+	if m.stage != stageExecuting && m.stage != stageReviewSettings && m.stage != stageDone {
 		// Only update content if it has changed
 		if base != m.lastContent {
 			m.contentViewport.SetContent(base)
@@ -1584,7 +1628,26 @@ func (m Model) View() string {
 		return scrollableContent + "\n" + helpWithBorder
 	}
 
-	return base
+	// For review/executing/done stages, place help bar at absolute bottom
+	// Calculate remaining space to push help bar to bottom
+	// First, vertically center the content in available space (like scrollable stages)
+	availableHeight := m.terminalHeight - lipgloss.Height(helpWithBorder)
+	centeredContent := lipgloss.Place(uiWidth+8, availableHeight, lipgloss.Center, lipgloss.Center, finalContent)
+
+	contentLines := lipgloss.Height(centeredContent)
+	helpBarLines := lipgloss.Height(helpWithBorder)
+	totalUsedLines := contentLines + helpBarLines
+
+	if m.terminalHeight > 0 && totalUsedLines < m.terminalHeight {
+		// Add spacing to push help bar to bottom
+		spacing := m.terminalHeight - totalUsedLines - 1
+		if spacing > 0 {
+			spacer := strings.Repeat("\n", spacing)
+			return centeredContent + spacer + helpWithBorder
+		}
+	}
+
+	return centeredContent + "\n" + helpWithBorder
 }
 
 // generateReviewYAML generates the YAML configuration from all selected settings, organized by provider.
