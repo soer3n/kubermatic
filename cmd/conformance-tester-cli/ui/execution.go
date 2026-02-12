@@ -31,7 +31,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"k8c.io/kubermatic/v2/cmd/conformance-tester-cli-bt/deploy"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester-cli/deploy"
 	"k8s.io/client-go/kubernetes"
 )
 
