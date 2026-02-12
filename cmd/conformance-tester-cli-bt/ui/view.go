@@ -30,6 +30,27 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// previewString returns a compact preview of a potentially large string.
+// It limits the output to `maxLines` lines and `maxChars` characters.
+// The boolean return indicates whether the original was truncated.
+func previewString(s string, maxLines, maxChars int) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	lines := strings.Split(s, "\n")
+	truncated := false
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+	joined := strings.Join(lines, "\n")
+	if len(joined) > maxChars {
+		joined = joined[:maxChars]
+		truncated = true
+	}
+	return joined, truncated
+}
+
 // Color definitions for consistent theming.
 const (
 	colorMainBlue      = "#2196F3"
@@ -120,6 +141,15 @@ const (
 	uiBoxHeightPad = 2 // Adjustment for top/bottom borders in boxStyle
 )
 
+// Preview thresholds for long credential values.
+const (
+	previewMaxLines = 6
+	previewMaxChars = 400
+	// truncationCharLimit: any single-line value longer than this
+	// will be considered for truncation and moved to the inspect modal.
+	truncationCharLimit = 150
+)
+
 // renderQuitConfirm draws the quit confirmation dialog.
 func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 	boxHeight := m.getUIHeight()
@@ -180,6 +210,35 @@ func (m Model) renderQuitConfirm(uiWidth, uiInnerWidth int) string {
 	b.WriteString(centeredButtons)
 
 	// Pad content to maintain consistent height
+	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
+	contentBody := strings.Join(lines, "\n")
+
+	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody)
+}
+
+// renderViewModal displays the full content of a credential inside a scrollable viewport.
+func (m Model) renderViewModal(uiWidth, uiInnerWidth int) string {
+	boxHeight := m.getUIHeight()
+
+	title := lipgloss.PlaceHorizontal(uiWidth, lipgloss.Center, styleHeader.Render(m.viewModalTitle))
+
+	// If a viewport exists (initialized when opening modal) use it, otherwise render raw content
+	var content string
+	if m.viewModalViewport.Width > 0 {
+		content = m.viewModalViewport.View()
+	} else {
+		content = m.viewModalContent
+	}
+
+	var b strings.Builder
+	b.WriteString(title + "\n\n")
+
+	body := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Width(uiInnerWidth).Render(content)
+	b.WriteString(body + "\n\n")
+
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA")).Render("Press Esc or Enter to close. Use Up/Down to scroll.")
+	b.WriteString(hint)
+
 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
 	contentBody := strings.Join(lines, "\n")
 
@@ -682,8 +741,8 @@ func (m Model) renderProviderSelection(helpWithBorder string, uiWidth int) strin
 
 		b.WriteString(providerOption + "\n")
 
-		// If provider is selected, show credential fields
-		if provider.Selected {
+		// If provider is selected and expanded, show credential fields
+		if i == m.expandedProviderIndex && provider.Selected {
 			b.WriteString(m.renderProviderCredentials(provider, i, uiWidth) + "\n")
 		}
 	}
@@ -755,11 +814,24 @@ func (m Model) renderProviderCredentials(provider Provider, providerIndex int, u
 
 		renderField := func(label string, input textinput.Model, error string, fieldIndex int) {
 			actualFieldIndex := fieldOffset + fieldIndex - 1
-			if providerIndex == m.providerFocusIndex && actualFieldIndex == m.providerFieldIndex {
-				b.WriteString(styleFocusHighlight.Render("    "+label) + " " + input.View() + "\n")
+
+			val := input.Value()
+			// If the value is longer than truncationCharLimit, show a truncated preview
+			if len(val) > truncationCharLimit {
+				preview, _ := previewString(val, previewMaxLines, truncationCharLimit)
+				if providerIndex == m.providerFocusIndex && actualFieldIndex == m.providerFieldIndex {
+					b.WriteString(styleFocusHighlight.Render("    "+label) + " " + lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(preview+" ...") + "  [i]\n")
+				} else {
+					b.WriteString("    " + label + " " + lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Faint(true).Render(preview+" ...") + "  [i]\n")
+				}
 			} else {
-				b.WriteString("    " + label + " " + input.View() + "\n")
+				if providerIndex == m.providerFocusIndex && actualFieldIndex == m.providerFieldIndex {
+					b.WriteString(styleFocusHighlight.Render("    "+label) + " " + input.View() + "\n")
+				} else {
+					b.WriteString("    " + label + " " + input.View() + "\n")
+				}
 			}
+
 			if error != "" {
 				errorMsg := lipgloss.NewStyle().Foreground(lipgloss.Color(colorErrorRed)).Bold(true).Width(uiWidth - 27).Render(error)
 				b.WriteString("      " + errorMsg + "\n")
@@ -840,84 +912,73 @@ func (m Model) renderPresetCredentialsSummary(provider Provider) string {
 	style := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(colorMainWhite)).
 		Faint(true)
+	// helper to render a label/value, truncating long values and appending the (i) hint
+	renderVal := func(label, val string) {
+		if val == "" {
+			return
+		}
+		if preview, truncated := previewString(val, previewMaxLines, truncationCharLimit); truncated {
+			b.WriteString(style.Render("      "+label+" "+preview+" ...") + "  [i]\n")
+		} else {
+			b.WriteString(style.Render("      "+label+" "+val) + "\n")
+		}
+	}
 
 	switch creds := provider.PresetCredentials.(type) {
 	case AWSCredentials:
-		b.WriteString(style.Render("      Access Key ID: "+creds.AccessKeyID.Value()) + "\n")
-		b.WriteString(style.Render("      Secret Access Key: "+creds.SecretAccessKey.Value()) + "\n")
-		if creds.AssumeRoleARN.Value() != "" {
-			b.WriteString(style.Render("      Assume Role ARN: "+creds.AssumeRoleARN.Value()) + "\n")
-		}
-		if creds.AssumeRoleExternalID.Value() != "" {
-			b.WriteString(style.Render("      External ID: "+creds.AssumeRoleExternalID.Value()) + "\n")
-		}
+		renderVal("Access Key ID:", creds.AccessKeyID.Value())
+		renderVal("Secret Access Key:", creds.SecretAccessKey.Value())
+		renderVal("Assume Role ARN:", creds.AssumeRoleARN.Value())
+		renderVal("External ID:", creds.AssumeRoleExternalID.Value())
 
 	case AzureCredentials:
-		b.WriteString(style.Render("      Tenant ID: "+creds.TenantID.Value()) + "\n")
-		b.WriteString(style.Render("      Subscription ID: "+creds.SubscriptionID.Value()) + "\n")
-		b.WriteString(style.Render("      Client ID: "+creds.ClientID.Value()) + "\n")
-		b.WriteString(style.Render("      Client Secret: "+creds.ClientSecret.Value()) + "\n")
+		renderVal("Tenant ID:", creds.TenantID.Value())
+		renderVal("Subscription ID:", creds.SubscriptionID.Value())
+		renderVal("Client ID:", creds.ClientID.Value())
+		renderVal("Client Secret:", creds.ClientSecret.Value())
 
 	case GCPCredentials:
-		b.WriteString(style.Render("      Service Account: "+creds.ServiceAccount.Value()) + "\n")
+		renderVal("Service Account:", creds.ServiceAccount.Value())
 
 	case AlibabaCredentials:
-		b.WriteString(style.Render("      Access Key ID: "+creds.AccessKeyID.Value()) + "\n")
-		b.WriteString(style.Render("      Access Key Secret: "+creds.AccessKeySecret.Value()) + "\n")
+		renderVal("Access Key ID:", creds.AccessKeyID.Value())
+		renderVal("Access Key Secret:", creds.AccessKeySecret.Value())
 
 	case AnexiaCredentials:
-		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+		renderVal("API Token:", creds.Token.Value())
 
 	case DigitalOceanCredentials:
-		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+		renderVal("API Token:", creds.Token.Value())
 
 	case HetznerCredentials:
-		b.WriteString(style.Render("      API Token: "+creds.Token.Value()) + "\n")
+		renderVal("API Token:", creds.Token.Value())
 
 	case KubeVirtCredentials:
-		b.WriteString(style.Render("      Kubeconfig: "+creds.Kubeconfig.Value()) + "\n")
+		renderVal("Kubeconfig:", creds.Kubeconfig.Value())
 
 	case NutanixCredentials:
-		b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
-		b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
-		b.WriteString(style.Render("      Cluster Name: "+creds.ClusterName.Value()) + "\n")
-		if creds.ProxyURL.Value() != "" {
-			b.WriteString(style.Render("      Proxy URL: "+creds.ProxyURL.Value()) + "\n")
-		}
-		if creds.CSIUsername.Value() != "" {
-			b.WriteString(style.Render("      CSI Username: "+creds.CSIUsername.Value()) + "\n")
-		}
+		renderVal("Username:", creds.Username.Value())
+		renderVal("Password:", creds.Password.Value())
+		renderVal("Cluster Name:", creds.ClusterName.Value())
+		renderVal("Proxy URL:", creds.ProxyURL.Value())
+		renderVal("CSI Username:", creds.CSIUsername.Value())
 
 	case OpenStackCredentials:
-		if creds.Username.Value() != "" {
-			b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
-		}
-		if creds.Password.Value() != "" {
-			b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
-		}
-		if creds.Project.Value() != "" {
-			b.WriteString(style.Render("      Project: "+creds.Project.Value()) + "\n")
-		}
-		if creds.Domain.Value() != "" {
-			b.WriteString(style.Render("      Domain: "+creds.Domain.Value()) + "\n")
-		}
+		renderVal("Username:", creds.Username.Value())
+		renderVal("Password:", creds.Password.Value())
+		renderVal("Project:", creds.Project.Value())
+		renderVal("Domain:", creds.Domain.Value())
 
 	case VSphereCredentials:
-		b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
-		b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
+		renderVal("Username:", creds.Username.Value())
+		renderVal("Password:", creds.Password.Value())
 
 	case VMwareCloudDirectorCredentials:
-		if creds.Username.Value() != "" {
-			b.WriteString(style.Render("      Username: "+creds.Username.Value()) + "\n")
-		}
-		if creds.Password.Value() != "" {
-			b.WriteString(style.Render("      Password: "+creds.Password.Value()) + "\n")
-		}
-		if creds.APIToken.Value() != "" {
-			b.WriteString(style.Render("      API Token: "+creds.APIToken.Value()) + "\n")
-		}
-		b.WriteString(style.Render("      Organization: "+creds.Organization.Value()) + "\n")
-		b.WriteString(style.Render("      VDC: "+creds.VDC.Value()) + "\n")
+		renderVal("Username:", creds.Username.Value())
+		renderVal("Password:", creds.Password.Value())
+		renderVal("API Token:", creds.APIToken.Value())
+		renderVal("Organization:", creds.Organization.Value())
+		renderVal("VDC:", creds.VDC.Value())
 	}
 
 	b.WriteString("\n")
@@ -1781,7 +1842,7 @@ func helpBar(stage int) string {
 		stageWelcome:                            "Press Enter to continue.",
 		stageEnvironmentSelection:               "↑/↓ to navigate, ←/→ to collapse/expand, Space to select, Tab/Shift+Tab to move between fields, Enter to continue, Esc to go back.",
 		stageReleaseSelection:                   "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
-		stageProviderSelection:                  "↑/↓ to navigate, Space to select, Enter to continue, Esc to go back.",
+		stageProviderSelection:                  "↑/↓ to navigate, Space to select, I/i for Detailed View, Enter to continue, Esc to go back.",
 		stageDistributionSelection:              "↑/↓ to navigate, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageDatacenterSettingsSelection:        "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",
 		stageClusterSettingsSelection:           "↑/↓ to navigate, ←/→ to collapse/expand providers, Space to select, CTRL+A to select/deselect all, Enter to continue, Esc to go back.",

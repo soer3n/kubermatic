@@ -29,6 +29,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const (
@@ -44,6 +45,7 @@ const (
 	keyNo        = "n"
 	keyControlC  = "ctrl+c"
 	keyQuit      = "q"
+	keyI         = "i"
 	keySpace     = " "
 	keySelectAll = "ctrl+a"
 	digits       = "0123456789"
@@ -56,6 +58,37 @@ func (m *Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// getFocusedCredentialContent returns full content for the currently focused provider credential.
+func (m *Model) getFocusedCredentialContent() string {
+	if len(m.providers) == 0 {
+		return ""
+	}
+	p := m.providers[m.providerFocusIndex]
+
+	if p.HasPresetCredentials && p.CredentialSource == CredentialSourcePreset {
+		switch creds := p.PresetCredentials.(type) {
+		case KubeVirtCredentials:
+			return creds.Kubeconfig.Value()
+		case GCPCredentials:
+			return creds.ServiceAccount.Value()
+		default:
+			// Fallback: return the masked summary text
+			return m.renderPresetCredentialsSummary(p)
+		}
+	}
+
+	switch creds := p.Credentials.(type) {
+	case KubeVirtCredentials:
+		return creds.Kubeconfig.Value()
+	case GCPCredentials:
+		return creds.ServiceAccount.Value()
+	case AWSCredentials:
+		return creds.AccessKeyID.Value() + "\n" + creds.SecretAccessKey.Value()
+	default:
+		return ""
+	}
 }
 
 func (m *Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -470,7 +503,13 @@ func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.providerFieldIndex == 0 {
 			m.providers[m.providerFocusIndex].Selected = !m.providers[m.providerFocusIndex].Selected
 			if m.providers[m.providerFocusIndex].Selected {
+				m.expandedProviderIndex = m.providerFocusIndex
 				m.providerFieldIndex = 1 // Move to first field after checkbox
+			} else {
+				// If deselecting the expanded one, collapse it
+				if m.expandedProviderIndex == m.providerFocusIndex {
+					m.expandedProviderIndex = -1
+				}
 			}
 		} else if m.providerFieldIndex == 1 || m.providerFieldIndex == 2 {
 			// Select the option at the current field index
@@ -488,6 +527,28 @@ func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case keyEsc:
 		m.stage = stageReleaseSelection
+		return m, nil
+	case keyI:
+		// Open view modal for focused provider credential (if any)
+		if m.providers[m.providerFocusIndex].Selected {
+			content := m.getFocusedCredentialContent()
+			if content != "" {
+				m.viewModalContent = content
+				m.viewModalTitle = m.providers[m.providerFocusIndex].DisplayName + " credentials"
+				m.viewModalVisible = true
+
+				uiInnerWidth := m.getUIInnerWidth()
+				uiInnerHeight := m.getUIInnerHeight()
+				vpHeight := uiInnerHeight
+				if vpHeight < 3 {
+					vpHeight = 3
+				}
+				m.viewModalViewport = viewport.New(uiInnerWidth, vpHeight)
+				wrappedContent := lipgloss.NewStyle().Width(uiInnerWidth).Render(m.viewModalContent)
+				m.viewModalViewport.SetContent(wrappedContent)
+				m.viewModalViewport.GotoTop()
+			}
+		}
 		return m, nil
 	default:
 		// Update the focused text input (only for custom credentials)

@@ -57,9 +57,10 @@ type Model struct {
 
 	releaseSelection ReleaseSelection
 
-	providers          []Provider
-	providerFocusIndex int // Index of currently focused provider
-	providerFieldIndex int // Index of the field within the selected provider
+	providers             []Provider
+	providerFocusIndex    int // Index of currently focused provider
+	providerFieldIndex    int // Index of the field within the selected provider
+	expandedProviderIndex int // Index of the provider whose credentials are currently expanded (-1 if none)
 
 	distributionSelection DistributionSelection
 
@@ -87,6 +88,12 @@ type Model struct {
 	// Quit confirmation modal state
 	quitConfirmVisible bool
 	quitConfirmIndex   int
+
+	// View modal for showing long credential content (e.g. kubeconfig, service account)
+	viewModalVisible  bool
+	viewModalTitle    string
+	viewModalContent  string
+	viewModalViewport viewport.Model
 
 	// Terminal dimensions for dynamic sizing
 	terminalWidth  int
@@ -693,6 +700,7 @@ func initialModel() Model {
 		distributionSelection: initializeDistributionSelection([]string{}), // Will be reinitialized after provider selection
 		providerFocusIndex:    0,
 		providerFieldIndex:    0,
+		expandedProviderIndex: -1,
 		Review: Review{
 			ExpandedProviders: make(map[string]bool),
 			ExpandedSections:  make(map[string]bool),
@@ -1407,6 +1415,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleGlobalKeys handles global key events that work across all stages
 func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	// If view modal is visible, intercept keys for closing/scrolling
+	if m.viewModalVisible {
+		switch msg.String() {
+		case keyEsc, keyEnter, keyNo, keyControlC:
+			m.viewModalVisible = false
+			return true, nil
+		case keyUp:
+			m.viewModalViewport.ScrollUp(1)
+			return true, nil
+		case keyDown:
+			m.viewModalViewport.ScrollDown(1)
+			return true, nil
+		default:
+			return true, nil
+		}
+	}
+
 	// Global quit confirmation handler
 	if m.quitConfirmVisible {
 		if handled, cmd := m.handleQuitConfirmation(msg); handled {
@@ -1549,6 +1574,14 @@ func (m Model) View() string {
 		// Render nothing for unknown stages
 		os.Exit(0)
 		return ""
+	}
+
+	if m.viewModalVisible {
+		// Show view modal (full credential content)
+		modal := m.renderViewModal(uiWidth, uiInnerWidth)
+		bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
+		fullContent := bannerContent + "\n" + modal
+		return m.renderCommonLayout(fullContent, helpWithBorder)
 	}
 
 	if m.quitConfirmVisible {

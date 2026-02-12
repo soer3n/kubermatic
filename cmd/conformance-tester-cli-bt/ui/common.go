@@ -61,6 +61,16 @@ func (m Model) renderCommonHelpBar(stage int) string {
 	uiInnerWidth := m.getUIInnerWidth()
 
 	helpText := helpBar(stage)
+
+	// // Dynamic hint: if on provider selection and focused provider has long content, show view hint
+	// if stage == stageProviderSelection && len(m.providers) > 0 {
+	// 	if content := m.getFocusedCredentialContent(); content != "" {
+	// 		if _, truncated := previewString(content, previewMaxLines, truncationCharLimit); truncated {
+	// 			helpText = helpText + " • (i) View"
+	// 		}
+	// 	}
+	// }
+
 	helpContent := styleHelpBar.Width(m.terminalWidth).Render(helpText)
 	helpWithBorder := styleHelpBarBorder.Width(uiInnerWidth).Render("") + "\n" + helpContent
 
