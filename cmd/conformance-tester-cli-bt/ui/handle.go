@@ -49,7 +49,7 @@ const (
 	digits       = "0123456789"
 )
 
-func (m Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyEnter:
 		m.stage = stageEnvironmentSelection
@@ -58,7 +58,7 @@ func (m Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg.String() {
@@ -282,7 +282,7 @@ func (m Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keySelectAll:
 		// Toggle select/deselect all
@@ -412,7 +412,7 @@ func (m Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg.String() {
@@ -907,7 +907,7 @@ func (m Model) focusProviderField(provider Provider, fieldIndex int) Provider {
 	return provider
 }
 
-func (m Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyUp:
 		if m.distributionSelection.FocusedIndex > 0 {
@@ -1073,7 +1073,7 @@ func (m Model) getDistributionFocusedDistribution() string {
 }
 
 // handleDatacenterSettingsSelection handles input for the datacenter settings selection stage.
-func (m Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyUp:
 		if m.datacenterSettingsSelection.FocusedIndex > 0 {
@@ -1314,7 +1314,7 @@ func (m Model) getDatacenterFocusedOption() (string, int, int) {
 }
 
 // handleClusterSettingsSelection handles input for the cluster settings selection stage.
-func (m Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyUp:
 		if m.clusterSettingsSelection.FocusedIndex > 0 {
@@ -1570,7 +1570,7 @@ func (m Model) getClusterFocusedOption() (string, int, int) {
 }
 
 // handleMachineDeploymentSettingsSelection handles input for the machine deployment settings selection stage.
-func (m Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyUp:
 		if m.machineDeploymentSettingsSelection.FocusedIndex > 0 {
@@ -1845,7 +1845,7 @@ func (m Model) handleDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleExecuting processes key input in the executing stage.
-func (m Model) handleExecuting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleExecuting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keyControlC:
 		// Don't show quit confirmation if already cancelling
@@ -1955,7 +1955,7 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 	case keyEsc, keyNo:
 		m.quitConfirmVisible = false
 		return true, nil
-	case keyYes:
+	case keyYes, keyControlC:
 		if m.stage == stageExecuting && !m.executionCancelling {
 			// Cancel execution and cleanup
 			m.executionCancelling = true
@@ -1978,7 +1978,7 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 }
 
 // handleClusterConfiguration handles input for the cluster configuration stage.
-func (m Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.clusterConfiguration.EditMode {
 		return m.handleClusterConfigurationEdit(msg)
 	}
@@ -2060,7 +2060,7 @@ func (m Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleClusterConfigurationEdit handles input when editing a configuration value.
-func (m Model) handleClusterConfigurationEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleClusterConfigurationEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	categoryIdx, settingIdx, _ := m.getClusterConfigFocusedItem()
 	setting := &m.clusterConfiguration.Categories[categoryIdx].Settings[settingIdx]
 
@@ -2369,7 +2369,7 @@ func (m Model) getMaxKubeconfigVisualIndex() int {
 }
 
 // handleReviewSettings handles input for the review settings stage with nested provider structure.
-func (m Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m *Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	providerReviews := m.generateReviewYAML()
 
 	// Calculate total navigable items

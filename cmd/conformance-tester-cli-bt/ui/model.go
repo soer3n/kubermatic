@@ -34,7 +34,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/go-logr/logr"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	ginkgoutils "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
@@ -92,10 +91,6 @@ type Model struct {
 	// Terminal dimensions for dynamic sizing
 	terminalWidth  int
 	terminalHeight int
-
-	// Content viewport for scrolling (used by stages without their own viewport)
-	contentViewport viewport.Model
-	lastContent     string // Track last rendered content to avoid unnecessary updates
 }
 
 func newTextInput(placeholder string, charLimit int) textinput.Model {
@@ -707,8 +702,6 @@ func initialModel() Model {
 		jobConfigMaps:       make(map[string]string),
 		jobSecrets:          make(map[string]string),
 		executionCancelling: false,
-		contentViewport:     viewport.New(80, 24), // Initialize with reasonable defaults
-		lastContent:         "",
 	}
 
 	return model
@@ -1248,41 +1241,11 @@ func newTextInputReadOnly(value string, width int) textinput.Model {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
-	// Track stage changes to reset viewport scroll
-	oldStage := m.stage
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Global quit confirmation handler
-		if m.quitConfirmVisible {
-			if handled, cmd := m.handleQuitConfirmation(msg); handled {
-				return m, cmd
-			}
-		}
-		switch msg.String() {
-		case keyControlC:
-			// Show quit confirmation modal
-			if m.stage != stageDone {
-				m.quitConfirmVisible = true
-				m.quitConfirmIndex = 0 // Default to "No"
-			}
-			return m, nil
-		case keyQuit:
-			// Immediate quit if we're at the done stage
-			if m.stage == stageDone {
-				return m, tea.Quit
-			}
-		// Handle page up/down for scrolling (except during execution/review with own viewport)
-		case "pgup":
-			if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
-				m.contentViewport.ViewUp()
-				return m, nil
-			}
-		case "pgdown":
-			if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
-				m.contentViewport.ViewDown()
-				return m, nil
-			}
+		// Handle global key events first
+		if handled, globalCmd := m.handleGlobalKeys(msg); handled {
+			return m, globalCmd
 		}
 
 		// Handle stage-specific key events
@@ -1315,27 +1278,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle mouse wheel events for scrolling
 	case tea.MouseMsg:
-		if !m.quitConfirmVisible && m.stage != stageExecuting && m.stage != stageReviewSettings {
-			switch msg.Type {
-			case tea.MouseWheelUp:
-				m.contentViewport.LineUp(3)
-				return m, nil
-			case tea.MouseWheelDown:
-				m.contentViewport.LineDown(3)
-				return m, nil
-			}
-		}
 		// Mouse events not used for scrolling are ignored
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.terminalWidth = msg.Width
 		m.terminalHeight = msg.Height
-
-		// Recreate content viewport with new dimensions
-		// Leave room for help bar (approximately 3 lines: border + content + spacing)
-		helpBarHeight := 3
-		m.contentViewport = viewport.New(msg.Width, msg.Height-helpBarHeight)
 
 		// Update execution viewport if it exists
 		if m.stage == stageExecuting || m.stage == stageReviewSettings {
@@ -1452,11 +1400,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Reset viewport scroll position when stage changes
-	if oldStage != m.stage && m.stage != stageExecuting && m.stage != stageReviewSettings {
-		m.contentViewport.GotoTop()
-	}
+	// Scrolling removed
 
 	return m, cmd
+}
+
+// handleGlobalKeys handles global key events that work across all stages
+func (m *Model) handleGlobalKeys(msg tea.KeyMsg) (bool, tea.Cmd) {
+	// Global quit confirmation handler
+	if m.quitConfirmVisible {
+		if handled, cmd := m.handleQuitConfirmation(msg); handled {
+			return true, cmd
+		}
+	}
+
+	switch msg.String() {
+	case keyControlC:
+		// Show quit confirmation modal
+		if m.stage != stageDone {
+			m.quitConfirmVisible = true
+			m.quitConfirmIndex = 0 // Default to "No"
+		}
+		return true, nil
+	case keyQuit:
+		// Immediate quit if we're at the done stage
+		if m.stage == stageDone {
+			return true, tea.Quit
+		}
+	}
+
+	return false, nil
 }
 
 // getUIWidth returns the dynamic UI width based on terminal size.
@@ -1544,14 +1517,12 @@ func (m Model) View() string {
 	uiWidth := m.getUIWidth()
 	uiInnerWidth := m.getUIInnerWidth()
 
-	helpText := helpBar(m.stage)
-	helpContent := styleHelpBar.Width(m.terminalWidth).Render(helpText)
-	helpWithBorder := styleHelpBarBorder.Width(uiInnerWidth).Render("") + "\n" + helpContent
+	helpWithBorder := m.renderCommonHelpBar(m.stage)
 
 	var content string
 	switch m.stage {
 	case stageWelcome:
-		content = m.renderWelcome("", uiWidth) // Don't include help bar in scrollable content
+		content = m.renderWelcome("", uiWidth)
 	case stageEnvironmentSelection:
 		content = m.renderEnvironmentSelection("", uiWidth)
 	case stageReleaseSelection:
@@ -1580,74 +1551,16 @@ func (m Model) View() string {
 		return ""
 	}
 
-	// Combine banner and content, then center the entire layout
-	bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
-	finalContent := lipgloss.JoinVertical(lipgloss.Center, bannerContent, content)
-
-	// The outer width includes the box padding (4 chars left + 4 chars right)
-	base := lipgloss.PlaceHorizontal(uiWidth+8, lipgloss.Center, finalContent)
-
 	if m.quitConfirmVisible {
-		// Show only the modal centered, on top of everything
+		// Show quit confirmation modal
 		modal := m.renderQuitConfirm(uiWidth, uiInnerWidth)
 		bannerContent := styleBanner.Width(uiWidth).Render(bannerText())
-
-		// Combine banner and modal
 		fullContent := bannerContent + "\n" + modal
-
-		// Vertically center the content in available space (like other stages)
-		availableHeight := m.terminalHeight - lipgloss.Height(helpWithBorder)
-		centeredContent := lipgloss.Place(uiWidth+8, availableHeight, lipgloss.Center, lipgloss.Center, fullContent)
-
-		// Calculate spacing to push help bar to bottom
-		contentLines := lipgloss.Height(centeredContent)
-		helpBarLines := lipgloss.Height(helpWithBorder)
-		totalUsedLines := contentLines + helpBarLines
-
-		if m.terminalHeight > 0 && totalUsedLines < m.terminalHeight {
-			spacing := m.terminalHeight - totalUsedLines - 1
-			if spacing > 0 {
-				spacer := strings.Repeat("\n", spacing)
-				return centeredContent + spacer + helpWithBorder
-			}
-		}
-
-		return centeredContent + "\n" + helpWithBorder
+		return m.renderCommonLayout(fullContent, helpWithBorder)
 	}
 
-	// Use content viewport for scrolling on stages without their own viewport
-	if m.stage != stageExecuting && m.stage != stageReviewSettings && m.stage != stageDone {
-		// Only update content if it has changed
-		if base != m.lastContent {
-			m.contentViewport.SetContent(base)
-			m.lastContent = base
-		}
-		scrollableContent := m.contentViewport.View()
-
-		// Add help bar below the scrollable content
-		return scrollableContent + "\n" + helpWithBorder
-	}
-
-	// For review/executing/done stages, place help bar at absolute bottom
-	// Calculate remaining space to push help bar to bottom
-	// First, vertically center the content in available space (like scrollable stages)
-	availableHeight := m.terminalHeight - lipgloss.Height(helpWithBorder)
-	centeredContent := lipgloss.Place(uiWidth+8, availableHeight, lipgloss.Center, lipgloss.Center, finalContent)
-
-	contentLines := lipgloss.Height(centeredContent)
-	helpBarLines := lipgloss.Height(helpWithBorder)
-	totalUsedLines := contentLines + helpBarLines
-
-	if m.terminalHeight > 0 && totalUsedLines < m.terminalHeight {
-		// Add spacing to push help bar to bottom
-		spacing := m.terminalHeight - totalUsedLines - 1
-		if spacing > 0 {
-			spacer := strings.Repeat("\n", spacing)
-			return centeredContent + spacer + helpWithBorder
-		}
-	}
-
-	return centeredContent + "\n" + helpWithBorder
+	// Render normal content with banner
+	return m.renderCommonLayout(content, helpWithBorder)
 }
 
 // generateReviewYAML generates the YAML configuration from all selected settings, organized by provider.
