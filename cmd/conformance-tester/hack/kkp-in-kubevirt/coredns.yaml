@@ -10,14 +10,14 @@ data:
     $TTL 60
 
     @ IN SOA ns1.conformance.kubermatic.io. admin.conformance.kubermatic.io. (
-        2026011801 7200 3600 1209600 60
+        2026011803 7200 3600 1209600 60
     )
 
     @   IN NS ns1.conformance.kubermatic.io.
-    ns1 IN A  10.0.0.53
+    ns1 IN A  10.224.0.10
 
-    @   IN A  10.233.160.205
-    *   IN A  10.0.0.5
+    @   IN A  10.103.238.103
+    *   IN A  10.107.181.167
 
 ---
 apiVersion: v1
@@ -56,6 +56,29 @@ data:
         reload
         errors
     }
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coredns-external
+  namespace: kube-system
+  annotations:
+    metallb.io/ip-allocated-from-pool: default
+    metallb.io/address-pool: default
+spec:
+  type: LoadBalancer
+  ports:
+  - name: udp
+    port: 53
+    protocol: UDP
+    targetPort: 53
+  - name: tcp
+    port: 53
+    protocol: TCP
+    targetPort: 53
+  selector:
+    k8s-app: kube-dns
 
 ---
 apiVersion: apps/v1

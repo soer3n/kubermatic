@@ -1,4 +1,4 @@
-package ginkgo
+package utils
 
 import (
 	"encoding/xml"

@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/kubectl/pkg/util/slice"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -37,6 +38,9 @@ import (
 
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
+
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type MachineScenario struct {
@@ -77,6 +81,7 @@ var (
 	opts                     *k8cginkgo.Options
 	runtimeOpts              *k8cginkgo.RuntimeOptions
 	legacyOpts               *legacytypes.Options
+	infraClient              ctrlclient.Client
 	kkpConfig                *kubermaticv1.KubermaticConfiguration
 	newScenarios             map[string]map[string]v1alpha1.MachineSpec
 	newClusters              map[string]*kubermaticv1.ClusterSpec
@@ -86,31 +91,51 @@ var (
 	newClusterClients        map[string]ctrlruntimeclient.Client
 	datacenterNameMappings   map[string]string
 	seed                     *kubermaticv1.Seed
+	projectName              string
 )
 
 func TestMain(m *testing.M) {
 	var err error
 
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+
+	opts, err = k8cginkgo.NewOptionsFromYAML(log)
+	if err != nil {
+		log.Fatalw("Failed to load options", zap.Error(err))
+	}
+
+	config, err := clientcmd.BuildConfigFromFlags("", opts.Secrets.Kubevirt.KubeconfigFile)
+	if err != nil {
+		panic(err)
+	}
+
+	client, err := ctrlclient.New(config, ctrlclient.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	infraClient = client
+
 	// // step 1
 	// versions := utils.GetReleaseVersions()
 	// log.Infof("Available Kubernetes versions: %v", versions)
 	// step 2
-	datacenters := GetDatacenterDescriptions()
+	datacenters := GetDatacenterDescriptions(client)
 	log.Infof("Available datacenter descriptions: %v", datacenters)
 	// step 3
-	clusters := utils.GetClusterDescriptions()
+	clusters := utils.GetClusterDescriptions(client)
 	log.Infof("Available cluster descriptions: %v", clusters)
 	// step 4
-	machines := GetMachineDescriptions()
+	machines := GetMachineDescriptions(client)
 	log.Infof("Available machine descriptions: %v", machines)
 	// step 5
 	_ = k8cginkgo.ResourceSettings{}
 
 	rootCtx = signals.SetupSignalHandler()
-	opts, err = k8cginkgo.NewOptionsFromYAML(log)
-	if err != nil {
-		log.Fatalw("Failed to load options", zap.Error(err))
-	}
+
 	configPath := os.Getenv("CONFORMANCE_TESTER_CONFIG_FILE")
 	if configPath != "" {
 		runtimeOpts, err = k8cginkgo.NewRuntimeOptions(rootCtx, log, opts)
@@ -132,7 +157,7 @@ func TestMain(m *testing.M) {
 	testSlice := []string{
 		legacytypes.StorageTests, legacytypes.LoadbalancerTests, legacytypes.MetricsTests,
 		legacytypes.UserClusterRBACTests, legacytypes.K8sGcrImageTests, legacytypes.MetricsTests,
-		legacytypes.SecurityContextTests,
+		legacytypes.SecurityContextTests, legacytypes.UserClusterSeccompTests, legacytypes.UserClusterK8sGcrImageTests,
 	}
 	// enable all tests
 	opts.Tests = []string{}
@@ -146,6 +171,11 @@ func TestMain(m *testing.M) {
 	legacyOpts.Providers = sets.Set[string]{"kubevirt": {}}
 	if err := legacyOpts.ParseFlags(log); err != nil {
 		log.Warnf("Invalid flags", zap.Error(err))
+	}
+
+	projectName = legacyOpts.KubermaticProject
+	if legacyOpts.KubermaticProject == "" {
+		projectName = "e2e-" + rand.String(5)
 	}
 
 	log.Infof("Included datacenter descriptions: %v", opts.Included.DatacenterDescriptions)
@@ -193,7 +223,6 @@ var _ = SynchronizedBeforeSuite(func() {
 
 	By(k8cginkgo.KKP("Ensuring a project exists"), func() {
 		if legacyOpts.KubermaticProject == "" {
-			projectName := "e2e-" + rand.String(5)
 			p, err := client.CreateProject(rootCtx, log, projectName)
 			Expect(err).NotTo(HaveOccurred())
 			projectName = p
@@ -218,8 +247,8 @@ var _ = SynchronizedBeforeSuite(func() {
 	By(fmt.Sprintf("Creating clusters for datacenters and kube versions: %v", maps.Keys(newClusters)))
 
 	var wg sync.WaitGroup
-	maxConcurrent := 4 // Set your desired concurrency limit
-	sem := make(chan struct{}, maxConcurrent)
+	// maxConcurrent := 4 // Set your desired concurrency limit
+	// sem := make(chan struct{}, maxConcurrent)
 	versionSlice := []string{}
 	if len(opts.Releases) > 0 {
 		for _, v := range opts.Releases {
@@ -257,6 +286,7 @@ var _ = SynchronizedBeforeSuite(func() {
 		if exclude {
 			continue
 		}
+		clustersToBuild := map[string]*kubermaticv1.ClusterSpec{}
 		for name, clusterSpec := range newClusters {
 			if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
 				continue
@@ -285,20 +315,24 @@ var _ = SynchronizedBeforeSuite(func() {
 			if exclude {
 				continue
 			}
-			log.Infof("Preparing creation of cluster %s for datacenter %s", name, clusterSpec.Cloud.DatacenterName)
-			sem <- struct{}{} // acquire a slot
-			wg.Add(1)
-			go func(name string, project string, spec *kubermaticv1.ClusterSpec) {
-				defer wg.Done()
-				defer func() { <-sem }() // release the slot
-				if !skipClusterCreation {
-					ensureCluster(name, datacenterNameMappings[seedKey], project, spec)
-				}
-				if skipClusterCreation && updateClusters {
-					// updateCluster(dc, spec)
-				}
-			}(name, legacyOpts.KubermaticProject, clusterSpec)
+			clustersToBuild[name] = clusterSpec
 		}
+
+		// for name, clusterSpec := range clustersToBuild {
+		// 	log.Infof("Preparing creation of cluster %s for datacenter %s", name, clusterSpec.Cloud.DatacenterName)
+		// 	sem <- struct{}{} // acquire a slot
+		// 	wg.Add(1)
+		// 	go func(name string, project string, spec *kubermaticv1.ClusterSpec) {
+		// 		defer wg.Done()
+		// 		defer func() { <-sem }() // release the slot
+		// 		if !skipClusterCreation {
+		// 			ensureCluster(name, datacenterNameMappings[seedKey], project, spec)
+		// 		}
+		// 		if skipClusterCreation && updateClusters {
+		// 			// updateCluster(dc, spec)
+		// 		}
+		// 	}(name, legacyOpts.KubermaticProject, clusterSpec)
+		// }
 	}
 	wg.Wait()
 }, func(data []byte) {

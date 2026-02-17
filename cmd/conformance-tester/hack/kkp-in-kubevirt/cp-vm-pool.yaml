@@ -2,11 +2,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: conformance-seed-apiserver-lb
+  name: conformance-seed-cp-lb
   namespace: conformance-tester
   annotations:
-    metallb.io/ip-allocated-from-pool: internal
-    metallb.io/address-pool: internal
+    metallb.io/ip-allocated-from-pool: default
+    metallb.io/address-pool: default
     # ovn.kubernetes.io/service_external_ip_from_subnet: external
     # ovn.kubernetes.io/vpc: ovn-cluster
 spec:
@@ -92,7 +92,7 @@ spec:
                 - groups: users,admin,docker,sudo
                   name: kubeone
                   ssh_authorized_keys:
-                  - ""
+                  - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDhusROKx37AKaX/p+VTsWDNX/EYNC2PgANrat0XN9I4FP6p8DgwcHwgDubm2qNgfGFVkHBXydilh2KpFZabBZP4TcaufCe9PszE2NIIeD16u9UV/GoFiaOg3o5FskEOgA9CQr7+5NbPXR7jUdk4LmuM0Zu84tjiqfM0aUvt2U4qgPpCZ5xTEeVlNnN9n/5pBOAgZvJ1Fcjspzr/55vDeUN/4aDTmnongEIUn88bZkAyZVSeF5dmGObx5yv9WbaaP3kDD6wXOlWEwwcmyuGb3npviJcAGFvvtfz6NAnr0DXyvloGBUKqtVrBzUex6MBUKL/j9JHAEOlN40unL1HC13TJFhmZdljhfaTu6Q/adTbPTL9Y1D2ZBZ0ot52+MyBUQABShER7B0JzZ1BNYF57/PXMk1cLQA3tGUn8xzS65g5+9dh/KX+LkpRT3HAFS72BWDxom5FOwGlsT/I6hBQb0O2ygT7OA1FFsb7IuN5znLccNcUYJLuoiBPJZ5JwGFHDik= soer3n@tux-soer3n"
                   lock-passwd: true
                   ssh_pwauth: False
                   chpasswd: { expire: False }

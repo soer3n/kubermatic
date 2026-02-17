@@ -11,7 +11,9 @@ import (
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
+	"k8c.io/machine-controller/sdk/providerconfig"
 )
 
 var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
@@ -19,17 +21,13 @@ var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 })
 
 var _ = Describe("KubeVirt", func() {
-	for name, entry := range GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName) {
+	var entries map[string][]build.ScenarioInfo
+	entries, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, _ = build.GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName, providerconfig.CloudProviderKubeVirt)
+	for name, entry := range entries {
 		Describe(name, func() {
-			BeforeEach(func() {
-				// cluster.Ensure(rootCtx, log, name, entry[0].ClusterSpec.Cloud.DatacenterName, projectName, entry[0].ClusterSpec, legacyOpts, runtimeOpts, opts)
-			})
+			BeforeEach(func() {})
 
 			for _, v := range entry {
-				// desc, ok := finalMachineDescriptions[name][v.ScenarioName]
-				// if !ok {
-				// 	continue
-				// }
 				label := Label("kubevirt")
 				if v.Exclude {
 					label = Label("skip")

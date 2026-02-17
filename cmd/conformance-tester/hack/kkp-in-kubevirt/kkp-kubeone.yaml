@@ -1,16 +1,16 @@
 ---
 apiVersion: kubeone.k8c.io/v1beta2
 kind: KubeOneCluster
-name: kubev-kkp-vpc
+name: conformance-kkp-k1
 versions:
-  kubernetes: 1.33.0
+  kubernetes: 1.34.3
 
 apiEndpoint:
-  host: '10.16.0.139'
+  host: '10.16.1.250'
   port: 6443
   alternativeNames:
-    - '10.16.0.139'
-    - '127.0.0.1'
+    - '10.16.1.250'
+    - '10.16.2.103'
 
 containerRuntime:
   containerd: {}
@@ -27,6 +27,8 @@ features:
 
 addons:
   enable: false
+  addons:
+  - name: cluster-autoscaler
 
 clusterNetwork:
   podSubnet: 10.244.0.0/16
@@ -49,12 +51,12 @@ controlPlane:
   - hostname: "conformance-tester-kkp-cp-pool-0"
     sshUsername: kubeone
     sshPort: 22
-    sshPrivateKeyFile: "~/.ssh/id_rsa"
-    privateAddress: "10.16.0.139"
-    publicAddress: "10.16.0.139"
+    # sshPrivateKeyFile: "~/.ssh/id_rsa"
+    privateAddress: "10.16.1.250"
+    publicAddress: "10.16.1.250"
     taints: []
     annotations:
       cluster.x-k8s.io/cluster-namespace: kube-system
-    bastion: 127.0.0.1
-    bastionUser: bastion
-    bastionPort: 2222
+    # bastion: 127.0.0.1
+    # bastionUser: bastion
+    # bastionPort: 2222

@@ -1,11 +1,12 @@
-package kubevirt
+package build
 
 import (
 	"context"
 	"crypto/sha256"
-	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
+	"iter"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -18,20 +19,27 @@ import (
 	"k8c.io/kubermatic/v2/pkg/validation"
 	"k8c.io/kubermatic/v2/pkg/version"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
-	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8c.io/machine-controller/sdk/userdata"
 	"k8s.io/apimachinery/pkg/runtime"
-	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
-	kubevirtprovider "k8c.io/kubermatic/v2/pkg/provider/cloud/kubevirt"
-	mckubevirtprovider "k8c.io/machine-controller/pkg/cloudprovider/provider/kubevirt"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/settings"
 )
 
-func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings DatacenterSetting, excludedDatacenterDescriptions, includedDatacenterDescriptions []string) map[string]kubermaticv1.Seed {
+func toJSON(i any) []byte {
+	b, err := json.Marshal(i)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings settings.DatacenterSetting, excludedDatacenterDescriptions, includedDatacenterDescriptions []string) map[string]kubermaticv1.Seed {
 	seeds := make(map[string]kubermaticv1.Seed)
 	const maxCombinedSettings = 6
 
@@ -47,7 +55,7 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 	}
 
 	// Separate settings into included and excluded
-	var included, excluded []DatacenterSetting
+	var included, excluded []settings.DatacenterSetting
 	for _, setting := range datacenterSettings {
 		if len(includedDescSet) > 0 {
 			if _, ok := includedDescSet[setting.Name]; ok {
@@ -65,10 +73,10 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 	}
 
 	// Helper to group/combine a set of settings
-	combineSettings := func(settings []DatacenterSetting, groupLabel string) map[string]kubermaticv1.Seed {
-		groupedSettings := make(map[string][]DatacenterSetting)
-		var ungroupedSettings []DatacenterSetting
-		for _, setting := range settings {
+	combineSettings := func(datacenterSettings []settings.DatacenterSetting, groupLabel string) map[string]kubermaticv1.Seed {
+		groupedSettings := make(map[string][]settings.DatacenterSetting)
+		var ungroupedSettings []settings.DatacenterSetting
+		for _, setting := range datacenterSettings {
 			if setting.Group != "" {
 				groupedSettings[setting.Group] = append(groupedSettings[setting.Group], setting)
 			} else if setting.Name != "default" {
@@ -100,7 +108,7 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 				canMerge := true
 				if setting.Group != "" {
 					for _, desc := range descriptions[pKey] {
-						for _, s := range settings {
+						for _, s := range datacenterSettings {
 							if s.Name == desc && s.Group == setting.Group {
 								canMerge = false
 								break
@@ -160,34 +168,10 @@ func buildDefaultSeedSettings(datacenterSettings []DatacenterSetting, kkpConfig 
 	excludedSeeds := combineSettings(excluded, "excluded")
 
 	// Merge both maps
-	for k, v := range includedSeeds {
-		seeds[k] = v
-	}
-	for k, v := range excludedSeeds {
-		seeds[k] = v
-	}
+	maps.Copy(seeds, includedSeeds)
+	maps.Copy(seeds, excludedSeeds)
 
 	return seeds
-}
-
-// clusterResult is used to pass data from a producer to a consumer.
-type clusterResult struct {
-	clusterName string
-	dedupKey    string
-	clusterSpec *kubermaticv1.ClusterSpec
-	err         error
-}
-
-type clusterJob struct {
-	combination    []k8cginkgo.ClusterSpecModifier
-	dcKey          string
-	seed           kubermaticv1.Seed
-	kubeVersion    *version.Version
-	log            *zap.SugaredLogger
-	rootCtx        context.Context
-	opts           *k8cginkgo.Options
-	kkpConfig      *kubermaticv1.KubermaticConfiguration
-	versionManager *version.Manager
 }
 
 func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *sync.WaitGroup) {
@@ -221,7 +205,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			}
 		}
 
-		dcName := "kubevirt"
+		dcName := ""
 
 		for k, v := range job.seed.Spec.Datacenters {
 			if v.Location == job.dcKey {
@@ -233,22 +217,16 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		// Now, continue with the full baseSpec for the actual cluster creation,
 		// but use the sanitizedSpec for generating the dedup key.
 		clusterSettingSpec := baseSpec
-
-		clusterSettingSpec.Cloud.ProviderName = string(kubermaticv1.KubevirtCloudProvider)
-		clusterSettingSpec.Cloud.DatacenterName = dcName
-		clusterSettingSpec.Cloud.Kubevirt = &kubermaticv1.KubevirtCloudSpec{
-			Kubeconfig: job.opts.Secrets.Kubevirt.Kubeconfig,
+		currentSeedDatacenter := job.seed.Spec.Datacenters[dcName]
+		p, c, err := getClusterProvider(job.providerConfig.CloudProvider, dcName, &currentSeedDatacenter, job.opts.Secrets)
+		if err != nil {
+			results <- clusterResult{err: fmt.Errorf("failed to get cluster provider for %s: %w", dcName, err)}
+			continue
 		}
+		clusterSettingSpec.Cloud = c
 		clusterSettingSpec.HumanReadableName = clusterName
 		clusterSettingSpec.ContainerRuntime = "containerd"
 		clusterSettingSpec.Version = semver.Semver(job.kubeVersion.Version.String())
-
-		currentSeedDatacenter := job.seed.Spec.Datacenters[dcName]
-		p, err := kubevirtprovider.NewCloudProvider(&currentSeedDatacenter, nil)
-		if err != nil {
-			results <- clusterResult{err: fmt.Errorf("failed to create cloud provider for %s: %w", dcName, err)}
-			continue
-		}
 
 		if err := defaulting.DefaultClusterSpec(job.rootCtx, clusterSettingSpec, nil, &job.seed, job.kkpConfig, p); err != nil {
 			results <- clusterResult{err: fmt.Errorf("failed to default cluster spec %s: %w", clusterName, err)}
@@ -282,14 +260,15 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 func buildNewClusters(
 	rootCtx context.Context,
 	versions []*version.Version,
-	clusterModifiers []k8cginkgo.ClusterSpecModifier,
+	clusterModifiers []settings.ClusterSpecModifier,
 	defaultSeedSettings map[string]kubermaticv1.Seed,
 	seed *kubermaticv1.Seed,
-	opts *k8cginkgo.Options,
+	opts *options.Options,
 	kkpConfig *kubermaticv1.KubermaticConfiguration,
 	log *zap.SugaredLogger,
 	versionManager *version.Manager,
 	file *os.File,
+	providerConfig *providerconfig.Config,
 	clusterDescriptions []string, // NEW: descriptions to include
 	includedDescriptions []string, // NEW: descriptions to include
 ) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
@@ -309,7 +288,7 @@ func buildNewClusters(
 	}
 
 	// Separate modifiers into included and excluded
-	var included, excluded []k8cginkgo.ClusterSpecModifier
+	var included, excluded []settings.ClusterSpecModifier
 	for _, m := range clusterModifiers {
 		if len(includedDescSet) > 0 {
 			if _, ok := includedDescSet[m.Name]; ok {
@@ -327,9 +306,9 @@ func buildNewClusters(
 	}
 
 	// Helper to group/combine a set of modifiers
-	combineModifiers := func(modifiers []k8cginkgo.ClusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+	combineModifiers := func(modifiers []settings.ClusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 		// Group modifiers by their group name.
-		groupedModifiers := make(map[string][]k8cginkgo.ClusterSpecModifier)
+		groupedModifiers := make(map[string][]settings.ClusterSpecModifier)
 		for _, m := range modifiers {
 			groupedModifiers[m.Group] = append(groupedModifiers[m.Group], m)
 		}
@@ -352,7 +331,7 @@ func buildNewClusters(
 			return map[string]*kubermaticv1.ClusterSpec{}, map[string][]string{}
 		}
 		// Combine modifiers and descriptions by index
-		combinedModifiers := make([][]k8cginkgo.ClusterSpecModifier, len(groupedModifiers[longestKey]))
+		combinedModifiers := make([][]settings.ClusterSpecModifier, len(groupedModifiers[longestKey]))
 		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
 		for _, modifiers := range groupedModifiers {
 			for idx, modifier := range modifiers {
@@ -367,7 +346,7 @@ func buildNewClusters(
 
 		// Start workers
 		var workerWg sync.WaitGroup
-		for i := 0; i < numWorkers; i++ {
+		for range numWorkers {
 			workerWg.Add(1)
 			go clusterWorker(jobs, results, &workerWg)
 		}
@@ -378,7 +357,7 @@ func buildNewClusters(
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
 					for dcKey := range defaultSeedSettings {
-						jobCombination := make([]k8cginkgo.ClusterSpecModifier, len(mods))
+						jobCombination := make([]settings.ClusterSpecModifier, len(mods))
 						copy(jobCombination, mods)
 						jobs <- clusterJob{
 							combination:    jobCombination,
@@ -390,6 +369,7 @@ func buildNewClusters(
 							opts:           opts,
 							kkpConfig:      kkpConfig,
 							versionManager: versionManager,
+							providerConfig: providerConfig,
 						}
 					}
 				}
@@ -451,47 +431,11 @@ func buildNewClusters(
 	excludedClusters, excludedDescriptions := combineModifiers(excluded, "excluded")
 
 	// Merge both maps
-	for k, v := range includedClusters {
-		finalClusters[k] = v
-	}
-	for k, v := range excludedClusters {
-		finalClusters[k] = v
-	}
-	for k, v := range combinedIncludedDescriptions {
-		finalClusterDescriptions[k] = v
-	}
-	for k, v := range excludedDescriptions {
-		finalClusterDescriptions[k] = v
-	}
-
-	// Output final cluster descriptions.
-	fmt.Fprintf(file, "\nFINAL CLUSTER DESCRIPTIONS (with combined cluster names):\n")
-	for key, descs := range finalClusterDescriptions {
-		fmt.Fprintf(file, "Cluster (dedup key: %s...):\n  Generated from combinations: %v\n\n", key[:12], descs)
-	}
-
+	maps.Copy(finalClusters, includedClusters)
+	maps.Copy(finalClusters, excludedClusters)
+	maps.Copy(finalClusterDescriptions, combinedIncludedDescriptions)
+	maps.Copy(finalClusterDescriptions, excludedDescriptions)
 	return finalClusters, finalClusterDescriptions
-}
-
-// scenarioResult is used to pass data from a producer to a consumer.
-type scenarioResult struct {
-	clusterKey  string
-	machineName string
-	dedupKey    string
-	machineSpec v1alpha1.MachineSpec
-	err         error
-}
-
-type scenarioJob struct {
-	combination           []machineSpecModifier
-	clusterKey            string
-	version               semver.Semver
-	log                   *zap.SugaredLogger
-	rootCtx               context.Context
-	resolver              *configvar.Resolver
-	opts                  *k8cginkgo.Options
-	defaultKubevirtConfig kubevirt.RawConfig
-	infraClient           ctrlruntimeclient.Client
 }
 
 func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *sync.WaitGroup) {
@@ -500,7 +444,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		// Create a descriptive name from the combination.
 		var modifierNames []string
 		for _, modifier := range job.combination {
-			modifierNames = append(modifierNames, modifier.name)
+			modifierNames = append(modifierNames, modifier.Name)
 		}
 		machineName := strings.Join(modifierNames, " & ")
 		if machineName == "" {
@@ -508,23 +452,20 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		}
 
 		// Create a sanitized config for deduplication, ignoring certain modifier groups.
-		sanitizedRawConfig := job.defaultKubevirtConfig
+		sanitizedRawConfig := job.providerConfig.CloudProviderSpec.Raw
 		ignoredGroups := map[string]bool{
 			"affinity": true,
 		}
+		ps, err := getProviderSpec(job.log, job.opts.Secrets, job.providerConfig.CloudProvider)
+		if err != nil {
+			results <- scenarioResult{err: fmt.Errorf("failed to get provider spec for %s: %w", machineName, err)}
+			continue
+		}
 		for _, modifier := range job.combination {
-			if !ignoredGroups[modifier.group] {
-				modifier.modify(&sanitizedRawConfig)
+			if !ignoredGroups[modifier.Group] {
+				modifier.Modify(ps)
 			}
 		}
-		sanitizedRawConfig.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(job.opts.Secrets.Kubevirt.Kubeconfig))
-
-		// Create a full config for the actual machine spec.
-		rawConfig := job.defaultKubevirtConfig
-		for _, modifier := range job.combination {
-			modifier.modify(&rawConfig)
-		}
-		rawConfig.Auth.Kubeconfig.Value = b64.StdEncoding.EncodeToString([]byte(job.opts.Secrets.Kubevirt.Kubeconfig))
 
 		// Generate the dedup key from the sanitized config AND the machine name to ensure uniqueness for the "default" case.
 		sanitizedSpecBytes, err := json.Marshal(sanitizedRawConfig)
@@ -538,32 +479,35 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		dedupKey := fmt.Sprintf("%x", h.Sum(nil))
 
 		// Create a base machine spec for this group.
-		machine, err := getDefaultMachineSpec(job.infraClient)
+		machine, err := getDefaultMachineSpec(job.rootCtx, job.log, job.providerConfig, job.opts.Secrets)
 		if err != nil {
 			job.log.Errorw("Failed to get default machine spec", "machine", machineName, zap.Error(err))
 			results <- scenarioResult{err: err}
 			continue
 		}
 
-		// Unmarshal, modify with the FULL config, and re-marshal the provider spec.
-		var pconfig providerconfig.Config
-		if err := json.Unmarshal(machine.ProviderSpec.Value.Raw, &pconfig); err != nil {
-			err = fmt.Errorf("failed to unmarshal provider config: %w", err)
-			job.log.Errorw(err.Error(), "machine", machineName)
+		psb, err := json.Marshal(ps)
+		if err != nil {
+			job.log.Errorw("Failed to marshal provider spec", "machine", machineName, zap.Error(err))
 			results <- scenarioResult{err: err}
 			continue
 		}
+		pconfig := providerconfig.Config{
+			CloudProvider: job.providerConfig.CloudProvider,
+			CloudProviderSpec: runtime.RawExtension{
+				Raw: psb,
+			},
+		}
 
-		pconfig.CloudProviderSpec.Raw = toJSON(rawConfig)
-		osspec, err := userdata.DefaultOperatingSystemSpec(providerconfig.OperatingSystemUbuntu, runtime.RawExtension{})
+		osspec, err := userdata.DefaultOperatingSystemSpec(job.distribution, runtime.RawExtension{})
 		if err != nil {
 			job.log.Errorw("Failed to get default OS spec", "machine", machineName, zap.Error(err))
 			results <- scenarioResult{err: err}
 			continue
 		}
-		pconfig.CloudProvider = providerconfig.CloudProviderKubeVirt
+		pconfig.CloudProvider = job.providerConfig.CloudProvider
 		pconfig.OperatingSystemSpec = osspec
-		pconfig.OperatingSystem = providerconfig.OperatingSystemUbuntu
+		pconfig.OperatingSystem = job.distribution
 		reencodedPConfig, err := json.Marshal(pconfig)
 		if err != nil {
 			err = fmt.Errorf("failed to re-marshal provider config: %w", err)
@@ -574,7 +518,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		machine.ProviderSpec.Value.Raw = reencodedPConfig
 		machine.Versions.Kubelet = job.version.String()
 
-		p := mckubevirtprovider.New(job.resolver)
+		p := getProvider(job.providerConfig.CloudProvider, job.resolver)
 		machineSpec, err := p.AddDefaults(job.log, *machine)
 		if err != nil {
 			results <- scenarioResult{err: fmt.Errorf("failed to add defaults to machine: %w", err)}
@@ -598,19 +542,19 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 }
 
 func buildNewScenarios(
-	machineModifiers []machineSpecModifier,
+	machineModifiers []settings.MachineSpecModifier[any],
 	newClusters map[string]*kubermaticv1.ClusterSpec,
-	opts *k8cginkgo.Options,
+	opts *options.Options,
 	log *zap.SugaredLogger,
-	defaultKubevirtConfig kubevirt.RawConfig,
+	providerConfig *providerconfig.Config,
 	resolver *configvar.Resolver,
 	file *os.File,
 	rootCtx context.Context,
+	operatingSystems sets.Set[string],
 	machineDescriptions []string, // NEW: descriptions to exlclude
 	includedMachineDescription []string, // NEW: descriptions to include
-	infraClient ctrlruntimeclient.Client,
 
-) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
+) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string, iter.Seq[string]) {
 	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 	finalMachineDescriptions := make(map[string]map[string][]string)
 
@@ -627,16 +571,16 @@ func buildNewScenarios(
 	}
 
 	// Separate modifiers into included and excluded
-	var included, excluded []machineSpecModifier
+	var included, excluded []settings.MachineSpecModifier[any]
 	for _, m := range machineModifiers {
 		if len(includedDescSet) > 0 {
-			if _, ok := includedDescSet[m.name]; ok {
+			if _, ok := includedDescSet[m.Name]; ok {
 				included = append(included, m)
 			} else {
 				excluded = append(excluded, m)
 			}
 		} else {
-			if _, ok := descSet[m.name]; !ok {
+			if _, ok := descSet[m.Name]; !ok {
 				included = append(included, m)
 			} else {
 				excluded = append(excluded, m)
@@ -645,13 +589,13 @@ func buildNewScenarios(
 	}
 
 	// Helper to group/combine a set of modifiers
-	combineModifiers := func(modifiers []machineSpecModifier, groupLabel string) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
+	combineModifiers := func(modifiers []settings.MachineSpecModifier[any], groupLabel string) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
 		localScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 		localMachineDescriptions := make(map[string]map[string][]string)
 		// Group modifiers by their group name.
-		groupedModifiers := make(map[string][]machineSpecModifier)
+		groupedModifiers := make(map[string][]settings.MachineSpecModifier[any])
 		for _, m := range modifiers {
-			groupedModifiers[m.group] = append(groupedModifiers[m.group], m)
+			groupedModifiers[m.Group] = append(groupedModifiers[m.Group], m)
 		}
 
 		var groupNames []string
@@ -672,12 +616,12 @@ func buildNewScenarios(
 			return map[string]map[string]v1alpha1.MachineSpec{}, map[string]map[string][]string{}
 		}
 		// Combine modifiers and descriptions by index
-		combinedModifiers := make([][]machineSpecModifier, len(groupedModifiers[longestKey]))
+		combinedModifiers := make([][]settings.MachineSpecModifier[any], len(groupedModifiers[longestKey]))
 		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
 		for _, modifiers := range groupedModifiers {
 			for idx, modifier := range modifiers {
 				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
-				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.name)
+				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.Name)
 			}
 		}
 
@@ -697,18 +641,21 @@ func buildNewScenarios(
 			defer close(jobs)
 			for _, mods := range combinedModifiers {
 				for clusterKey, clusterSpec := range newClusters {
-					jobCombination := make([]machineSpecModifier, len(mods))
-					copy(jobCombination, mods)
-					jobs <- scenarioJob{
-						combination:           jobCombination,
-						clusterKey:            clusterKey,
-						version:               clusterSpec.Version,
-						log:                   log,
-						rootCtx:               rootCtx,
-						resolver:              resolver,
-						opts:                  opts,
-						defaultKubevirtConfig: defaultKubevirtConfig,
-						infraClient:           infraClient,
+					for distro, _ := range operatingSystems {
+						jobCombination := make([]settings.MachineSpecModifier[any], len(mods))
+						copy(jobCombination, mods)
+						d := providerconfig.OperatingSystem(distro)
+						jobs <- scenarioJob{
+							combination:    jobCombination,
+							clusterKey:     clusterKey,
+							version:        clusterSpec.Version,
+							log:            log,
+							rootCtx:        rootCtx,
+							resolver:       resolver,
+							opts:           opts,
+							providerConfig: providerConfig,
+							distribution:   d,
+						}
 					}
 				}
 			}
@@ -783,5 +730,10 @@ func buildNewScenarios(
 	}
 
 	log.Infof("Finished generating scenarios with included/excluded grouping.")
-	return finalScenarios, finalMachineDescriptions
+	var finalMachineDescriptionsSlice iter.Seq[string]
+	for _, v := range includedScenarios {
+		finalMachineDescriptionsSlice = maps.Keys(v)
+		break
+	}
+	return finalScenarios, finalMachineDescriptions, finalMachineDescriptionsSlice
 }

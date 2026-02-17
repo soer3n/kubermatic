@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var DefaultMachineResources = k8cginkgo.ResourceSettings{
@@ -12,7 +13,7 @@ var DefaultMachineResources = k8cginkgo.ResourceSettings{
 	DiskSize: []string{"20Gi"},
 }
 
-func GetClusterDescriptions() map[string]k8cginkgo.Description {
+func GetClusterDescriptions(client ctrlclient.Client) map[string]k8cginkgo.Description {
 	groupedSettings := map[string]k8cginkgo.Description{}
 	groupedSettingsDesc := map[string][]string{}
 	for _, modifier := range k8cginkgo.ClusterSettings {

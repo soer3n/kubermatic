@@ -50,16 +50,6 @@ var machineSettings = []machineSpecModifier{
 			// This assumes some default image is set elsewhere.
 		},
 	},
-	// {
-	// 	name:  "with custom cpu and memory",
-	// 	group: "custom-resources",
-	// 	modify: func(spec *kubevirt.RawConfig) {
-	// 		spec.VirtualMachine.Instancetype = nil
-	// 		spec.VirtualMachine.Preference = nil
-	// 		spec.VirtualMachine.Template.CPUs.Value = "4"
-	// 		spec.VirtualMachine.Template.Memory.Value = "8Gi"
-	// 	},
-	// },
 	{
 		name:  "with changed cluster name",
 		group: "cluster-name",
@@ -165,8 +155,8 @@ var machineSettings = []machineSpecModifier{
 }
 
 // getDefaultMachineSpec returns the default machine spec.
-func getDefaultMachineSpec() (*v1alpha1.MachineSpec, error) {
-	cfg, err := getDefaultKubevirtConfig()
+func getDefaultMachineSpec(infraClient ctrlruntimeclient.Client) (*v1alpha1.MachineSpec, error) {
+	cfg, err := getDefaultKubevirtConfig(infraClient)
 	if err != nil {
 		return nil, err
 	}
@@ -202,14 +192,25 @@ func toJSON(i interface{}) []byte {
 }
 
 // getDefaultKubevirtConfig returns the default kubevirt config.
-func getDefaultKubevirtConfig() (*kubevirt.RawConfig, error) {
+func getDefaultKubevirtConfig(infraClient ctrlruntimeclient.Client) (*kubevirt.RawConfig, error) {
+	var scsList storagev1.StorageClassList
+	if err := infraClient.List(context.TODO(), &scsList); err != nil {
+		return nil, fmt.Errorf("failed to list storage classes: %w", err)
+	}
+	var defaultStorageClass *storagev1.StorageClass
+	for _, sc := range scsList.Items {
+		if v, ok := sc.ObjectMeta.Annotations["storageclass.kubernetes.io/is-default-class"]; ok && v == "true" {
+			defaultStorageClass = &sc
+		}
+	}
+
 	return &kubevirt.RawConfig{
 		ClusterName: providerconfig.ConfigVarString{Value: "test-cluster"},
-		Auth: kubevirt.Auth{
-			Kubeconfig: providerconfig.ConfigVarString{Value: "valid-kubeconfig"},
-		},
 		VirtualMachine: kubevirt.VirtualMachine{
-			DNSPolicy:               providerconfig.ConfigVarString{Value: "ClusterFirstWithHostNet"},
+			DNSPolicy: providerconfig.ConfigVarString{Value: "None"},
+			DNSConfig: &v1.PodDNSConfig{
+				Nameservers: []string{"10.97.179.24"},
+			},
 			EnableNetworkMultiQueue: providerconfig.ConfigVarBool{Value: ptr.To(true)},
 			Template: kubevirt.Template{
 				CPUs:   providerconfig.ConfigVarString{Value: "2"},
@@ -218,7 +219,7 @@ func getDefaultKubevirtConfig() (*kubevirt.RawConfig, error) {
 					OsImage: providerconfig.ConfigVarString{Value: "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"},
 					Disk: kubevirt.Disk{
 						Size:             providerconfig.ConfigVarString{Value: "20Gi"},
-						StorageClassName: providerconfig.ConfigVarString{Value: "kubermatic-fast"},
+						StorageClassName: providerconfig.ConfigVarString{Value: defaultStorageClass.Name},
 					},
 				},
 			},

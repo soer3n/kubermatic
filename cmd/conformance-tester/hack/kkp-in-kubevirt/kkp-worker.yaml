@@ -29,10 +29,10 @@ spec:
       providerSpec:
         value:
           sshPublicKeys:
-            - ""
+            - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDhusROKx37AKaX/p+VTsWDNX/EYNC2PgANrat0XN9I4FP6p8DgwcHwgDubm2qNgfGFVkHBXydilh2KpFZabBZP4TcaufCe9PszE2NIIeD16u9UV/GoFiaOg3o5FskEOgA9CQr7+5NbPXR7jUdk4LmuM0Zu84tjiqfM0aUvt2U4qgPpCZ5xTEeVlNnN9n/5pBOAgZvJ1Fcjspzr/55vDeUN/4aDTmnongEIUn88bZkAyZVSeF5dmGObx5yv9WbaaP3kDD6wXOlWEwwcmyuGb3npviJcAGFvvtfz6NAnr0DXyvloGBUKqtVrBzUex6MBUKL/j9JHAEOlN40unL1HC13TJFhmZdljhfaTu6Q/adTbPTL9Y1D2ZBZ0ot52+MyBUQABShER7B0JzZ1BNYF57/PXMk1cLQA3tGUn8xzS65g5+9dh/KX+LkpRT3HAFS72BWDxom5FOwGlsT/I6hBQb0O2ygT7OA1FFsb7IuN5znLccNcUYJLuoiBPJZ5JwGFHDik= soer3n@tux-soer3n"
           cloudProvider: "kubevirt"
           cloudProviderSpec:
-            # clusterName: tenant
+            clusterName: conformance-kkp-k1
             auth:
               kubeconfig:
                 # Can also be set via the env var 'KUBEVIRT_KUBECONFIG' on the machine-controller.
@@ -52,4 +52,4 @@ spec:
             distUpgradeOnBoot: false
             disableAutoUpdate: true
       versions:
-        kubelet: 1.33.0
+        kubelet: 1.34.3

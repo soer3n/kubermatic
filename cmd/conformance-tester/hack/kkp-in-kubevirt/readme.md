@@ -10,6 +10,6 @@ ssh -L 8443:10.109.253.213:6443 -L 6443:10.109.253.213:6443 -p 2222 bastion@127.
 
 # use dnsmasq to reach kkp from local workstation
 # entry should look like the following:
-# address=/conformance.kubermatic.io/127.0.0.1
+# address=/conformance.kubermatic.io/10.16.2.104
 
 ```
