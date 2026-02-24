@@ -31,6 +31,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	kubevirt "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/kubevirt"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // fetchDatacenterSettingsForProvider fetches datacenter settings from the cluster for a specific provider.
@@ -75,8 +79,7 @@ func (m *Model) fetchDatacenterSettingsForProvider(provider string) tea.Cmd {
 		// Call provider-specific functions
 		switch strings.ToLower(provider) {
 		case "kubevirt":
-			// Import is at package level, call the existing function
-			descriptionsMap = fetchKubeVirtDatacenterSettings()
+			descriptionsMap = fetchKubeVirtDatacenterSettings(kubeconfigPath)
 		// Add more providers as they become available
 		default:
 			descriptionsMap = make(map[string]k8cginkgo.Description)
@@ -135,7 +138,7 @@ func (m *Model) fetchMachineSettingsForProvider(provider string) tea.Cmd {
 		// Call provider-specific functions
 		switch strings.ToLower(provider) {
 		case "kubevirt":
-			descriptionsMap = fetchKubeVirtMachineSettings()
+			descriptionsMap = fetchKubeVirtMachineSettings(kubeconfigPath)
 		// Add more providers as they become available
 		default:
 			descriptionsMap = make(map[string]k8cginkgo.Description)
@@ -153,34 +156,45 @@ func (m *Model) fetchMachineSettingsForProvider(provider string) tea.Cmd {
 	}
 }
 
+// buildKubeVirtClient constructs a controller-runtime client from the given kubeconfig file path.
+func buildKubeVirtClient(kubeconfigPath string) (ctrlclient.Client, error) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build rest config: %w", err)
+	}
+
+	client, err := ctrlclient.New(config, ctrlclient.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create client: %w", err)
+	}
+	return client, nil
+}
+
 // fetchKubeVirtDatacenterSettings fetches KubeVirt datacenter settings.
-// This replicates the logic from kubevirt.GetDatacenterDescriptions() but uses the environment's kubeconfig.
-func fetchKubeVirtDatacenterSettings() map[string]k8cginkgo.Description {
-	// Call the existing function - it will now use the KUBECONFIG we set in the environment
-	// We recover from any panics that might occur
+func fetchKubeVirtDatacenterSettings(kubeconfigPath string) map[string]k8cginkgo.Description {
 	defer func() {
-		if r := recover(); r != nil {
-			// Silently recover - return will be nil which is handled by caller
-		}
+		recover() //nolint:errcheck
 	}()
 
-	// Call the kubevirt package function directly
-	// This will use the KUBECONFIG environment variable we temporarily set
-	return kubevirt.GetDatacenterDescriptions()
+	client, err := buildKubeVirtClient(kubeconfigPath)
+	if err != nil {
+		return nil
+	}
+	return kubevirt.GetDatacenterDescriptions(client)
 }
 
 // fetchKubeVirtMachineSettings fetches KubeVirt machine deployment settings.
-// This replicates the logic from kubevirt.GetMachineDescriptions() but uses the environment's kubeconfig.
-func fetchKubeVirtMachineSettings() map[string]k8cginkgo.Description {
-	// Call the existing function - it will now use the KUBECONFIG we set in the environment
-	// We recover from any panics that might occur
+func fetchKubeVirtMachineSettings(kubeconfigPath string) map[string]k8cginkgo.Description {
 	defer func() {
-		if r := recover(); r != nil {
-			// Silently recover - return will be nil which is handled by caller
-		}
+		recover() //nolint:errcheck
 	}()
 
-	// Call the kubevirt package function directly
-	// This will use the KUBECONFIG environment variable we temporarily set
-	return kubevirt.GetMachineDescriptions()
+	client, err := buildKubeVirtClient(kubeconfigPath)
+	if err != nil {
+		return nil
+	}
+	return kubevirt.GetMachineDescriptions(client)
 }

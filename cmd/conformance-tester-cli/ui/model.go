@@ -344,7 +344,7 @@ func initializeMachineDeploymentSettingsSelection(providers []string) MachineDep
 
 // initializeClusterSettingsSelection creates the cluster settings selection structure.
 func initializeClusterSettingsSelection(providers []string) ClusterSettingsSelection {
-	descriptionsMap := ginkgoutils.GetClusterDescriptions()
+	descriptionsMap := ginkgoutils.GetClusterDescriptions(nil)
 
 	// Convert map to SettingGroup slice (same for all providers)
 	var groups []SettingGroup
