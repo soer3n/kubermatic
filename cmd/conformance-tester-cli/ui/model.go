@@ -98,6 +98,9 @@ type Model struct {
 	// Terminal dimensions for dynamic sizing
 	terminalWidth  int
 	terminalHeight int
+
+	// Cache for processed kubeconfig temp files (raw value -> temp file path)
+	kubeconfigTempFiles map[string]string
 }
 
 func newTextInput(placeholder string, charLimit int) textinput.Model {
@@ -1937,11 +1940,20 @@ func (m *Model) generateIncludedSectionForProvider(provider Provider) ReviewSect
 // processKubeVirtKubeconfig handles KubeVirt kubeconfig - if it's base64 encoded content,
 // decode it and save to a temporary file, returning the file path.
 // If it's already a file path, return it as-is.
+// Results are cached so the same temp file is reused across renders.
 func (m *Model) processKubeVirtKubeconfig(kubeconfigValue string) (string, error) {
 	// Check if the value looks like a file path
 	if strings.HasPrefix(kubeconfigValue, "/") || strings.HasPrefix(kubeconfigValue, "./") || strings.HasPrefix(kubeconfigValue, "~/") {
 		// It's already a file path
 		return kubeconfigValue, nil
+	}
+
+	// Return cached result if available
+	if m.kubeconfigTempFiles == nil {
+		m.kubeconfigTempFiles = make(map[string]string)
+	}
+	if cached, ok := m.kubeconfigTempFiles[kubeconfigValue]; ok {
+		return cached, nil
 	}
 
 	// Try to decode as base64
@@ -1970,6 +1982,7 @@ func (m *Model) processKubeVirtKubeconfig(kubeconfigValue string) (string, error
 		return "", fmt.Errorf("failed to write kubeconfig to temp file: %w", err)
 	}
 
+	m.kubeconfigTempFiles[kubeconfigValue] = tmpFile.Name()
 	return tmpFile.Name(), nil
 }
 
