@@ -1741,20 +1741,6 @@ func (m *Model) generateSecretsSectionForProvider(provider Provider) ReviewSecti
 	b.WriteString("secrets:\n")
 	b.WriteString(fmt.Sprintf("  %s:\n", strings.ToLower(provider.DisplayName)))
 
-	// Add datacenter if available
-	for _, provName := range m.datacenterSettingsSelection.Providers {
-		if provName == provider.DisplayName {
-			for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provName] {
-				groupKey := fmt.Sprintf("%s:%s", provName, group.Key)
-				if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
-					b.WriteString(fmt.Sprintf("    kkpDatacenter: \"%s\"\n", group.Key))
-					break
-				}
-			}
-			break
-		}
-	}
-
 	// Add credentials
 	if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
 		// Credentials come from preset - use PresetCredentials
@@ -2256,20 +2242,6 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 	// Secrets
 	b.WriteString("secrets:\n")
 	b.WriteString(fmt.Sprintf("  %s:\n", strings.ToLower(provider.DisplayName)))
-
-	// Add datacenter
-	for _, provName := range m.datacenterSettingsSelection.Providers {
-		if provName == provider.DisplayName {
-			for _, group := range m.datacenterSettingsSelection.SettingsByProvider[provName] {
-				groupKey := fmt.Sprintf("%s:%s", provName, group.Key)
-				if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
-					b.WriteString(fmt.Sprintf("    kkpDatacenter: \"%s\"\n", group.Key))
-					break
-				}
-			}
-			break
-		}
-	}
 
 	// Add credentials
 	if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
