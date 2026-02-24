@@ -118,6 +118,19 @@ func newTextInputWithMask(placeholder string, charLimit int, masked bool) textin
 	return ti
 }
 
+// latestDefaultKubernetesVersion returns the highest Kubernetes version known to
+// the defaulting package, used as a fallback when the user selects nothing.
+func latestDefaultKubernetesVersion() string {
+	sel := initializeReleaseSelection()
+	if len(sel.MajorVersions) > 0 {
+		major := sel.MajorVersions[0]
+		if len(sel.MinorVersions[major]) > 0 {
+			return sel.MinorVersions[major][0]
+		}
+	}
+	return "1.31.0" // absolute last resort
+}
+
 // initializeReleaseSelection creates the release selection structure from defaulting package.
 func initializeReleaseSelection() ReleaseSelection {
 	versions := defaulting.DefaultKubernetesVersioning.Versions
@@ -1699,6 +1712,7 @@ func (m *Model) generateEnvironmentSectionForProvider(provider Provider) ReviewS
 
 	if m.existingEnv.Selected {
 		if m.existingEnv.SelectedSeedIndex >= 0 && m.existingEnv.SelectedSeedIndex < len(m.existingEnv.AvailableSeeds) {
+			b.WriteString("kubermaticNamespace: \"kubermatic\"\n")
 			b.WriteString(fmt.Sprintf("kubermaticSeedName: \"%s\"\n",
 				m.existingEnv.AvailableSeeds[m.existingEnv.SelectedSeedIndex]))
 		}
@@ -1709,6 +1723,7 @@ func (m *Model) generateEnvironmentSectionForProvider(provider Provider) ReviewS
 			b.WriteString("kubermaticProject: \"\"\n")
 		}
 	} else {
+		b.WriteString("kubermaticNamespace: \"kubermatic\"\n")
 		b.WriteString("kubermaticSeedName: \"\"\n")
 		b.WriteString("kubermaticProject: \"\"\n")
 	}
@@ -1775,7 +1790,7 @@ func (m *Model) generateReleasesSectionForProvider(provider Provider) ReviewSect
 	}
 
 	if len(selectedReleases) == 0 {
-		selectedReleases = []string{"1.29.0"}
+		selectedReleases = []string{latestDefaultKubernetesVersion()}
 	}
 
 	b.WriteString("releases:\n")
@@ -1851,7 +1866,7 @@ func (m *Model) generateResourcesSectionForProvider(provider Provider) ReviewSec
 
 	// Default values
 	if len(cpuResources) == 0 {
-		cpuResources = []string{"2000m"}
+		cpuResources = []string{"2"}
 	}
 	if len(memoryResources) == 0 {
 		memoryResources = []string{"4Gi"}
@@ -1866,7 +1881,7 @@ func (m *Model) generateResourcesSectionForProvider(provider Provider) ReviewSec
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("\"%s\"", cpu))
+		b.WriteString(cpu)
 	}
 	b.WriteString("]\n")
 
@@ -2078,8 +2093,8 @@ func (m *Model) generateDatacenterDescriptionsForProvider(provider Provider) []s
 		if len(group.Options) == 0 {
 			// Check if the group itself is selected
 			if m.datacenterSettingsSelection.SelectedGroups[groupKey] {
-				// group.Name already includes "with" prefix
-				descriptions = append(descriptions, group.Name)
+				// group.Name already includes "with" prefix; trim trailing space added by longestCommonPrefixTokens
+				descriptions = append(descriptions, strings.TrimRight(group.Name, " "))
 			}
 		} else {
 			// For each selected option in this group, generate both enabled and disabled entries
@@ -2109,8 +2124,8 @@ func (m *Model) generateClusterDescriptionsForProvider(provider Provider) []stri
 		if len(group.Options) == 0 {
 			// Check if the group itself is selected
 			if m.clusterSettingsSelection.SelectedGroups[groupKey] {
-				// group.Name already includes "with" prefix
-				descriptions = append(descriptions, group.Name)
+				// group.Name already includes "with" prefix; trim trailing space added by longestCommonPrefixTokens
+				descriptions = append(descriptions, strings.TrimRight(group.Name, " "))
 			}
 		} else {
 			// For each selected option in this group
@@ -2140,8 +2155,8 @@ func (m *Model) generateMachineDescriptionsForProvider(provider Provider) []stri
 		if len(group.Options) == 0 {
 			// Check if the group itself is selected
 			if m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] {
-				// group.Name already includes "with" prefix
-				descriptions = append(descriptions, group.Name)
+				// group.Name already includes "with" prefix; trim trailing space added by longestCommonPrefixTokens
+				descriptions = append(descriptions, strings.TrimRight(group.Name, " "))
 			}
 		} else {
 			// For each selected option in this group
@@ -2219,9 +2234,11 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 	b.WriteString("# Kubermatic settings\n")
 	if m.existingEnv.Selected {
 		if m.existingEnv.SelectedSeedIndex >= 0 && m.existingEnv.SelectedSeedIndex < len(m.existingEnv.AvailableSeeds) {
+			b.WriteString("kubermaticNamespace: \"kubermatic\"\n")
 			b.WriteString(fmt.Sprintf("kubermaticSeedName: \"%s\"\n",
 				m.existingEnv.AvailableSeeds[m.existingEnv.SelectedSeedIndex]))
 		} else {
+			b.WriteString("kubermaticNamespace: \"kubermatic\"\n")
 			b.WriteString("kubermaticSeedName: \"\"\n")
 		}
 		if m.existingEnv.ProjectName.Value() != "" {
@@ -2231,6 +2248,7 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 			b.WriteString("kubermaticProject: \"\"\n\n")
 		}
 	} else {
+		b.WriteString("kubermaticNamespace: \"kubermatic\"\n")
 		b.WriteString("kubermaticSeedName: \"\"\n")
 		b.WriteString("kubermaticProject: \"\"\n\n")
 	}
@@ -2282,7 +2300,7 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 		}
 	}
 	if len(selectedReleases) == 0 {
-		selectedReleases = []string{"1.29.0"}
+		selectedReleases = []string{latestDefaultKubernetesVersion()}
 	}
 
 	b.WriteString("# A list of Kubernetes releases to test.\n")
@@ -2324,7 +2342,7 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 			case "CPU Cores":
 				if val, ok := setting.Value.([]int); ok {
 					for _, cpu := range val {
-						cpuResources = append(cpuResources, fmt.Sprintf("%dm", cpu))
+						cpuResources = append(cpuResources, fmt.Sprintf("%d", cpu))
 					}
 				}
 			case "Memory":
@@ -2340,7 +2358,7 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 	}
 
 	if len(cpuResources) == 0 {
-		cpuResources = []string{"2000m"}
+		cpuResources = []string{"2"}
 	}
 	if len(memoryResources) == 0 {
 		memoryResources = []string{"4Gi"}
@@ -2355,7 +2373,7 @@ func (m *Model) generateCompleteYAMLForProvider(provider Provider) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("\"%s\"", cpu))
+		b.WriteString(cpu)
 	}
 	b.WriteString("]\n")
 

@@ -96,19 +96,6 @@ func (m *Model) cleanupTestExecution() tea.Cmd {
 			}
 		}
 
-		// Delete PVC
-		cleanupMessages = append(cleanupMessages, "\n💾 Deleting PVC...")
-		err = clientset.CoreV1().PersistentVolumeClaims(deploy.ConformanceNamespace).Delete(
-			ctx,
-			deploy.PVCName,
-			metav1.DeleteOptions{},
-		)
-		if err != nil {
-			cleanupMessages = append(cleanupMessages, fmt.Sprintf("  ⚠ Failed to delete PVC %s: %v", deploy.PVCName, err))
-		} else {
-			cleanupMessages = append(cleanupMessages, fmt.Sprintf("  ✓ Deleted PVC: %s", deploy.PVCName))
-		}
-
 		// Delete namespace
 		cleanupMessages = append(cleanupMessages, fmt.Sprintf("\n🗂️  Deleting namespace %s...", deploy.ConformanceNamespace))
 		err = clientset.CoreV1().Namespaces().Delete(

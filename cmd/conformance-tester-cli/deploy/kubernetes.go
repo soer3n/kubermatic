@@ -23,16 +23,18 @@
 package deploy
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,10 +44,12 @@ const (
 	// ConformanceNamespace is the dedicated namespace for conformance tests.
 	ConformanceNamespace = "conformance-tests"
 	// ConformanceImage is the Docker image used for running tests.
-	ConformanceImage = "docker.io/soer3n/conformance-tester:ginkgo"
-	// PVCName is the name of the PersistentVolumeClaim for storing results.
-	PVCName = "conformance-results"
+	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-15550024022026"
 )
+
+// kubeconfigFileRegex matches the kubeconfigFile key in YAML configuration,
+// used to replace the user-provided path with the container mount path.
+var kubeconfigFileRegex = regexp.MustCompile(`kubeconfigFile:\s*["']?[^"'\n]+["']?`)
 
 // JobConfig holds configuration for creating a Kubernetes Job.
 type JobConfig struct {
@@ -98,39 +102,6 @@ func EnsureNamespace(ctx context.Context, clientset *kubernetes.Clientset) error
 	return nil
 }
 
-// EnsurePVC creates a PersistentVolumeClaim for storing results if it doesn't exist.
-func EnsurePVC(ctx context.Context, clientset *kubernetes.Clientset) error {
-	pvc := &corev1.PersistentVolumeClaim{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      PVCName,
-			Namespace: ConformanceNamespace,
-		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteMany,
-			},
-			Resources: corev1.VolumeResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("10Gi"),
-				},
-			},
-		},
-	}
-
-	_, err := clientset.CoreV1().PersistentVolumeClaims(ConformanceNamespace).Get(ctx, PVCName, metav1.GetOptions{})
-	if err == nil {
-		// PVC already exists
-		return nil
-	}
-
-	_, err = clientset.CoreV1().PersistentVolumeClaims(ConformanceNamespace).Create(ctx, pvc, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create PVC %s: %w", PVCName, err)
-	}
-
-	return nil
-}
-
 // CreateConfigMap creates a ConfigMap with the provider configuration.
 func CreateConfigMap(ctx context.Context, clientset *kubernetes.Clientset, config JobConfig) error {
 	// Add "client: kube" to the config if not present
@@ -138,6 +109,9 @@ func CreateConfigMap(ctx context.Context, clientset *kubernetes.Clientset, confi
 	if !strings.Contains(configYAML, "client:") {
 		configYAML = "client: \"kube\"\n\n" + configYAML
 	}
+
+	// Replace any kubeconfigFile path with the mounted secret path.
+	configYAML = kubeconfigFileRegex.ReplaceAllString(configYAML, `kubeconfigFile: "/opt/kubeconfig"`)
 
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
@@ -156,6 +130,47 @@ func CreateConfigMap(ctx context.Context, clientset *kubernetes.Clientset, confi
 	_, err := clientset.CoreV1().ConfigMaps(config.Namespace).Create(ctx, cm, metav1.CreateOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to create ConfigMap: %w", err)
+	}
+
+	return nil
+}
+
+// EnsureClusterRoleBinding creates or updates a ClusterRoleBinding that grants cluster-admin
+// permissions to the default service account in the conformance-tests namespace.
+func EnsureClusterRoleBinding(ctx context.Context, clientset *kubernetes.Clientset) error {
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "conformance-cluster-admin",
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: "rbac.authorization.k8s.io",
+			Kind:     "ClusterRole",
+			Name:     "cluster-admin",
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				APIGroup:  "",
+				Kind:      "ServiceAccount",
+				Name:      "default",
+				Namespace: ConformanceNamespace,
+			},
+		},
+	}
+
+	existing, err := clientset.RbacV1().ClusterRoleBindings().Get(ctx, "conformance-cluster-admin", metav1.GetOptions{})
+	if err == nil {
+		// Update the existing binding to ensure it has the correct subjects.
+		crb.ResourceVersion = existing.ResourceVersion
+		_, err = clientset.RbacV1().ClusterRoleBindings().Update(ctx, crb, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update ClusterRoleBinding: %w", err)
+		}
+		return nil
+	}
+
+	_, err = clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to create ClusterRoleBinding: %w", err)
 	}
 
 	return nil
@@ -226,10 +241,6 @@ func CreateJob(ctx context.Context, clientset *kubernetes.Clientset, config JobC
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Env: []corev1.EnvVar{
 								{
-									Name:  "KUBECONFIG",
-									Value: "/opt/kubeconfig",
-								},
-								{
 									Name:  "CONFORMANCE_TESTER_CONFIG_FILE",
 									Value: "/opt/config.yaml",
 								},
@@ -259,12 +270,10 @@ func CreateJob(ctx context.Context, clientset *kubernetes.Clientset, config JobC
 								{
 									Name:      "results",
 									MountPath: "/" + config.ReportsRoot,
-									SubPath:   config.ProviderLabel + "/" + config.ReportsRoot,
 								},
 								{
 									Name:      "results",
 									MountPath: "/" + config.LogDirectory,
-									SubPath:   config.ProviderLabel + "/" + config.LogDirectory,
 								},
 							},
 						},
@@ -291,9 +300,7 @@ func CreateJob(ctx context.Context, clientset *kubernetes.Clientset, config JobC
 						{
 							Name: "results",
 							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: PVCName,
-								},
+								EmptyDir: &corev1.EmptyDirVolumeSource{},
 							},
 						},
 					},
@@ -340,7 +347,7 @@ func WaitForPodRunning(ctx context.Context, clientset *kubernetes.Clientset, job
 	}
 }
 
-// StreamPodLogs streams logs from a pod to the output channel.
+// StreamPodLogs streams logs from a pod to the output channel, line by line.
 func StreamPodLogs(ctx context.Context, clientset *kubernetes.Clientset, podName string, outputChan chan<- string) error {
 	req := clientset.CoreV1().Pods(ConformanceNamespace).GetLogs(podName, &corev1.PodLogOptions{
 		Follow: true,
@@ -352,18 +359,15 @@ func StreamPodLogs(ctx context.Context, clientset *kubernetes.Clientset, podName
 	}
 	defer stream.Close()
 
-	buf := make([]byte, 2000)
-	for {
-		n, err := stream.Read(buf)
-		if n > 0 {
-			outputChan <- string(buf[:n])
-		}
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return fmt.Errorf("error reading logs: %w", err)
-		}
+	scanner := bufio.NewScanner(stream)
+	// Increase buffer to handle long JSON log lines (default is 64KB).
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		outputChan <- scanner.Text() + "\n"
+	}
+
+	if err := scanner.Err(); err != nil && err != io.EOF {
+		return fmt.Errorf("error reading logs: %w", err)
 	}
 
 	return nil

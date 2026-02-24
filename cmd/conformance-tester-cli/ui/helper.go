@@ -24,7 +24,6 @@ package ui
 
 import (
 	"os"
-	"strconv"
 	"strings"
 )
 
@@ -133,19 +132,11 @@ func (m *Model) validateExistingEnvironment() bool {
 		return false
 	}
 
-	// Validate Preset selection
-	if m.existingEnv.SelectedPresetIndex < 0 || m.existingEnv.SelectedPresetIndex >= len(m.existingEnv.AvailablePresets) {
-		m.existingEnv.Errors.Fields["PresetName"] = "Please select a Preset"
-		return false
-	}
+	// // Validate Preset selection
+	// if m.existingEnv.SelectedPresetIndex < 0 || m.existingEnv.SelectedPresetIndex >= len(m.existingEnv.AvailablePresets) && len(m.existingEnv.AvailablePresets) > 0 {
+	// 	m.existingEnv.Errors.Fields["PresetName"] = "Please select a Preset"
+	// 	return false
+	// }
 
 	return true
-}
-
-func mustAtoi(s string) int {
-	i, err := strconv.Atoi(s)
-	if err != nil {
-		return 1
-	}
-	return i
 }

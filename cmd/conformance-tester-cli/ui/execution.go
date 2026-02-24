@@ -72,23 +72,24 @@ func (m *Model) executeConformanceTests() tea.Cmd {
 			})
 		}
 
-		// Ensure PVC exists
-		if err := deploy.EnsurePVC(ctx, clientset); err != nil {
+		// Ensure ClusterRoleBinding exists
+		if err := deploy.EnsureClusterRoleBinding(ctx, clientset); err != nil {
 			return execOutputMsg{
-				output: fmt.Sprintf("Error creating PVC: %v\n", err),
+				output: fmt.Sprintf("Error creating ClusterRoleBinding: %v\n", err),
 				err:    err,
 			}
 		}
 
-		// Send success message for PVC
+		// Send success message for ClusterRoleBinding
 		if m.program != nil {
 			m.program.Send(execOutputMsg{
-				output: fmt.Sprintf("✓ PVC %s ready\n", deploy.PVCName),
+				output: "✓ ClusterRoleBinding ready\n",
 			})
 		}
 
-		// Get kubeconfig content for provider credentials
-		kubeconfigContent, err := os.ReadFile(kubeconfigPath)
+		// Read the management cluster kubeconfig as the default credential for all providers.
+		// KubeVirt overrides this with its own datacenter kubeconfig below.
+		managementKubeconfig, err := os.ReadFile(kubeconfigPath)
 		if err != nil {
 			return execOutputMsg{
 				output: fmt.Sprintf("Error reading kubeconfig: %v\n", err),
@@ -126,22 +127,44 @@ func (m *Model) executeConformanceTests() tea.Cmd {
 			providerLabel := strings.ToLower(provider.DisplayName)
 			providerLabel = strings.ReplaceAll(providerLabel, " ", "-")
 
-			// For KubeVirt, process the kubeconfig if it's from a preset
-			providerKubeconfigContent := string(kubeconfigContent)
-			if provider.DisplayName == "KubeVirt" && provider.HasPresetCredentials {
-				if creds, ok := provider.PresetCredentials.(KubeVirtCredentials); ok {
-					kubeconfigValue := creds.Kubeconfig.Value()
-					if kubeconfigValue != "" && kubeconfigValue != "***preset-value***" {
-						// This is base64-encoded kubeconfig from preset
-						decodedKubeconfig, err := m.processKubeVirtKubeconfig(kubeconfigValue)
-						if err == nil {
-							// Read the temp file content
-							if tempContent, readErr := os.ReadFile(decodedKubeconfig); readErr == nil {
-								providerKubeconfigContent = string(tempContent)
-							}
-						}
+			// For KubeVirt, the secret must contain the KubeVirt datacenter kubeconfig,
+			// not the management cluster kubeconfig. Extract it from provider credentials.
+			// All other providers use the management cluster kubeconfig.
+			providerKubeconfigContent := string(managementKubeconfig)
+			if provider.DisplayName == "KubeVirt" {
+				var kubeconfigValue string
+				if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
+					if creds, ok := provider.PresetCredentials.(KubeVirtCredentials); ok {
+						kubeconfigValue = creds.Kubeconfig.Value()
+					}
+				} else {
+					if creds, ok := provider.Credentials.(KubeVirtCredentials); ok {
+						kubeconfigValue = creds.Kubeconfig.Value()
 					}
 				}
+
+				if kubeconfigValue == "" || kubeconfigValue == "***preset-value***" {
+					return execOutputMsg{
+						output: fmt.Sprintf("✗ No KubeVirt kubeconfig provided for %s\n", provider.DisplayName),
+						err:    fmt.Errorf("no KubeVirt kubeconfig provided for provider %s", provider.DisplayName),
+					}
+				}
+
+				kubeconfigPath, err := m.processKubeVirtKubeconfig(kubeconfigValue)
+				if err != nil {
+					return execOutputMsg{
+						output: fmt.Sprintf("✗ Failed to process KubeVirt kubeconfig for %s: %v\n", provider.DisplayName, err),
+						err:    err,
+					}
+				}
+				content, err := os.ReadFile(kubeconfigPath)
+				if err != nil {
+					return execOutputMsg{
+						output: fmt.Sprintf("✗ Failed to read KubeVirt kubeconfig for %s: %v\n", provider.DisplayName, err),
+						err:    err,
+					}
+				}
+				providerKubeconfigContent = string(content)
 			}
 
 			jobConfig := deploy.JobConfig{
