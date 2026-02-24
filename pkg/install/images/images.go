@@ -475,7 +475,7 @@ func getImagesFromReconcilers(_ logrus.FieldLogger, templateData *resources.Temp
 	deploymentReconcilers := kubernetescontroller.GetDeploymentReconcilers(templateData, kubernetescontroller.Features{}, kubermaticVersions)
 	deploymentReconcilers = append(deploymentReconcilers, monitoring.GetDeploymentReconcilers(templateData)...)
 	deploymentReconcilers = append(deploymentReconcilers, masteroperator.APIDeploymentReconciler(config, "", kubermaticVersions))
-	deploymentReconcilers = append(deploymentReconcilers, masteroperator.MasterControllerManagerDeploymentReconciler(config, "", kubermaticVersions))
+	deploymentReconcilers = append(deploymentReconcilers, masteroperator.MasterControllerManagerDeploymentReconciler(config, "", kubermaticVersions, nil))
 	deploymentReconcilers = append(deploymentReconcilers, masteroperator.UIDeploymentReconciler(config, kubermaticVersions))
 	deploymentReconcilers = append(deploymentReconcilers, seedoperatorkubermatic.SeedControllerManagerDeploymentReconciler("", kubermaticVersions, config, seed))
 	deploymentReconcilers = append(deploymentReconcilers, seedoperatornodeportproxy.EnvoyDeploymentReconciler(config, seed, false, kubermaticVersions))
@@ -513,7 +513,7 @@ func getImagesFromReconcilers(_ logrus.FieldLogger, templateData *resources.Temp
 		templateData.RewriteImage,
 	))
 	daemonsetReconcilers = append(daemonsetReconcilers, nodelocaldns.DaemonSetReconciler(templateData.RewriteImage))
-	daemonsetReconcilers = append(daemonsetReconcilers, envoyagent.DaemonSetReconciler(net.IPv4(0, 0, 0, 0), kubermaticVersions, "", templateData.RewriteImage))
+	daemonsetReconcilers = append(daemonsetReconcilers, envoyagent.DaemonSetReconciler(templateData.Cluster(), net.IPv4(0, 0, 0, 0), kubermaticVersions, "", templateData.RewriteImage))
 
 	for _, creatorGetter := range statefulsetReconcilers {
 		_, creator := creatorGetter()

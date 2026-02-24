@@ -2,8 +2,80 @@
 
 - [v2.29.0](#v2290)
 - [v2.29.1](#v2291)
+- [v2.29.2](#v2292)
+- [v2.29.3](#v2293)
+- [v2.29.4](#v2294)
 
-## [v2.29.1](https://github.com/kubermatic/kubermatic/releases/tag/v2.29.1)
+## v2.29.4
+
+**GitHub release: [v2.29.4](https://github.com/kubermatic/kubermatic/releases/tag/v2.29.4)**
+
+### Supported Kubernetes Versions
+
+- Add support of new Kubernetes patch releases v1.34.4/v1.33.8/v1.32.12 ([#15472](https://github.com/kubermatic/kubermatic/pull/15472))
+
+### New Features
+
+- Add Gateway API support to the IAP chart, allowing IAP deployments to use HTTPRoute resources instead of Ingress when migrating to Gateway API ([#15365](https://github.com/kubermatic/kubermatic/pull/15365))
+- Kubermatic now supports Gateway API for external traffic routing as an alternative to NGINX Ingress. It can be enabled via the `--enable-gateway-api` operator flag (set via `migrateGatewayAPI: true` in Helm values and `--migrate-gateway-api` in `kubermatic-installer`) ([#15402](https://github.com/kubermatic/kubermatic/pull/15402))
+- The installer now uses a consistent scheme setup for both `deploy` and `local kind` commands ([#15288](https://github.com/kubermatic/kubermatic/pull/15288))
+
+### Bugfixes
+
+- Add optional Seed setting `spec.nodeportProxy.envoy.replicas` to configure the `nodeport-proxy-envoy` replica count. If unset, existing default behavior remains (`3` replicas) ([#15464](https://github.com/kubermatic/kubermatic/pull/15464))
+
+### Updates
+
+- Update nginx-ingress-controller version to 1.14.3 ([#15364](https://github.com/kubermatic/kubermatic/pull/15364))
+
+## v2.29.3
+
+**GitHub release: [v2.29.3](https://github.com/kubermatic/kubermatic/releases/tag/v2.29.3)**
+
+### New Features
+
+- Add status conditions for policy binding resources ([#15209](https://github.com/kubermatic/kubermatic/pull/15209))
+
+### Bugfixes
+
+- Fix issue where OIDC kubeconfig downloads would fail with RBAC "Forbidden" errors when the identity provider returns uppercase email addresses ([#7740](https://github.com/kubermatic/dashboard/pull/7740))
+
+### Updates
+
+- Update Go version to 1.25.6 ([#15332](https://github.com/kubermatic/kubermatic/pull/15332), [#7782](https://github.com/kubermatic/dashboard/pull/7782))
+
+## v2.29.2
+
+**GitHub release: [v2.29.2](https://github.com/kubermatic/kubermatic/releases/tag/v2.29.2)**
+
+### Breaking Changes
+
+- Fix cluster-autoscaler RBAC permissions.cluster-autoscaler application needs to be re-installed to force recreating ApplicationInstallation resource, in order to get the new updated default values.yaml ([#15152](https://github.com/kubermatic/kubermatic/pull/15152))
+- Update oauth2-proxy to appversion v7.13.0. If your configuration relies on matching query parameters in `skip_auth_routes` patterns, you must update your regex patterns to match paths only. Review all `skip_auth_routes` entries for potential impact. For detailed information, migration guidance, and security implications, see the upstream [security advisory](https://github.com/oauth2-proxy/oauth2-proxy/security/advisories/GHSA-7rh7-c77v-6434) ([#15174](https://github.com/kubermatic/kubermatic/pull/15174))
+
+### New Features
+
+- Add new env vars for KubeVirt provider in machine controller ([#15253](https://github.com/kubermatic/kubermatic/pull/15253))
+- Set Tolerations overrides for control plane components ([#15252](https://github.com/kubermatic/kubermatic/pull/15252))
+- Users can now configure additional arguments to oauth2-proxy pods. (useful for seed and user-mla) ([#15241](https://github.com/kubermatic/kubermatic/pull/15241))
+
+### Bugfixes
+
+- Cortex upgrade to 1.16.1 fixing issue of cortex-ingester taking up a lot of storage space ([#15242](https://github.com/kubermatic/kubermatic/pull/15242))
+- Delete orphaned UserProjectBinding resources on User or Project deletion ([#15181](https://github.com/kubermatic/kubermatic/pull/15181))
+- Velero backup hook annotations have been corrected to use proper JSON format and ASCII quotes, fixing backup failures caused by invalid exec commands ([#15217](https://github.com/kubermatic/kubermatic/pull/15217))
+- Fix Operating System Manager args, for flags like containerd-registry-mirrors ([#15154](https://github.com/kubermatic/kubermatic/pull/15154))
+- Add omitempty to component settings fields to allow partial configuration ([#15182](https://github.com/kubermatic/kubermatic/pull/15182))
+- Fix encryption at rest feature failing in environments with separate master and seed clusters ([#7718](https://github.com/kubermatic/dashboard/pull/7718))
+
+### Updates
+
+- Update machine-controller to [v1.64.1](https://github.com/kubermatic/machine-controller/releases/tag/v1.64.1) ([#15267](https://github.com/kubermatic/kubermatic/pull/15267))
+- Add support of the latest k8s patch releases v1.34.3/v1.33.7 ([#15239](https://github.com/kubermatic/kubermatic/pull/15239))
+
+## v2.29.1
+
+**GitHub release: [v2.29.1](https://github.com/kubermatic/kubermatic/releases/tag/v2.29.1)**
 
 ### Supported Kubernetes Versions
 

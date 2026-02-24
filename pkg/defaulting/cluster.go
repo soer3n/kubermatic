@@ -28,6 +28,7 @@ import (
 	"k8c.io/kubermatic/v2/pkg/cni"
 	"k8c.io/kubermatic/v2/pkg/provider"
 	"k8c.io/kubermatic/v2/pkg/resources"
+	"k8c.io/kubermatic/v2/pkg/util/kyverno"
 
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -45,7 +46,15 @@ import (
 // This function assumes that the KubermaticConfiguration has already been defaulted
 // (as the KubermaticConfigurationGetter does that automatically), but the Seed
 // does not yet need to be defaulted (to the values of the KubermaticConfiguration).
-func DefaultClusterSpec(ctx context.Context, spec *kubermaticv1.ClusterSpec, template *kubermaticv1.ClusterTemplate, seed *kubermaticv1.Seed, config *kubermaticv1.KubermaticConfiguration, cloudProvider provider.CloudProvider) error {
+func DefaultClusterSpec(
+	ctx context.Context,
+	spec *kubermaticv1.ClusterSpec,
+	clusterAnnotations map[string]string,
+	template *kubermaticv1.ClusterTemplate,
+	seed *kubermaticv1.Seed,
+	config *kubermaticv1.KubermaticConfiguration,
+	cloudProvider provider.CloudProvider,
+) error {
 	var err error
 
 	// Apply default values to the Seed, just in case.
@@ -94,23 +103,25 @@ func DefaultClusterSpec(ctx context.Context, spec *kubermaticv1.ClusterSpec, tem
 		return fieldErr
 	}
 
-	// Set the audit logging settings
-	if seed.Spec.AuditLogging != nil {
-		spec.AuditLogging = new(kubermaticv1.AuditLoggingSettings)
-		(*seed.Spec.AuditLogging).DeepCopyInto(spec.AuditLogging)
-	}
-
-	// Enforce audit logging
-	if datacenter.Spec.EnforceAuditLogging {
-		if spec.AuditLogging == nil {
-			spec.AuditLogging = &kubermaticv1.AuditLoggingSettings{}
+	// Set the audit logging settings (skip if cluster has opt-out annotation)
+	if clusterAnnotations[kubermaticv1.SkipAuditLoggingEnforcementAnnotation] != "true" {
+		if seed.Spec.AuditLogging != nil {
+			spec.AuditLogging = new(kubermaticv1.AuditLoggingSettings)
+			(*seed.Spec.AuditLogging).DeepCopyInto(spec.AuditLogging)
 		}
-		spec.AuditLogging.Enabled = true
-	}
 
-	// Enforce audit webhook backend
-	if datacenter.Spec.EnforcedAuditWebhookSettings != nil {
-		spec.AuditLogging.WebhookBackend = datacenter.Spec.EnforcedAuditWebhookSettings
+		// Enforce audit logging
+		if datacenter.Spec.EnforceAuditLogging {
+			if spec.AuditLogging == nil {
+				spec.AuditLogging = &kubermaticv1.AuditLoggingSettings{}
+			}
+			spec.AuditLogging.Enabled = true
+		}
+
+		// Enforce audit webhook backend
+		if datacenter.Spec.EnforcedAuditWebhookSettings != nil {
+			spec.AuditLogging.WebhookBackend = datacenter.Spec.EnforcedAuditWebhookSettings
+		}
 	}
 
 	// Enforce PodSecurityPolicy
@@ -146,6 +157,21 @@ func DefaultClusterSpec(ctx context.Context, spec *kubermaticv1.ClusterSpec, tem
 			spec.KubeLB.Enabled = true
 		}
 	}
+
+	kyvernoEnforcement := kyverno.GetEnforcement(
+		datacenter.Spec.Kyverno,
+		seed.Spec.Kyverno,
+		config.Spec.UserCluster.Kyverno,
+	)
+	if kyvernoEnforcement.Enforced {
+		if spec.Kyverno == nil {
+			spec.Kyverno = &kubermaticv1.KyvernoSettings{}
+		}
+		spec.Kyverno.Enabled = true
+	}
+
+	// Default EventRateLimit admission plugin from global config
+	defaultEventRateLimitPlugin(spec, config)
 
 	// Add default CNI plugin settings if not present.
 	if spec.CNIPlugin == nil {
@@ -266,4 +292,34 @@ func DefaultClusterNetwork(specClusterNetwork kubermaticv1.ClusterNetworkingConf
 	}
 
 	return specClusterNetwork
+}
+
+// defaultEventRateLimitPlugin applies global EventRateLimit admission plugin settings to the cluster spec.
+func defaultEventRateLimitPlugin(spec *kubermaticv1.ClusterSpec, config *kubermaticv1.KubermaticConfiguration) {
+	if config == nil || config.Spec.UserCluster.AdmissionPlugins == nil ||
+		config.Spec.UserCluster.AdmissionPlugins.EventRateLimit == nil {
+		return
+	}
+
+	erl := config.Spec.UserCluster.AdmissionPlugins.EventRateLimit
+	isEnforced := erl.Enforced != nil && *erl.Enforced
+
+	// If enforced, enable the plugin
+	if isEnforced {
+		spec.UseEventRateLimitAdmissionPlugin = true
+	}
+
+	// Apply enabled default if not already enabled
+	if !spec.UseEventRateLimitAdmissionPlugin && erl.Enabled != nil && *erl.Enabled {
+		spec.UseEventRateLimitAdmissionPlugin = true
+	}
+
+	// Apply configuration:
+	// - If enforced AND defaultConfig is set: always apply (overwrite user config)
+	// - If not enforced: only apply if user hasn't specified config
+	if spec.UseEventRateLimitAdmissionPlugin && erl.DefaultConfig != nil {
+		if isEnforced || spec.EventRateLimitConfig == nil {
+			spec.EventRateLimitConfig = erl.DefaultConfig.DeepCopy()
+		}
+	}
 }

@@ -5,6 +5,54 @@
 - [v2.28.2](#v2282)
 - [v2.28.3](#v2283)
 - [v2.28.4](#v2284)
+- [v2.28.5](#v2285)
+- [v2.28.6](#v2286)
+- [v2.28.7](#v2287)
+
+## v2.28.7
+
+**GitHub release: [v2.28.7](https://github.com/kubermatic/kubermatic/releases/tag/v2.28.7)**
+
+### Supported Kubernetes Versions
+
+- Add support for the latest k8s patch release v1.33.8 and v1.32.12 ([#15466](https://github.com/kubermatic/kubermatic/pull/15466))
+
+### Bugfixes
+
+- Add optional Seed setting `spec.nodeportProxy.envoy.replicas` to configure the `nodeport-proxy-envoy` replica count. If unset, existing default behavior remains (`3` replicas) ([#15464](https://github.com/kubermatic/kubermatic/pull/15464))
+
+### Updates
+
+- Update nginx-ingress controller from 1.12.6 to 1.13.7 ([#15467](https://github.com/kubermatic/kubermatic/pull/15467))
+
+## v2.28.6
+
+**GitHub release: [v2.28.6](https://github.com/kubermatic/kubermatic/releases/tag/v2.28.6)**
+
+### Updates
+
+- Update Go version to 1.24.12 ([#15325](https://github.com/kubermatic/kubermatic/pull/15325), [#7781](https://github.com/kubermatic/dashboard/pull/7781))
+- Users can now configure additional arguments to oauth2-proxy pods. (useful for seed and user-mla) ([#15279](https://github.com/kubermatic/kubermatic/pull/15279))
+
+## v2.28.5
+
+**GitHub release: [v2.28.5](https://github.com/kubermatic/kubermatic/releases/tag/v2.28.5)**
+
+### Breaking Changes
+
+This release contains changes that require additional attention, please read the following items carefully.
+
+- Fix cluster-autoscaler RBAC permissions. cluster-autoscaler application needs to be re-installed to force recreating ApplicationInstallation resource, in order to get the new updated default values.yaml ([#15152](https://github.com/kubermatic/kubermatic/pull/15152))
+
+### Bugfixes
+
+- Minor upgrade of cortex to fix repeating errors in the logs ([#15258](https://github.com/kubermatic/kubermatic/pull/15258))
+- Delete orphaned UserProjectBinding resources on User or Project deletion ([#15181](https://github.com/kubermatic/kubermatic/pull/15181))
+- Add omitempty to component settings fields to allow partial configuration ([#15182](https://github.com/kubermatic/kubermatic/pull/15182))
+
+### Updates
+
+- Add support of k8s patch releases v1.33.7 ([#15247](https://github.com/kubermatic/kubermatic/pull/15247))
 
 ## v2.28.4
 
