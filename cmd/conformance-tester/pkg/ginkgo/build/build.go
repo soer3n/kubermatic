@@ -227,7 +227,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		clusterSettingSpec.ContainerRuntime = "containerd"
 		clusterSettingSpec.Version = semver.Semver(job.kubeVersion.Version.String())
 
-		if err := defaulting.DefaultClusterSpec(job.rootCtx, clusterSettingSpec, nil, &job.seed, job.kkpConfig, p); err != nil {
+		if err := defaulting.DefaultClusterSpec(job.rootCtx, clusterSettingSpec, nil, nil, &job.seed, job.kkpConfig, p); err != nil {
 			results <- clusterResult{err: fmt.Errorf("failed to default cluster spec %s: %w", clusterName, err)}
 			continue
 		}
