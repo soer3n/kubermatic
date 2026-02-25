@@ -19,6 +19,7 @@ import (
 	"k8c.io/kubermatic/v2/pkg/validation"
 	"k8c.io/kubermatic/v2/pkg/version"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8c.io/machine-controller/sdk/userdata"
@@ -39,8 +40,9 @@ func toJSON(i any) []byte {
 	return b
 }
 
-func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings settings.DatacenterSetting, excludedDatacenterDescriptions, includedDatacenterDescriptions []string) map[string]kubermaticv1.Seed {
-	seeds := make(map[string]kubermaticv1.Seed)
+func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, kkpConfig *kubermaticv1.KubermaticConfiguration, log *zap.SugaredLogger, defaultDatacenterSettings settings.DatacenterSetting, excludedDatacenterDescriptions, includedDatacenterDescriptions []string) (map[string]kubermaticv1.Seed, map[string]kubermaticv1.Seed) {
+	includedSeeds := make(map[string]kubermaticv1.Seed)
+	excludedSeeds := make(map[string]kubermaticv1.Seed)
 	const maxCombinedSettings = 6
 
 	// Build a set for fast lookup
@@ -164,14 +166,10 @@ func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, k
 		return finalSeeds
 	}
 
-	includedSeeds := combineSettings(included, "included")
-	excludedSeeds := combineSettings(excluded, "excluded")
+	includedSeeds = combineSettings(included, "included")
+	excludedSeeds = combineSettings(excluded, "excluded")
 
-	// Merge both maps
-	maps.Copy(seeds, includedSeeds)
-	maps.Copy(seeds, excludedSeeds)
-
-	return seeds
+	return includedSeeds, excludedSeeds
 }
 
 func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *sync.WaitGroup) {
@@ -223,6 +221,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			results <- clusterResult{err: fmt.Errorf("failed to get cluster provider for %s: %w", dcName, err)}
 			continue
 		}
+
 		clusterSettingSpec.Cloud = c
 		clusterSettingSpec.HumanReadableName = clusterName
 		clusterSettingSpec.ContainerRuntime = "containerd"
@@ -245,7 +244,8 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			results <- clusterResult{err: fmt.Errorf("failed to marshal spec for hashing: %w", err)}
 			continue
 		}
-		f := fmt.Sprintf("%x", sha256.Sum256(specBytes))[:6]
+		specBytesHash := fmt.Sprintf("%x", sha256.Sum256(specBytes))
+		f := fmt.Sprintf("%s-%s", clusterSettingSpec.Cloud.DatacenterName[:6], specBytesHash[:6])
 		dedupKey := fmt.Sprintf("k8c-%s-%s", f, strings.ReplaceAll(job.kubeVersion.Version.String(), ".", "-"))
 
 		results <- clusterResult{
@@ -261,7 +261,8 @@ func buildNewClusters(
 	rootCtx context.Context,
 	versions []*version.Version,
 	clusterModifiers []settings.ClusterSpecModifier,
-	defaultSeedSettings map[string]kubermaticv1.Seed,
+	includedSeeds map[string]kubermaticv1.Seed,
+	excludedSeeds map[string]kubermaticv1.Seed,
 	seed *kubermaticv1.Seed,
 	opts *options.Options,
 	kkpConfig *kubermaticv1.KubermaticConfiguration,
@@ -271,7 +272,7 @@ func buildNewClusters(
 	providerConfig *providerconfig.Config,
 	clusterDescriptions []string, // NEW: descriptions to include
 	includedDescriptions []string, // NEW: descriptions to include
-) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+) (map[string]*kubermaticv1.ClusterSpec, map[string][]string, map[string]*Scenario) {
 	finalClusters := make(map[string]*kubermaticv1.ClusterSpec)
 	finalClusterDescriptions := make(map[string][]string)
 
@@ -356,20 +357,40 @@ func buildNewClusters(
 			defer close(jobs)
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
-					for dcKey := range defaultSeedSettings {
-						jobCombination := make([]settings.ClusterSpecModifier, len(mods))
-						copy(jobCombination, mods)
-						jobs <- clusterJob{
-							combination:    jobCombination,
-							dcKey:          dcKey,
-							seed:           *seed,
-							kubeVersion:    kubeVersion,
-							log:            log,
-							rootCtx:        rootCtx,
-							opts:           opts,
-							kkpConfig:      kkpConfig,
-							versionManager: versionManager,
-							providerConfig: providerConfig,
+					if groupLabel == "included" {
+						for dcKey := range includedSeeds {
+							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
+							copy(jobCombination, mods)
+							jobs <- clusterJob{
+								combination:    jobCombination,
+								dcKey:          dcKey,
+								seed:           *seed,
+								kubeVersion:    kubeVersion,
+								log:            log,
+								rootCtx:        rootCtx,
+								opts:           opts,
+								kkpConfig:      kkpConfig,
+								versionManager: versionManager,
+								providerConfig: providerConfig,
+							}
+						}
+					}
+					if groupLabel == "excluded" {
+						for dcKey := range excludedSeeds {
+							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
+							copy(jobCombination, mods)
+							jobs <- clusterJob{
+								combination:    jobCombination,
+								dcKey:          dcKey,
+								seed:           *seed,
+								kubeVersion:    kubeVersion,
+								log:            log,
+								rootCtx:        rootCtx,
+								opts:           opts,
+								kkpConfig:      kkpConfig,
+								versionManager: versionManager,
+								providerConfig: providerConfig,
+							}
 						}
 					}
 				}
@@ -430,12 +451,34 @@ func buildNewClusters(
 	includedClusters, combinedIncludedDescriptions := combineModifiers(included, "included")
 	excludedClusters, excludedDescriptions := combineModifiers(excluded, "excluded")
 
+	scenarios := map[string]*Scenario{}
+
+	for key, cluster := range includedClusters {
+		scenarios[key] = &Scenario{
+			ClusterName:  key,
+			ClusterSpec:  cluster,
+			ScenarioName: key,
+			Exclude:      false,
+			Description:  strings.Join(combinedIncludedDescriptions[key], " and "),
+		}
+	}
+
+	for key, cluster := range excludedClusters {
+		scenarios[key] = &Scenario{
+			ClusterName:  key,
+			ClusterSpec:  cluster,
+			ScenarioName: key,
+			Exclude:      true,
+			Description:  strings.Join(excludedDescriptions[key], " and "),
+		}
+	}
+
 	// Merge both maps
 	maps.Copy(finalClusters, includedClusters)
 	maps.Copy(finalClusters, excludedClusters)
 	maps.Copy(finalClusterDescriptions, combinedIncludedDescriptions)
 	maps.Copy(finalClusterDescriptions, excludedDescriptions)
-	return finalClusters, finalClusterDescriptions
+	return finalClusters, finalClusterDescriptions, scenarios
 }
 
 func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *sync.WaitGroup) {
@@ -452,7 +495,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		}
 
 		// Create a sanitized config for deduplication, ignoring certain modifier groups.
-		sanitizedRawConfig := job.providerConfig.CloudProviderSpec.Raw
+		// sanitizedRawConfig := job.providerConfig.CloudProviderSpec.Raw
 		ignoredGroups := map[string]bool{
 			"affinity": true,
 		}
@@ -466,17 +509,6 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 				modifier.Modify(ps)
 			}
 		}
-
-		// Generate the dedup key from the sanitized config AND the machine name to ensure uniqueness for the "default" case.
-		sanitizedSpecBytes, err := json.Marshal(sanitizedRawConfig)
-		if err != nil {
-			results <- scenarioResult{err: fmt.Errorf("failed to marshal sanitized spec for hashing: %w", err)}
-			continue
-		}
-		h := sha256.New()
-		h.Write(sanitizedSpecBytes)
-		h.Write([]byte(machineName))
-		dedupKey := fmt.Sprintf("%x", h.Sum(nil))
 
 		// Create a base machine spec for this group.
 		machine, err := getDefaultMachineSpec(job.rootCtx, job.log, job.providerConfig, job.opts.Secrets)
@@ -498,6 +530,17 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 				Raw: psb,
 			},
 		}
+
+		// Generate the dedup key from the sanitized config AND the machine name to ensure uniqueness for the "default" case.
+		sanitizedSpecBytes, err := json.Marshal(psb)
+		if err != nil {
+			results <- scenarioResult{err: fmt.Errorf("failed to marshal sanitized spec for hashing: %w", err)}
+			continue
+		}
+		h := sha256.New()
+		h.Write(sanitizedSpecBytes)
+		h.Write([]byte(machineName))
+		dedupKey := fmt.Sprintf("%x", h.Sum(nil))
 
 		osspec, err := userdata.DefaultOperatingSystemSpec(job.distribution, runtime.RawExtension{})
 		if err != nil {
@@ -525,11 +568,11 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 			continue
 		}
 
-		if err := p.Validate(job.rootCtx, job.log, machineSpec); err != nil {
-			job.log.Infof("Skipping invalid machine spec for %q: %v", machineName, err)
-			results <- scenarioResult{err: nil} // Skippable
-			continue
-		}
+		// if err := p.Validate(job.rootCtx, job.log, machineSpec); err != nil {
+		// 	job.log.Infof("Skipping invalid machine spec for %q: %v", machineName, err)
+		// 	results <- scenarioResult{err: nil} // Skippable
+		// 	continue
+		// }
 
 		results <- scenarioResult{
 			clusterKey:  job.clusterKey,
@@ -542,6 +585,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 }
 
 func buildNewScenarios(
+	scenarios map[string]*Scenario,
 	machineModifiers []settings.MachineSpecModifier[any],
 	newClusters map[string]*kubermaticv1.ClusterSpec,
 	opts *options.Options,
@@ -554,7 +598,13 @@ func buildNewScenarios(
 	machineDescriptions []string, // NEW: descriptions to exlclude
 	includedMachineDescription []string, // NEW: descriptions to include
 
-) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string, iter.Seq[string]) {
+) (
+	map[string]map[string]v1alpha1.MachineSpec,
+	map[string]map[string]v1alpha1.MachineSpec,
+	map[string]map[string][]string,
+	map[string]map[string][]string,
+	map[string]*Scenario,
+	iter.Seq[string]) {
 	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 	finalMachineDescriptions := make(map[string]map[string][]string)
 
@@ -695,6 +745,32 @@ func buildNewScenarios(
 	includedScenarios, includedDescriptions := combineModifiers(included, "included")
 	excludedScenarios, excludedDescriptions := combineModifiers(excluded, "excluded")
 
+	includedScenarioMds := map[string]v1alpha1.MachineSpec{}
+	excludedScenarioMds := map[string]v1alpha1.MachineSpec{}
+	for _, v := range includedScenarios {
+		includedScenarioMds = v
+		for _, md := range v {
+			r := &kubevirt.RawConfig{}
+			json.Unmarshal(md.ProviderSpec.Value.Raw, r)
+			log.Infof("Generated included scenario machine spec: %s", r.VirtualMachine.Template)
+		}
+		break
+	}
+	for _, v := range excludedScenarios {
+		excludedScenarioMds = v
+		break
+	}
+
+	for _, s := range scenarios {
+		if s.Exclude {
+			s.Machines = excludedScenarioMds
+		} else {
+			s.Machines = includedScenarioMds
+		}
+	}
+
+	// TODO: adjust title accordingly...
+
 	// Merge both maps
 	for clusterKey, deduped := range includedScenarios {
 		if _, ok := finalScenarios[clusterKey]; !ok {
@@ -735,5 +811,5 @@ func buildNewScenarios(
 		finalMachineDescriptionsSlice = maps.Keys(v)
 		break
 	}
-	return finalScenarios, finalMachineDescriptions, finalMachineDescriptionsSlice
+	return includedScenarios, excludedScenarios, includedDescriptions, excludedDescriptions, scenarios, finalMachineDescriptionsSlice
 }

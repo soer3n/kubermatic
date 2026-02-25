@@ -2,7 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
-	"time"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	"k8s.io/apimachinery/pkg/types"
@@ -21,20 +21,30 @@ var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 })
 
 var _ = Describe("KubeVirt", func() {
-	var entries map[string][]build.ScenarioInfo
-	entries, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, _ = build.GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName, providerconfig.CloudProviderKubeVirt)
+	var includedMachineDescriptions, excludedMachineDescriptions map[string]map[string][]string
+	entries, includedMachineDescriptions, excludedMachineDescriptions, seed = build.GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName, providerconfig.CloudProviderKubeVirt)
 	for name, entry := range entries {
-		Describe(name, func() {
-			BeforeEach(func() {})
-
-			for _, v := range entry {
+		Describe(fmt.Sprintf("with kubernetes version %s", entry.ClusterSpec.Version), func() {
+			for k, v := range entry.Machines {
 				label := Label("kubevirt")
-				if v.Exclude {
+				if entry.Exclude {
 					label = Label("skip")
 				}
-				It(v.Description, label, func() {
+				clusterLabel := Label(entry.ClusterName)
+				machineDescription := []string{}
+				// for k := range entry.Machines {
+				if entry.Exclude {
+					machineDescription = excludedMachineDescriptions[entry.ClusterName][k]
+
+				} else {
+					machineDescription = includedMachineDescriptions[entry.ClusterName][k]
+
+				}
+
+				// }
+				It(fmt.Sprintf("%s and %v", entry.Description, strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
-					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", name, entry[0].ClusterSpec.Cloud.DatacenterName[:8])}, cluster); err != nil {
+					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: entry.ClusterName}, cluster); err != nil {
 						log.Errorf("Failed to get cluster %s: %v", name, err)
 						Fail(fmt.Sprintf("Failed to get cluster %s: %v", name, err))
 					}
@@ -44,10 +54,10 @@ var _ = Describe("KubeVirt", func() {
 						log.Errorf("Failed to get user cluster client for cluster %s: %v", name, err)
 						Fail(fmt.Sprintf("Failed to get user cluster client for cluster %s: %v", name, err))
 					}
-					By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", v.ClusterSpec.Cloud.DatacenterName, v.ClusterSpec.Version.String()))
-					By(fmt.Sprintf("Scenario with dc %q cluster %q", v.ClusterSpec.Cloud.DatacenterName, name))
-					By(fmt.Sprintf("Setting up machine for %s %s. Scenario: %s", v.ClusterSpec.Cloud.DatacenterName, name, v.Description), func() {
-						k8cginkgo.MachineSetup(rootCtx, log, userClusterClient, name, v.ScenarioName, &v.Machine, legacyOpts)
+					By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", entry.ClusterSpec.Cloud.DatacenterName, entry.ClusterSpec.Version.String()))
+					By(fmt.Sprintf("Scenario with dc %q cluster %q", entry.ClusterSpec.Cloud.DatacenterName, name))
+					By(fmt.Sprintf("Setting up machine for %s %s. Scenario: %s", entry.ClusterSpec.Cloud.DatacenterName, name, entry.Description), func() {
+						k8cginkgo.MachineSetup(rootCtx, log, userClusterClient, name, entry.ScenarioName, &v, legacyOpts)
 					})
 
 					By(fmt.Sprintf("Machine setup done %q", name))
@@ -62,7 +72,6 @@ var _ = Describe("KubeVirt", func() {
 						}, userClusterClient, n+1)).To(BeNil())
 					})
 					By(fmt.Sprintf("Smoke tests done %q", name))
-					time.Sleep(500 * time.Millisecond)
 				})
 			}
 		})

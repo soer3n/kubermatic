@@ -44,13 +44,14 @@ type scenarioResult struct {
 	err         error
 }
 
-type ScenarioInfo struct {
-	ClusterSpec  *kubermaticv1.ClusterSpec
-	Machine      v1alpha1.MachineSpec
+type Scenario struct {
+	ClusterName  string
 	ScenarioName string
+	Description  string
 	ProjectName  string
 	Exclude      bool
-	Description  string
+	ClusterSpec  *kubermaticv1.ClusterSpec
+	Machines     map[string]v1alpha1.MachineSpec
 }
 
 type scenarioJob struct {

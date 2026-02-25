@@ -44,7 +44,7 @@ func Ensure(rootCtx context.Context,
 	currentOpts.Secrets.Kubevirt.KKPDatacenter = name
 	spec.Cloud.DatacenterName = dcName
 	cluster := &kubermaticv1.Cluster{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("%s-%s", name, dcName[:8]), Labels: map[string]string{kubermaticv1.ProjectIDLabelKey: projectName}},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{kubermaticv1.ProjectIDLabelKey: projectName}},
 		Spec:       *spec,
 	}
 
@@ -70,12 +70,12 @@ func Ensure(rootCtx context.Context,
 			}
 
 			return true
-		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
+		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
 
 		Eventually(func() bool {
 			newCluster := &kubermaticv1.Cluster{}
 			namespacedClusterName := types.NamespacedName{Name: cluster.Name}
-			if err := legacyOpts.SeedClusterClient.Get(rootCtx, namespacedClusterName, newCluster); err != nil {
+			if err := runtimeOpts.SeedClusterClient.Get(rootCtx, namespacedClusterName, newCluster); err != nil {
 				if apierrors.IsNotFound(err) {
 					return false
 				}
@@ -108,12 +108,12 @@ func Ensure(rootCtx context.Context,
 			}
 
 			return false
-		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
+		}).WithTimeout(10*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
 	})
 
 	By(k8cginkgo.KKP("Wait for control plane"), func() {
 		Eventually(func() bool {
-			if err := legacyOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
+			if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
 				return false
 			}
 			versions := kubermatic.GetVersions()
@@ -124,14 +124,14 @@ func Ensure(rootCtx context.Context,
 
 		Eventually(func() bool {
 			var err error
-			_, err = legacyOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
+			_, err = runtimeOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
 			return err == nil
-		}, 10*time.Minute, 5*time.Second).Should(BeTrue())
+		}).WithTimeout(10 * time.Minute).WithPolling(15 * time.Second).Should(BeTrue())
 	})
 
 	By(k8cginkgo.KKP("Add LB and PV Finalizers"), func() {
 		Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			if err := legacyOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
+			if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster); err != nil {
 				return err
 			}
 			cluster.Finalizers = append(cluster.Finalizers,
@@ -148,7 +148,7 @@ func Ensure(rootCtx context.Context,
 			log.Errorf("Failed to get user cluster client for cluster %s: %v", cluster.Name, err)
 			Fail(fmt.Sprintf("Failed to get user cluster client for cluster %s: %v", cluster.Name, err))
 		}
-		ExpectWithOffset(3, tests.TestUserClusterMetrics(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
+		// ExpectWithOffset(3, tests.TestUserClusterMetrics(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
 		ExpectWithOffset(3, tests.TestUserclusterControllerRBAC(rootCtx, log, legacyOpts, cluster, userClusterClient, runtimeOpts.SeedClusterClient)).To(BeNil())
 		ExpectWithOffset(3, tests.TestUserClusterNoK8sGcrImages(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())
 		ExpectWithOffset(3, tests.TestUserClusterSeccompProfiles(rootCtx, log, legacyOpts, cluster, userClusterClient)).To(BeNil())

@@ -139,7 +139,7 @@ func ResourceMachineSettings(ctx context.Context, providerConfig *providerconfig
 			generatedMachineSettings = append(generatedMachineSettings, settings)
 		}
 	}
-	return p.MachineSettings(ctx, providerConfig, namespace, secrets, resources)
+	return generatedMachineSettings
 }
 
 func GenericDatacenterSettings(ctx context.Context, providerConfig *providerconfig.Config, secrets legacytypes.Secrets) []settings.DatacenterSetting {

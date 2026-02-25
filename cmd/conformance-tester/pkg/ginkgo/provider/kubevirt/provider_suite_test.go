@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
@@ -73,6 +74,7 @@ var (
 	finalClusterDescriptions map[string][]string
 	datacenterNameMappings   map[string]string
 	seed                     *kubermaticv1.Seed
+	entries                  map[string]*build.Scenario
 	projectName              string
 )
 
@@ -163,8 +165,8 @@ func CustomFail(message string, callerSkip ...int) {
 }
 
 var _ = SynchronizedBeforeSuite(func() {
-	utils.PrepareSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters)
-
+	By("Preparing test environment and creating clusters")
+	utils.PrepareSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, entries, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters)
 }, func(data []byte) {
 	// Assign cluster name on every node
 })
@@ -175,7 +177,6 @@ var _ = SynchronizedAfterSuite(func() {
 }, func() {
 	By("Cleaning up created clusters")
 	utils.PostProcessingSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters, skipClusterDeletion)
-
 })
 
 var _ = ReportBeforeSuite(func(r Report) {})

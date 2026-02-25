@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"strings"
 	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -15,10 +14,10 @@ import (
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/cluster"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
-	"k8s.io/kubectl/pkg/util/slice"
 )
 
 func PrepareSuite(
@@ -28,6 +27,7 @@ func PrepareSuite(
 	runtimeOpts *options.RuntimeOptions,
 	opts options.Options,
 	seed *kubermaticv1.Seed,
+	entries map[string]*build.Scenario,
 	kkpConfig *kubermaticv1.KubermaticConfiguration,
 	projectName string,
 	defaultSeedSettings map[string]kubermaticv1.Seed,
@@ -59,7 +59,7 @@ func PrepareSuite(
 	})
 
 	By(k8cginkgo.KKP("Attaching datacenters to seed"), func() {
-		err := runtimeOpts.SeedClusterClient.Update(rootCtx, seed)
+		err := legacyOpts.SeedClusterClient.Update(rootCtx, seed)
 		Expect(err).NotTo(HaveOccurred(), "Failed to update seed")
 	})
 
@@ -71,90 +71,26 @@ func PrepareSuite(
 	var wg sync.WaitGroup
 	maxConcurrent := 4 // Set your desired concurrency limit
 	sem := make(chan struct{}, maxConcurrent)
-	versionSlice := []string{}
-	if len(opts.Releases) > 0 {
-		for _, v := range opts.Releases {
-			versionSlice = append(versionSlice, v)
-		}
-	} else {
-		for _, scenario := range kkpConfig.Spec.Versions.Versions {
-			versionSlice = append(versionSlice, scenario.String())
-		}
-	}
-	for i, _ := range defaultSeedSettings {
-		log.Infof("defaultSeedSettings[%d]: %+v", i, datacenterNameMappings[i])
-	}
-	for i, _ := range newClusters {
-		log.Infof("newClusters[%d]: %+v", i, finalClusterDescriptions[i])
-	}
-	for seedKey := range defaultSeedSettings {
-		exclude := false
-		if len(opts.Included.DatacenterDescriptions) > 0 {
-			exclude = true
-			for _, included := range opts.Included.DatacenterDescriptions {
-				if strings.Contains(seedKey, included) {
-					exclude = false
-					break
-				}
-			}
-		} else {
-			for _, excluded := range opts.Excluded.DatacenterDescriptions {
-				if strings.Contains(seedKey, excluded) {
-					exclude = true
-					break
-				}
-			}
-		}
-		if exclude {
+
+	for name, entry := range entries {
+		if entry.Exclude {
 			continue
 		}
-		clustersToBuild := map[string]*kubermaticv1.ClusterSpec{}
-		for name, clusterSpec := range newClusters {
-			if !slice.ContainsString(versionSlice, clusterSpec.Version.String(), nil) {
-				continue
+		clusterSpec := entry.ClusterSpec
+		log.Infof("Preparing creation of cluster %s for datacenter %s", name, clusterSpec.Cloud.DatacenterName)
+		sem <- struct{}{} // acquire a slot
+		wg.Add(1)
+		go func(name string, project string, spec *kubermaticv1.ClusterSpec) {
+			defer wg.Done()
+			defer func() { <-sem }() // release the slot
+			if !skipClusterCreation {
+				cluster.Ensure(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts)
 			}
-			clusterDesc, ok := finalClusterDescriptions[name]
-			if !ok {
-				continue
+			if skipClusterCreation && updateClusters {
+				cluster.Update(name, spec)
 			}
-			exclude = false
-			if len(opts.Included.ClusterDescriptions) > 0 {
-				exclude = true
-				for _, included := range opts.Included.ClusterDescriptions {
-					if slice.ContainsString(clusterDesc, included, nil) {
-						exclude = false
-						break
-					}
-				}
-			} else {
-				for _, excluded := range opts.Excluded.ClusterDescriptions {
-					if slice.ContainsString(clusterDesc, excluded, nil) {
-						exclude = true
-						break
-					}
-				}
-			}
-			if exclude {
-				continue
-			}
-			clustersToBuild[name] = clusterSpec
-		}
-
-		for name, clusterSpec := range clustersToBuild {
-			log.Infof("Preparing creation of cluster %s for datacenter %s", name, clusterSpec.Cloud.DatacenterName)
-			sem <- struct{}{} // acquire a slot
-			wg.Add(1)
-			go func(name string, project string, spec *kubermaticv1.ClusterSpec) {
-				defer wg.Done()
-				defer func() { <-sem }() // release the slot
-				if !skipClusterCreation {
-					cluster.Ensure(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts)
-				}
-				if skipClusterCreation && updateClusters {
-					cluster.Update(name, spec)
-				}
-			}(name, legacyOpts.KubermaticProject, clusterSpec)
-		}
+		}(name, legacyOpts.KubermaticProject, clusterSpec)
 	}
 	wg.Wait()
+	log.Infof("Finished preparing creation of clusters")
 }

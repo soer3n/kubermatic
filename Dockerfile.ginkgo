@@ -13,10 +13,10 @@ RUN go mod download
 RUN go install github.com/onsi/ginkgo/v2/ginkgo@v2.26.0
 
 # Copy source
-COPY cmd/conformance-tester/pkg/ginkgo/ .
+COPY . .
 
 # Build the ginkgo test binary
-RUN ginkgo build -o ./cmd/e2e/e2e.test ./cmd/conformance-tester/pkg/ginkgo/... 
+RUN ginkgo build -o ./cmd/e2e/e2e.test ./cmd/conformance-tester/pkg/ginkgo/provider/... 
 
 # =========================
 # Runtime stage

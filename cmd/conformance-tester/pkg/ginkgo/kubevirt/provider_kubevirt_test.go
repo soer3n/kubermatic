@@ -19,24 +19,24 @@ var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 })
 
 var _ = Describe("KubeVirt", func() {
+	// var entry []build.Scenario
 	for name, entry := range GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName) {
+		// name := name
+		// entry := entry
 		Describe(name, func() {
 			BeforeEach(func() {
 				// cluster.Ensure(rootCtx, log, name, entry[0].ClusterSpec.Cloud.DatacenterName, projectName, entry[0].ClusterSpec, legacyOpts, runtimeOpts, opts)
 			})
 
 			for _, v := range entry {
-				// desc, ok := finalMachineDescriptions[name][v.ScenarioName]
-				// if !ok {
-				// 	continue
-				// }
 				label := Label("kubevirt")
 				if v.Exclude {
 					label = Label("skip")
 				}
-				It(v.Description, label, func() {
+				clusterLabel := Label(fmt.Sprintf("cluster-%s", v.ScenarioName))
+				It(v.Description, label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
-					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: fmt.Sprintf("%s-%s", name, entry[0].ClusterSpec.Cloud.DatacenterName[:8])}, cluster); err != nil {
+					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: name}, cluster); err != nil {
 						log.Errorf("Failed to get cluster %s: %v", name, err)
 						Fail(fmt.Sprintf("Failed to get cluster %s: %v", name, err))
 					}
