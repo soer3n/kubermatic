@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -484,15 +485,8 @@ func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case keyEnter:
 		// Proceed to next stage if at least one provider is selected
-		hasSelection := false
-		var selectedProviders []string
-		for _, provider := range m.providers {
-			if provider.Selected {
-				hasSelection = true
-				selectedProviders = append(selectedProviders, provider.DisplayName)
-			}
-		}
-		if hasSelection {
+		selectedProviders := selectedProviderNames(m.providers)
+		if len(selectedProviders) > 0 {
 			// Initialize distribution selection based on selected providers
 			m.distributionSelection = initializeDistributionSelection(selectedProviders)
 			m.stage = stageDistributionSelection
@@ -613,142 +607,101 @@ func (m Model) getMaxFieldIndexForProvider(provider Provider) int {
 	return baseFields
 }
 
-// updateProviderCredentialField updates a specific credential field for a provider.
-func (m Model) updateProviderCredentialField(provider Provider, fieldIndex int, msg tea.KeyMsg) (Provider, tea.Cmd) {
+type credentialFieldAction int
+
+const (
+	credentialFieldActionUpdate credentialFieldAction = iota
+	credentialFieldActionBlur
+	credentialFieldActionFocus
+)
+
+func applyTextInputFieldAction(fields []*textinput.Model, action credentialFieldAction, fieldIndex int, msg tea.KeyMsg) tea.Cmd {
+	if len(fields) == 0 {
+		return nil
+	}
+
+	switch action {
+	case credentialFieldActionUpdate:
+		if fieldIndex < 1 || fieldIndex > len(fields) {
+			return nil
+		}
+		updated, cmd := fields[fieldIndex-1].Update(msg)
+		*fields[fieldIndex-1] = updated
+		return cmd
+	case credentialFieldActionBlur:
+		for _, field := range fields {
+			field.Blur()
+		}
+	case credentialFieldActionFocus:
+		if fieldIndex < 1 || fieldIndex > len(fields) {
+			return nil
+		}
+		fields[fieldIndex-1].Focus()
+	}
+
+	return nil
+}
+
+func (m Model) applyProviderCredentialFieldAction(provider Provider, fieldIndex int, msg tea.KeyMsg, action credentialFieldAction) (Provider, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch creds := provider.Credentials.(type) {
 	case AWSCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.AccessKeyID, cmd = creds.AccessKeyID.Update(msg)
-		case 2:
-			creds.SecretAccessKey, cmd = creds.SecretAccessKey.Update(msg)
-		case 3:
-			creds.AssumeRoleARN, cmd = creds.AssumeRoleARN.Update(msg)
-		case 4:
-			creds.AssumeRoleExternalID, cmd = creds.AssumeRoleExternalID.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.AccessKeyID, &creds.SecretAccessKey, &creds.AssumeRoleARN, &creds.AssumeRoleExternalID}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case AzureCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.TenantID, cmd = creds.TenantID.Update(msg)
-		case 2:
-			creds.SubscriptionID, cmd = creds.SubscriptionID.Update(msg)
-		case 3:
-			creds.ClientID, cmd = creds.ClientID.Update(msg)
-		case 4:
-			creds.ClientSecret, cmd = creds.ClientSecret.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.TenantID, &creds.SubscriptionID, &creds.ClientID, &creds.ClientSecret}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case GCPCredentials:
-		if fieldIndex == 1 {
-			creds.ServiceAccount, cmd = creds.ServiceAccount.Update(msg)
-			provider.Credentials = creds
-		}
-
+		fields := []*textinput.Model{&creds.ServiceAccount}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
+		provider.Credentials = creds
 	case AlibabaCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.AccessKeyID, cmd = creds.AccessKeyID.Update(msg)
-		case 2:
-			creds.AccessKeySecret, cmd = creds.AccessKeySecret.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.AccessKeyID, &creds.AccessKeySecret}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case AnexiaCredentials:
-		if fieldIndex == 1 {
-			creds.Token, cmd = creds.Token.Update(msg)
-			provider.Credentials = creds
-		}
-
+		fields := []*textinput.Model{&creds.Token}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
+		provider.Credentials = creds
 	case DigitalOceanCredentials:
-		if fieldIndex == 1 {
-			creds.Token, cmd = creds.Token.Update(msg)
-			provider.Credentials = creds
-		}
-
+		fields := []*textinput.Model{&creds.Token}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
+		provider.Credentials = creds
 	case HetznerCredentials:
-		if fieldIndex == 1 {
-			creds.Token, cmd = creds.Token.Update(msg)
-			provider.Credentials = creds
-		}
-
+		fields := []*textinput.Model{&creds.Token}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
+		provider.Credentials = creds
 	case KubeVirtCredentials:
-		if fieldIndex == 1 {
-			creds.Kubeconfig, cmd = creds.Kubeconfig.Update(msg)
-			provider.Credentials = creds
-		}
-
+		fields := []*textinput.Model{&creds.Kubeconfig}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
+		provider.Credentials = creds
 	case NutanixCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username, cmd = creds.Username.Update(msg)
-		case 2:
-			creds.Password, cmd = creds.Password.Update(msg)
-		case 3:
-			creds.ClusterName, cmd = creds.ClusterName.Update(msg)
-		case 4:
-			creds.ProxyURL, cmd = creds.ProxyURL.Update(msg)
-		case 5:
-			creds.CSIUsername, cmd = creds.CSIUsername.Update(msg)
-		case 6:
-			creds.CSIPassword, cmd = creds.CSIPassword.Update(msg)
-		case 7:
-			creds.CSIEndpoint, cmd = creds.CSIEndpoint.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.Username, &creds.Password, &creds.ClusterName, &creds.ProxyURL, &creds.CSIUsername, &creds.CSIPassword, &creds.CSIEndpoint}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case OpenStackCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username, cmd = creds.Username.Update(msg)
-		case 2:
-			creds.Password, cmd = creds.Password.Update(msg)
-		case 3:
-			creds.Project, cmd = creds.Project.Update(msg)
-		case 4:
-			creds.ProjectID, cmd = creds.ProjectID.Update(msg)
-		case 5:
-			creds.Domain, cmd = creds.Domain.Update(msg)
-		case 6:
-			creds.ApplicationCredentialID, cmd = creds.ApplicationCredentialID.Update(msg)
-		case 7:
-			creds.ApplicationCredentialSecret, cmd = creds.ApplicationCredentialSecret.Update(msg)
-		case 8:
-			creds.Token, cmd = creds.Token.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.Username, &creds.Password, &creds.Project, &creds.ProjectID, &creds.Domain, &creds.ApplicationCredentialID, &creds.ApplicationCredentialSecret, &creds.Token}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case VSphereCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username, cmd = creds.Username.Update(msg)
-		case 2:
-			creds.Password, cmd = creds.Password.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.Username, &creds.Password}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
-
 	case VMwareCloudDirectorCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username, cmd = creds.Username.Update(msg)
-		case 2:
-			creds.Password, cmd = creds.Password.Update(msg)
-		case 3:
-			creds.APIToken, cmd = creds.APIToken.Update(msg)
-		case 4:
-			creds.Organization, cmd = creds.Organization.Update(msg)
-		case 5:
-			creds.VDC, cmd = creds.VDC.Update(msg)
-		}
+		fields := []*textinput.Model{&creds.Username, &creds.Password, &creds.APIToken, &creds.Organization, &creds.VDC}
+		cmd = applyTextInputFieldAction(fields, action, fieldIndex, msg)
 		provider.Credentials = creds
 	}
 
 	return provider, cmd
+}
+
+// updateProviderCredentialField updates a specific credential field for a provider.
+func (m Model) updateProviderCredentialField(provider Provider, fieldIndex int, msg tea.KeyMsg) (Provider, tea.Cmd) {
+	return m.applyProviderCredentialFieldAction(provider, fieldIndex, msg, credentialFieldActionUpdate)
 }
 
 // updateProviderFocus manages focus state for provider selection.
@@ -778,193 +731,13 @@ func (m *Model) updateProviderFocus() {
 
 // blurAllProviderFields blurs all credential fields in a provider.
 func (m Model) blurAllProviderFields(provider Provider) Provider {
-	switch creds := provider.Credentials.(type) {
-	case AWSCredentials:
-		creds.AccessKeyID.Blur()
-		creds.SecretAccessKey.Blur()
-		creds.AssumeRoleARN.Blur()
-		creds.AssumeRoleExternalID.Blur()
-		provider.Credentials = creds
-	case AzureCredentials:
-		creds.TenantID.Blur()
-		creds.SubscriptionID.Blur()
-		creds.ClientID.Blur()
-		creds.ClientSecret.Blur()
-		provider.Credentials = creds
-	case GCPCredentials:
-		creds.ServiceAccount.Blur()
-		provider.Credentials = creds
-	case AlibabaCredentials:
-		creds.AccessKeyID.Blur()
-		creds.AccessKeySecret.Blur()
-		provider.Credentials = creds
-	case AnexiaCredentials:
-		creds.Token.Blur()
-		provider.Credentials = creds
-	case DigitalOceanCredentials:
-		creds.Token.Blur()
-		provider.Credentials = creds
-	case HetznerCredentials:
-		creds.Token.Blur()
-		provider.Credentials = creds
-	case KubeVirtCredentials:
-		creds.Kubeconfig.Blur()
-		provider.Credentials = creds
-	case NutanixCredentials:
-		creds.Username.Blur()
-		creds.Password.Blur()
-		creds.ClusterName.Blur()
-		creds.ProxyURL.Blur()
-		creds.CSIUsername.Blur()
-		creds.CSIPassword.Blur()
-		creds.CSIEndpoint.Blur()
-		provider.Credentials = creds
-	case OpenStackCredentials:
-		creds.Username.Blur()
-		creds.Password.Blur()
-		creds.Project.Blur()
-		creds.ProjectID.Blur()
-		creds.Domain.Blur()
-		creds.ApplicationCredentialID.Blur()
-		creds.ApplicationCredentialSecret.Blur()
-		creds.Token.Blur()
-		provider.Credentials = creds
-	case VSphereCredentials:
-		creds.Username.Blur()
-		creds.Password.Blur()
-		provider.Credentials = creds
-	case VMwareCloudDirectorCredentials:
-		creds.Username.Blur()
-		creds.Password.Blur()
-		creds.APIToken.Blur()
-		creds.Organization.Blur()
-		creds.VDC.Blur()
-		provider.Credentials = creds
-	}
+	provider, _ = m.applyProviderCredentialFieldAction(provider, 0, tea.KeyMsg{}, credentialFieldActionBlur)
 	return provider
 }
 
 // focusProviderField focuses a specific field in provider credentials.
 func (m Model) focusProviderField(provider Provider, fieldIndex int) Provider {
-	switch creds := provider.Credentials.(type) {
-	case AWSCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.AccessKeyID.Focus()
-		case 2:
-			creds.SecretAccessKey.Focus()
-		case 3:
-			creds.AssumeRoleARN.Focus()
-		case 4:
-			creds.AssumeRoleExternalID.Focus()
-		}
-		provider.Credentials = creds
-	case AzureCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.TenantID.Focus()
-		case 2:
-			creds.SubscriptionID.Focus()
-		case 3:
-			creds.ClientID.Focus()
-		case 4:
-			creds.ClientSecret.Focus()
-		}
-		provider.Credentials = creds
-	case GCPCredentials:
-		if fieldIndex == 1 {
-			creds.ServiceAccount.Focus()
-			provider.Credentials = creds
-		}
-	case AlibabaCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.AccessKeyID.Focus()
-		case 2:
-			creds.AccessKeySecret.Focus()
-		}
-		provider.Credentials = creds
-	case AnexiaCredentials:
-		if fieldIndex == 1 {
-			creds.Token.Focus()
-			provider.Credentials = creds
-		}
-	case DigitalOceanCredentials:
-		if fieldIndex == 1 {
-			creds.Token.Focus()
-			provider.Credentials = creds
-		}
-	case HetznerCredentials:
-		if fieldIndex == 1 {
-			creds.Token.Focus()
-			provider.Credentials = creds
-		}
-	case KubeVirtCredentials:
-		if fieldIndex == 1 {
-			creds.Kubeconfig.Focus()
-			provider.Credentials = creds
-		}
-	case NutanixCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username.Focus()
-		case 2:
-			creds.Password.Focus()
-		case 3:
-			creds.ClusterName.Focus()
-		case 4:
-			creds.ProxyURL.Focus()
-		case 5:
-			creds.CSIUsername.Focus()
-		case 6:
-			creds.CSIPassword.Focus()
-		case 7:
-			creds.CSIEndpoint.Focus()
-		}
-		provider.Credentials = creds
-	case OpenStackCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username.Focus()
-		case 2:
-			creds.Password.Focus()
-		case 3:
-			creds.Project.Focus()
-		case 4:
-			creds.ProjectID.Focus()
-		case 5:
-			creds.Domain.Focus()
-		case 6:
-			creds.ApplicationCredentialID.Focus()
-		case 7:
-			creds.ApplicationCredentialSecret.Focus()
-		case 8:
-			creds.Token.Focus()
-		}
-		provider.Credentials = creds
-	case VSphereCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username.Focus()
-		case 2:
-			creds.Password.Focus()
-		}
-		provider.Credentials = creds
-	case VMwareCloudDirectorCredentials:
-		switch fieldIndex {
-		case 1:
-			creds.Username.Focus()
-		case 2:
-			creds.Password.Focus()
-		case 3:
-			creds.APIToken.Focus()
-		case 4:
-			creds.Organization.Focus()
-		case 5:
-			creds.VDC.Focus()
-		}
-		provider.Credentials = creds
-	}
+	provider, _ = m.applyProviderCredentialFieldAction(provider, fieldIndex, tea.KeyMsg{}, credentialFieldActionFocus)
 	return provider
 }
 
@@ -1035,40 +808,14 @@ func (m *Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 		return m, nil
 
 	case keyEnter:
-		// Check if at least one distribution is selected
-		hasSelection := false
-		for _, selected := range m.distributionSelection.Selected {
-			if selected {
-				hasSelection = true
-				break
-			}
-		}
-
-		if hasSelection {
+		if hasAnySelected(m.distributionSelection.Selected) {
 			// Get all selected providers to initialize datacenter settings
-			var selectedProviders []string
-			for _, provider := range m.providers {
-				if provider.Selected {
-					selectedProviders = append(selectedProviders, provider.DisplayName)
-				}
-			}
+			selectedProviders := selectedProviderNames(m.providers)
 
 			// Initialize datacenter settings for all selected providers
 			if len(selectedProviders) > 0 {
 				m.datacenterSettingsSelection = initializeDatacenterSettingsSelection(selectedProviders)
-
-				// Trigger lazy loading for all providers
-				var cmds []tea.Cmd
-				for _, provider := range selectedProviders {
-					// Set loading state
-					if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
-						ps.LoadingSettings = true
-						ps.SettingsFetchError = ""
-						m.datacenterSettingsSelection.ProviderSettings[provider] = ps
-					}
-					// Trigger fetch
-					cmds = append(cmds, m.fetchDatacenterSettingsForProvider(provider))
-				}
+				cmds := m.buildDatacenterSettingsFetchCmds(selectedProviders)
 
 				m.stage = stageDatacenterSettingsSelection // Move to next stage
 				return m, tea.Batch(cmds...)
@@ -1133,121 +880,156 @@ func (m Model) getDistributionFocusedDistribution() string {
 	return ""
 }
 
-// handleDatacenterSettingsSelection handles input for the datacenter settings selection stage.
-func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+// region SettingsTreeHelpers
+
+func settingGroupKey(provider, group string) string {
+	return fmt.Sprintf("%s:%s", provider, group)
+}
+
+func settingOptionKey(provider, group, option string) string {
+	return fmt.Sprintf("%s:%s:%s", provider, group, option)
+}
+
+func isProviderHeaderFocused(provider string, groupIdx int) bool {
+	return provider != "" && groupIdx == -1
+}
+
+// getFocusedSettingItem resolves the currently focused settings-tree item.
+// It returns (provider, -1) for provider headers and (provider, groupIdx) for group headers.
+// When respectGroupExpansion is true, option rows are counted only if group.IsExpanded is true.
+func getFocusedSettingItem(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int, respectGroupExpansion bool) (string, int) {
+	currentIndex := 0
+	for _, provider := range providers {
+		if currentIndex == focusedIndex {
+			return provider, -1
+		}
+		currentIndex++
+
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == focusedIndex {
+					return provider, groupIdx
+				}
+				currentIndex++
+
+				if !respectGroupExpansion || group.IsExpanded {
+					currentIndex += len(group.Options)
+				}
+			}
+		}
+	}
+
+	return "", -1
+}
+
+// getFocusedSettingOption resolves the currently focused item including option rows.
+// It returns (provider, -1, -1) for provider headers, (provider, groupIdx, -1) for group headers,
+// and (provider, groupIdx, optionIdx) for option rows.
+func getFocusedSettingOption(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int) (string, int, int) {
+	currentIndex := 0
+	for _, provider := range providers {
+		if currentIndex == focusedIndex {
+			return provider, -1, -1
+		}
+		currentIndex++
+
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == focusedIndex {
+					return provider, groupIdx, -1
+				}
+				currentIndex++
+
+				for optionIdx := range group.Options {
+					if currentIndex == focusedIndex {
+						return provider, groupIdx, optionIdx
+					}
+					currentIndex++
+				}
+			}
+		}
+	}
+
+	return "", -1, -1
+}
+
+// endregion SettingsTreeHelpers
+
+// Shared settings-stage helpers.
+// region SettingsStageHelpers
+func moveSelectionFocus(focused *int, max int, key string) {
+	switch key {
 	case keyUp:
-		if m.datacenterSettingsSelection.FocusedIndex > 0 {
-			m.datacenterSettingsSelection.FocusedIndex--
+		if *focused > 0 {
+			*focused--
 		}
-		return m, nil
-
 	case keyDown:
-		maxIndex := m.getDatacenterMaxFocusIndex()
-		if m.datacenterSettingsSelection.FocusedIndex < maxIndex {
-			m.datacenterSettingsSelection.FocusedIndex++
+		if *focused < max {
+			*focused++
 		}
-		return m, nil
+	}
+}
 
-	case keyRight:
-		// Expand provider
-		provider, groupIdx := m.getDatacenterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - expand provider
-			m.datacenterSettingsSelection.ExpandedProviders[provider] = true
-		}
-		return m, nil
+func toggleFocusedSetting(groups []SettingGroup, selected map[string]bool, selectedGroups map[string]bool, provider string, groupIdx, optionIdx int) {
+	if groupIdx < 0 || groupIdx >= len(groups) {
+		return
+	}
 
-	case keyLeft:
-		// Collapse provider
-		provider, groupIdx := m.getDatacenterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - collapse provider
-			m.datacenterSettingsSelection.ExpandedProviders[provider] = false
-		}
-		return m, nil
+	group := groups[groupIdx]
+	groupKey := settingGroupKey(provider, group.Key)
 
-	case keySpace:
-		// Check if focused on provider header
-		provider, groupIdx := m.getDatacenterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - ignore
-			return m, nil
+	if optionIdx == -1 {
+		if len(group.Options) == 0 {
+			selectedGroups[groupKey] = !selectedGroups[groupKey]
+			return
 		}
 
-		// Check if focused on setting group or option
-		provider, groupIdx, optionIdx := m.getDatacenterFocusedOption()
-		if provider == "" {
-			return m, nil
-		}
-
-		groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-		if groupIdx >= len(groups) {
-			return m, nil
-		}
-
-		group := groups[groupIdx]
-		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-
-		if optionIdx == -1 {
-			// Focused on setting group
-			if len(group.Options) == 0 {
-				// No options - toggle the group itself as a boolean flag
-				currentState := m.datacenterSettingsSelection.SelectedGroups[groupKey]
-				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !currentState
-			} else {
-				// Has options - toggle all options
-				allSelected := true
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					if !m.datacenterSettingsSelection.Selected[optionKey] {
-						allSelected = false
-						break
-					}
-				}
-
-				// Toggle all options
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					m.datacenterSettingsSelection.Selected[optionKey] = !allSelected
-				}
-				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
-			}
-		} else {
-			// Focused on individual option - toggle it
-			if optionIdx >= len(group.Options) {
-				return m, nil
-			}
-			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
-			m.datacenterSettingsSelection.Selected[optionKey] = !m.datacenterSettingsSelection.Selected[optionKey]
-
-			// Update group selection state
-			allSelected := true
-			for _, option := range group.Options {
-				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-				if !m.datacenterSettingsSelection.Selected[optKey] {
-					allSelected = false
-					break
-				}
-			}
-			m.datacenterSettingsSelection.SelectedGroups[groupKey] = allSelected
-		}
-		return m, nil
-
-	case keySelectAll:
-		// Check if all options are selected
 		allSelected := true
-		for _, provider := range m.datacenterSettingsSelection.Providers {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					if !m.datacenterSettingsSelection.Selected[selectionKey] {
-						allSelected = false
-						break
-					}
-				}
-				if !allSelected {
+		for _, option := range group.Options {
+			optionKey := settingOptionKey(provider, group.Key, option)
+			if !selected[optionKey] {
+				allSelected = false
+				break
+			}
+		}
+
+		for _, option := range group.Options {
+			optionKey := settingOptionKey(provider, group.Key, option)
+			selected[optionKey] = !allSelected
+		}
+		selectedGroups[groupKey] = !allSelected
+		return
+	}
+
+	if optionIdx >= len(group.Options) {
+		return
+	}
+
+	optionKey := settingOptionKey(provider, group.Key, group.Options[optionIdx])
+	selected[optionKey] = !selected[optionKey]
+
+	allSelected := true
+	for _, option := range group.Options {
+		optKey := settingOptionKey(provider, group.Key, option)
+		if !selected[optKey] {
+			allSelected = false
+			break
+		}
+	}
+	selectedGroups[groupKey] = allSelected
+}
+
+func toggleAllSettings(providers []string, settingsByProvider map[string][]SettingGroup, selected map[string]bool, selectedGroups map[string]bool) {
+	allSelected := true
+	for _, provider := range providers {
+		groups := settingsByProvider[provider]
+		for _, group := range groups {
+			for _, option := range group.Options {
+				selectionKey := settingOptionKey(provider, group.Key, option)
+				if !selected[selectionKey] {
+					allSelected = false
 					break
 				}
 			}
@@ -1255,29 +1037,201 @@ func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, te
 				break
 			}
 		}
+		if !allSelected {
+			break
+		}
+	}
 
-		// Toggle all options and groups
-		for _, provider := range m.datacenterSettingsSelection.Providers {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
+	for _, provider := range providers {
+		groups := settingsByProvider[provider]
+		for _, group := range groups {
+			groupKey := settingGroupKey(provider, group.Key)
+			for _, option := range group.Options {
+				selectionKey := settingOptionKey(provider, group.Key, option)
+				selected[selectionKey] = !allSelected
+			}
+			selectedGroups[groupKey] = !allSelected
+		}
+	}
+}
+
+func getSettingsMaxFocusIndex(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool) int {
+	count := 0
+	for _, provider := range providers {
+		count++ // Provider header
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
 			for _, group := range groups {
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					m.datacenterSettingsSelection.Selected[selectionKey] = !allSelected
-				}
-				m.datacenterSettingsSelection.SelectedGroups[groupKey] = !allSelected
+				count++                     // Setting group header
+				count += len(group.Options) // Options (always shown)
 			}
 		}
-		return m, nil
+	}
+	return count - 1
+}
 
+func setProviderExpanded(provider string, groupIdx int, expandedProviders map[string]bool, expanded bool) {
+	if provider != "" && groupIdx == -1 {
+		expandedProviders[provider] = expanded
+	}
+}
+
+func selectedProviderNames(providers []Provider) []string {
+	selectedProviders := make([]string, 0)
+	for _, provider := range providers {
+		if provider.Selected {
+			selectedProviders = append(selectedProviders, provider.DisplayName)
+		}
+	}
+	return selectedProviders
+}
+
+func hasAnySelected(selection map[string]bool) bool {
+	for _, selected := range selection {
+		if selected {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSharedSettingsKeys processes the common settings-stage keys:
+// up/down, left/right, space and select-all.
+// It returns true when the key was handled.
+func handleSharedSettingsKeys(
+	key string,
+	focusedIndex *int,
+	maxIndex int,
+	getFocusedItem func() (string, int),
+	getFocusedOption func() (string, int, int),
+	expandedProviders map[string]bool,
+	providers []string,
+	settingsByProvider map[string][]SettingGroup,
+	selected map[string]bool,
+	selectedGroups map[string]bool,
+) bool {
+	switch key {
+	case keyUp, keyDown:
+		moveSelectionFocus(focusedIndex, maxIndex, key)
+		return true
+	case keyRight:
+		provider, groupIdx := getFocusedItem()
+		setProviderExpanded(provider, groupIdx, expandedProviders, true)
+		return true
+	case keyLeft:
+		provider, groupIdx := getFocusedItem()
+		setProviderExpanded(provider, groupIdx, expandedProviders, false)
+		return true
+	case keySpace:
+		provider, groupIdx := getFocusedItem()
+		if isProviderHeaderFocused(provider, groupIdx) {
+			return true
+		}
+
+		provider, groupIdx, optionIdx := getFocusedOption()
+		if provider == "" {
+			return true
+		}
+
+		groups := settingsByProvider[provider]
+		toggleFocusedSetting(groups, selected, selectedGroups, provider, groupIdx, optionIdx)
+		return true
+	case keySelectAll:
+		toggleAllSettings(providers, settingsByProvider, selected, selectedGroups)
+		return true
+	}
+
+	return false
+}
+
+// endregion SettingsStageHelpers
+
+// Stage transition helpers (initialize loading state + fetch commands).
+// region StageTransitionHelpers
+func (m *Model) buildDatacenterSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(selectedProviders))
+	for _, provider := range selectedProviders {
+		if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
+			ps.LoadingSettings = true
+			ps.SettingsFetchError = ""
+			m.datacenterSettingsSelection.ProviderSettings[provider] = ps
+		}
+		cmds = append(cmds, m.fetchDatacenterSettingsForProvider(provider))
+	}
+	return cmds
+}
+
+func (m *Model) buildMachineSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(selectedProviders))
+	for _, provider := range selectedProviders {
+		if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
+			ps.LoadingSettings = true
+			ps.SettingsFetchError = ""
+			m.machineDeploymentSettingsSelection.ProviderSettings[provider] = ps
+		}
+		cmds = append(cmds, m.fetchMachineSettingsForProvider(provider))
+	}
+	return cmds
+}
+
+// endregion StageTransitionHelpers
+
+// Execution log helpers.
+// region ExecutionLogHelpers
+func (m *Model) refreshLogsViewport() {
+	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+	m.Review.Viewport.GotoBottom()
+}
+
+func (m *Model) appendLogLine(line string) {
+	m.logs = append(m.logs, line)
+	m.refreshLogsViewport()
+}
+
+func (m *Model) appendNonEmptyOutput(output string) {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if line != "" {
+			m.logs = append(m.logs, line)
+		}
+	}
+	m.refreshLogsViewport()
+}
+
+func (m *Model) startExecutionCancellation() tea.Cmd {
+	m.executionCancelling = true
+	m.executionError = "Test execution cancelled by user"
+	m.quitConfirmVisible = false
+	m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
+	if m.Review.Viewport.Width > 0 {
+		m.refreshLogsViewport()
+	}
+	return m.cleanupTestExecution()
+}
+
+// endregion ExecutionLogHelpers
+
+// handleDatacenterSettingsSelection handles input for the datacenter settings selection stage.
+func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handleSharedSettingsKeys(
+		msg.String(),
+		&m.datacenterSettingsSelection.FocusedIndex,
+		m.getDatacenterMaxFocusIndex(),
+		m.getDatacenterFocusedItem,
+		m.getDatacenterFocusedOption,
+		m.datacenterSettingsSelection.ExpandedProviders,
+		m.datacenterSettingsSelection.Providers,
+		m.datacenterSettingsSelection.SettingsByProvider,
+		m.datacenterSettingsSelection.Selected,
+		m.datacenterSettingsSelection.SelectedGroups,
+	) {
+		return m, nil
+	}
+
+	switch msg.String() {
 	case keyEnter:
 		// Get all selected providers to initialize cluster settings
-		var selectedProviders []string
-		for _, provider := range m.providers {
-			if provider.Selected {
-				selectedProviders = append(selectedProviders, provider.DisplayName)
-			}
-		}
+		selectedProviders := selectedProviderNames(m.providers)
 
 		// Initialize cluster settings for the selected providers
 		if len(selectedProviders) > 0 {
@@ -1299,243 +1253,64 @@ func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, te
 
 // getDatacenterMaxFocusIndex returns the maximum focus index for datacenter settings.
 func (m Model) getDatacenterMaxFocusIndex() int {
-	count := 0
-	for _, provider := range m.datacenterSettingsSelection.Providers {
-		count++ // Provider header
-		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				count++                     // Setting group header
-				count += len(group.Options) // Options (always shown)
-			}
-		}
-	}
-	return count - 1
+	return getSettingsMaxFocusIndex(
+		m.datacenterSettingsSelection.Providers,
+		m.datacenterSettingsSelection.SettingsByProvider,
+		m.datacenterSettingsSelection.ExpandedProviders,
+	)
 }
 
 // getDatacenterFocusedItem returns (provider, groupIdx) for the focused item.
 // Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
 // (provider, groupIdx) if on setting group.
 func (m Model) getDatacenterFocusedItem() (string, int) {
-	currentIndex := 0
-	for _, provider := range m.datacenterSettingsSelection.Providers {
-		if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
-			return provider, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
-					return provider, groupIdx // On setting group
-				}
-				currentIndex++
-
-				if group.IsExpanded {
-					currentIndex += len(group.Options) // Skip options
-				}
-			}
-		}
-	}
-	return "", -1
+	return getFocusedSettingItem(
+		m.datacenterSettingsSelection.Providers,
+		m.datacenterSettingsSelection.SettingsByProvider,
+		m.datacenterSettingsSelection.ExpandedProviders,
+		m.datacenterSettingsSelection.FocusedIndex,
+		true,
+	)
 }
 
 // getDatacenterFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
 // Returns ("", -1, -1) if not focused on an option.
 func (m Model) getDatacenterFocusedOption() (string, int, int) {
-	currentIndex := 0
-	for _, provider := range m.datacenterSettingsSelection.Providers {
-		// Provider header
-		if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
-			return provider, -1, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.datacenterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				// Group header
-				if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
-					return provider, groupIdx, -1 // On setting group
-				}
-				currentIndex++
-
-				// Options (always shown since IsExpanded is always true)
-				for optionIdx := range group.Options {
-					if currentIndex == m.datacenterSettingsSelection.FocusedIndex {
-						return provider, groupIdx, optionIdx
-					}
-					currentIndex++
-				}
-			}
-		}
-	}
-	return "", -1, -1
+	return getFocusedSettingOption(
+		m.datacenterSettingsSelection.Providers,
+		m.datacenterSettingsSelection.SettingsByProvider,
+		m.datacenterSettingsSelection.ExpandedProviders,
+		m.datacenterSettingsSelection.FocusedIndex,
+	)
 }
 
 // handleClusterSettingsSelection handles input for the cluster settings selection stage.
 func (m *Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handleSharedSettingsKeys(
+		msg.String(),
+		&m.clusterSettingsSelection.FocusedIndex,
+		m.getClusterMaxFocusIndex(),
+		m.getClusterFocusedItem,
+		m.getClusterFocusedOption,
+		m.clusterSettingsSelection.ExpandedProviders,
+		m.clusterSettingsSelection.Providers,
+		m.clusterSettingsSelection.SettingsByProvider,
+		m.clusterSettingsSelection.Selected,
+		m.clusterSettingsSelection.SelectedGroups,
+	) {
+		return m, nil
+	}
+
 	switch msg.String() {
-	case keyUp:
-		if m.clusterSettingsSelection.FocusedIndex > 0 {
-			m.clusterSettingsSelection.FocusedIndex--
-		}
-		return m, nil
-
-	case keyDown:
-		maxIndex := m.getClusterMaxFocusIndex()
-		if m.clusterSettingsSelection.FocusedIndex < maxIndex {
-			m.clusterSettingsSelection.FocusedIndex++
-		}
-		return m, nil
-
-	case keyRight:
-		// Expand provider
-		provider, groupIdx := m.getClusterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - expand provider
-			m.clusterSettingsSelection.ExpandedProviders[provider] = true
-		}
-		return m, nil
-
-	case keyLeft:
-		// Collapse provider
-		provider, groupIdx := m.getClusterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - collapse provider
-			m.clusterSettingsSelection.ExpandedProviders[provider] = false
-		}
-		return m, nil
-
-	case keySpace:
-		// Check if focused on provider header
-		provider, groupIdx := m.getClusterFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - ignore
-			return m, nil
-		}
-
-		// Check if focused on setting group or option
-		provider, groupIdx, optionIdx := m.getClusterFocusedOption()
-		if provider == "" {
-			return m, nil
-		}
-
-		groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-		if groupIdx >= len(groups) {
-			return m, nil
-		}
-
-		group := groups[groupIdx]
-		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-
-		if optionIdx == -1 {
-			// Focused on setting group
-			if len(group.Options) == 0 {
-				// No options - toggle the group itself as a boolean flag
-				currentState := m.clusterSettingsSelection.SelectedGroups[groupKey]
-				m.clusterSettingsSelection.SelectedGroups[groupKey] = !currentState
-			} else {
-				// Has options - toggle all options
-				allSelected := true
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					if !m.clusterSettingsSelection.Selected[optionKey] {
-						allSelected = false
-						break
-					}
-				}
-
-				// Toggle all options
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					m.clusterSettingsSelection.Selected[optionKey] = !allSelected
-				}
-				m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
-			}
-		} else {
-			// Focused on individual option - toggle it
-			if optionIdx >= len(group.Options) {
-				return m, nil
-			}
-			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
-			m.clusterSettingsSelection.Selected[optionKey] = !m.clusterSettingsSelection.Selected[optionKey]
-
-			// Update group selection state
-			allSelected := true
-			for _, option := range group.Options {
-				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-				if !m.clusterSettingsSelection.Selected[optKey] {
-					allSelected = false
-					break
-				}
-			}
-			m.clusterSettingsSelection.SelectedGroups[groupKey] = allSelected
-		}
-		return m, nil
-
-	case keySelectAll:
-		// Check if all options are selected
-		allSelected := true
-		for _, provider := range m.clusterSettingsSelection.Providers {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					if !m.clusterSettingsSelection.Selected[selectionKey] {
-						allSelected = false
-						break
-					}
-				}
-				if !allSelected {
-					break
-				}
-			}
-			if !allSelected {
-				break
-			}
-		}
-
-		// Toggle all options and groups
-		for _, provider := range m.clusterSettingsSelection.Providers {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					m.clusterSettingsSelection.Selected[selectionKey] = !allSelected
-				}
-				m.clusterSettingsSelection.SelectedGroups[groupKey] = !allSelected
-			}
-		}
-		return m, nil
-
 	case keyEnter:
 		// Get all selected providers to initialize machine deployment settings
-		var selectedProviders []string
-		for _, provider := range m.providers {
-			if provider.Selected {
-				selectedProviders = append(selectedProviders, provider.DisplayName)
-			}
-		}
+		selectedProviders := selectedProviderNames(m.providers)
 
 		// Initialize machine deployment settings for the selected providers
 		if len(selectedProviders) > 0 {
 			m.machineDeploymentSettingsSelection = initializeMachineDeploymentSettingsSelection(selectedProviders)
 
-			// Trigger lazy loading for all providers
-			var cmds []tea.Cmd
-			for _, provider := range selectedProviders {
-				// Set loading state
-				if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
-					ps.LoadingSettings = true
-					ps.SettingsFetchError = ""
-					m.machineDeploymentSettingsSelection.ProviderSettings[provider] = ps
-				}
-				// Trigger fetch
-				cmds = append(cmds, m.fetchMachineSettingsForProvider(provider))
-			}
+			cmds := m.buildMachineSettingsFetchCmds(selectedProviders)
 
 			// Move to next stage
 			m.stage = stageMachineDeploymentSettingsSelection
@@ -1557,216 +1332,55 @@ func (m *Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.C
 
 // getClusterMaxFocusIndex returns the maximum focus index for cluster settings.
 func (m Model) getClusterMaxFocusIndex() int {
-	count := 0
-	for _, provider := range m.clusterSettingsSelection.Providers {
-		count++ // Provider header
-		if m.clusterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				count++                     // Setting group header
-				count += len(group.Options) // Options (always shown)
-			}
-		}
-	}
-	return count - 1
+	return getSettingsMaxFocusIndex(
+		m.clusterSettingsSelection.Providers,
+		m.clusterSettingsSelection.SettingsByProvider,
+		m.clusterSettingsSelection.ExpandedProviders,
+	)
 }
 
 // getClusterFocusedItem returns (provider, groupIdx) for the focused item.
 // Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
 // (provider, groupIdx) if on setting group.
 func (m Model) getClusterFocusedItem() (string, int) {
-	currentIndex := 0
-	for _, provider := range m.clusterSettingsSelection.Providers {
-		if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-			return provider, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.clusterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-					return provider, groupIdx // On setting group
-				}
-				currentIndex++
-
-				currentIndex += len(group.Options) // Skip options
-			}
-		}
-	}
-	return "", -1
+	return getFocusedSettingItem(
+		m.clusterSettingsSelection.Providers,
+		m.clusterSettingsSelection.SettingsByProvider,
+		m.clusterSettingsSelection.ExpandedProviders,
+		m.clusterSettingsSelection.FocusedIndex,
+		false,
+	)
 }
 
 // getClusterFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
 // Returns ("", -1, -1) if not focused on an option.
 func (m Model) getClusterFocusedOption() (string, int, int) {
-	currentIndex := 0
-	for _, provider := range m.clusterSettingsSelection.Providers {
-		// Provider header
-		if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-			return provider, -1, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.clusterSettingsSelection.ExpandedProviders[provider] {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				// Group header
-				if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-					return provider, groupIdx, -1 // On setting group
-				}
-				currentIndex++
-
-				// Options (always shown since IsExpanded is always true)
-				for optionIdx := range group.Options {
-					if currentIndex == m.clusterSettingsSelection.FocusedIndex {
-						return provider, groupIdx, optionIdx
-					}
-					currentIndex++
-				}
-			}
-		}
-	}
-	return "", -1, -1
+	return getFocusedSettingOption(
+		m.clusterSettingsSelection.Providers,
+		m.clusterSettingsSelection.SettingsByProvider,
+		m.clusterSettingsSelection.ExpandedProviders,
+		m.clusterSettingsSelection.FocusedIndex,
+	)
 }
 
 // handleMachineDeploymentSettingsSelection handles input for the machine deployment settings selection stage.
 func (m *Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handleSharedSettingsKeys(
+		msg.String(),
+		&m.machineDeploymentSettingsSelection.FocusedIndex,
+		m.getMachineDeploymentMaxFocusIndex(),
+		m.getMachineDeploymentFocusedItem,
+		m.getMachineDeploymentFocusedOption,
+		m.machineDeploymentSettingsSelection.ExpandedProviders,
+		m.machineDeploymentSettingsSelection.Providers,
+		m.machineDeploymentSettingsSelection.SettingsByProvider,
+		m.machineDeploymentSettingsSelection.Selected,
+		m.machineDeploymentSettingsSelection.SelectedGroups,
+	) {
+		return m, nil
+	}
+
 	switch msg.String() {
-	case keyUp:
-		if m.machineDeploymentSettingsSelection.FocusedIndex > 0 {
-			m.machineDeploymentSettingsSelection.FocusedIndex--
-		}
-		return m, nil
-
-	case keyDown:
-		maxIndex := m.getMachineDeploymentMaxFocusIndex()
-		if m.machineDeploymentSettingsSelection.FocusedIndex < maxIndex {
-			m.machineDeploymentSettingsSelection.FocusedIndex++
-		}
-		return m, nil
-
-	case keyRight:
-		// Expand provider
-		provider, groupIdx := m.getMachineDeploymentFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - expand provider
-			m.machineDeploymentSettingsSelection.ExpandedProviders[provider] = true
-		}
-		return m, nil
-
-	case keyLeft:
-		// Collapse provider
-		provider, groupIdx := m.getMachineDeploymentFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - collapse provider
-			m.machineDeploymentSettingsSelection.ExpandedProviders[provider] = false
-		}
-		return m, nil
-
-	case keySpace:
-		// Check if focused on provider header
-		provider, groupIdx := m.getMachineDeploymentFocusedItem()
-		if provider != "" && groupIdx == -1 {
-			// Focused on provider header - ignore
-			return m, nil
-		}
-
-		// Check if focused on setting group or option
-		provider, groupIdx, optionIdx := m.getMachineDeploymentFocusedOption()
-		if provider == "" {
-			return m, nil
-		}
-
-		groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-		if groupIdx >= len(groups) {
-			return m, nil
-		}
-
-		group := groups[groupIdx]
-		groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-
-		if optionIdx == -1 {
-			// Focused on setting group
-			if len(group.Options) == 0 {
-				// No options - toggle the group itself as a boolean flag
-				currentState := m.machineDeploymentSettingsSelection.SelectedGroups[groupKey]
-				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !currentState
-			} else {
-				// Has options - toggle all options
-				allSelected := true
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					if !m.machineDeploymentSettingsSelection.Selected[optionKey] {
-						allSelected = false
-						break
-					}
-				}
-
-				// Toggle all options
-				for _, option := range group.Options {
-					optionKey := fmt.Sprintf("%s:%s", groupKey, option)
-					m.machineDeploymentSettingsSelection.Selected[optionKey] = !allSelected
-				}
-				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
-			}
-		} else {
-			// Focused on individual option - toggle it
-			if optionIdx >= len(group.Options) {
-				return m, nil
-			}
-			optionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, group.Options[optionIdx])
-			m.machineDeploymentSettingsSelection.Selected[optionKey] = !m.machineDeploymentSettingsSelection.Selected[optionKey]
-
-			// Update group selection state
-			allSelected := true
-			for _, option := range group.Options {
-				optKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-				if !m.machineDeploymentSettingsSelection.Selected[optKey] {
-					allSelected = false
-					break
-				}
-			}
-			m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = allSelected
-		}
-		return m, nil
-
-	case keySelectAll:
-		// Check if all options are selected
-		allSelected := true
-		for _, provider := range m.machineDeploymentSettingsSelection.Providers {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					if !m.machineDeploymentSettingsSelection.Selected[selectionKey] {
-						allSelected = false
-						break
-					}
-				}
-				if !allSelected {
-					break
-				}
-			}
-			if !allSelected {
-				break
-			}
-		}
-
-		// Toggle all options and groups
-		for _, provider := range m.machineDeploymentSettingsSelection.Providers {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				for _, option := range group.Options {
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					m.machineDeploymentSettingsSelection.Selected[selectionKey] = !allSelected
-				}
-				m.machineDeploymentSettingsSelection.SelectedGroups[groupKey] = !allSelected
-			}
-		}
-		return m, nil
-
 	case keyEnter:
 		// Initialize cluster configuration for the next stage
 		m.clusterConfiguration = initializeClusterConfiguration()
@@ -1786,104 +1400,71 @@ func (m *Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Mo
 
 // getMachineDeploymentMaxFocusIndex returns the maximum focus index for machine deployment settings.
 func (m Model) getMachineDeploymentMaxFocusIndex() int {
-	count := 0
-	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
-		count++ // Provider header
-		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for _, group := range groups {
-				count++                     // Setting group header
-				count += len(group.Options) // Options (always shown)
-			}
-		}
-	}
-	return count - 1
+	return getSettingsMaxFocusIndex(
+		m.machineDeploymentSettingsSelection.Providers,
+		m.machineDeploymentSettingsSelection.SettingsByProvider,
+		m.machineDeploymentSettingsSelection.ExpandedProviders,
+	)
 }
 
 // getMachineDeploymentFocusedItem returns (provider, groupIdx) for the focused item.
 // Returns ("", -1) if not on provider or group, (provider, -1) if on provider header,
 // (provider, groupIdx) if on setting group.
 func (m Model) getMachineDeploymentFocusedItem() (string, int) {
-	currentIndex := 0
-	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
-		if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
-			return provider, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
-					return provider, groupIdx // On setting group
-				}
-				currentIndex++
-
-				if group.IsExpanded {
-					currentIndex += len(group.Options) // Skip options
-				}
-			}
-		}
-	}
-	return "", -1
+	return getFocusedSettingItem(
+		m.machineDeploymentSettingsSelection.Providers,
+		m.machineDeploymentSettingsSelection.SettingsByProvider,
+		m.machineDeploymentSettingsSelection.ExpandedProviders,
+		m.machineDeploymentSettingsSelection.FocusedIndex,
+		true,
+	)
 }
 
 // getMachineDeploymentFocusedOption returns (provider, groupIdx, optionIdx) for the focused option.
 // Returns ("", -1, -1) if not focused on an option.
 func (m Model) getMachineDeploymentFocusedOption() (string, int, int) {
-	currentIndex := 0
-	for _, provider := range m.machineDeploymentSettingsSelection.Providers {
-		// Provider header
-		if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
-			return provider, -1, -1 // On provider header
-		}
-		currentIndex++
-
-		if m.machineDeploymentSettingsSelection.ExpandedProviders[provider] {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				// Group header
-				if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
-					return provider, groupIdx, -1 // On setting group
-				}
-				currentIndex++
-
-				// Options (always shown since IsExpanded is always true)
-				for optionIdx := range group.Options {
-					if currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex {
-						return provider, groupIdx, optionIdx
-					}
-					currentIndex++
-				}
-			}
-		}
-	}
-	return "", -1, -1
+	return getFocusedSettingOption(
+		m.machineDeploymentSettingsSelection.Providers,
+		m.machineDeploymentSettingsSelection.SettingsByProvider,
+		m.machineDeploymentSettingsSelection.ExpandedProviders,
+		m.machineDeploymentSettingsSelection.FocusedIndex,
+	)
 }
 
 // handleWindowSize manages viewport resizing.
 func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) tea.Cmd {
 	m.terminalWidth = msg.Width
 	m.terminalHeight = msg.Height
-	m.Review.Viewport.Width = msg.Width - 8
-	m.Review.Viewport.Height = msg.Height - 10
+	viewportWidth := m.getUIInnerWidth()
+	viewportHeight := m.getUIHeight() - 4
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	m.Review.Viewport.Width = viewportWidth
+	m.Review.Viewport.Height = viewportHeight
 	return nil
 }
 
 // handleStart initializes execution.
 func (m *Model) handleStart(msg startMsg) tea.Cmd {
 	m.cmdChan = msg.ch
+	viewportWidth := m.getUIInnerWidth()
+	viewportHeight := m.getUIHeight() - 4
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
 	if m.Review.Viewport.Width == 0 {
-		m.Review.Viewport = viewport.New(80, 15)
+		m.Review.Viewport = viewport.New(viewportWidth, viewportHeight)
+	} else {
+		m.Review.Viewport.Width = viewportWidth
+		m.Review.Viewport.Height = viewportHeight
 	}
 	return streamLogs(m.cmdChan)
 }
 
 // handleLog processes log messages.
 func (m *Model) handleLog(msg logMsg) tea.Cmd {
-	m.logs = append(m.logs, msg.line)
-	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-	m.Review.Viewport.GotoBottom()
+	m.appendLogLine(msg.line)
 	return streamLogs(m.cmdChan)
 }
 
@@ -1936,10 +1517,8 @@ func (m *Model) handleDoneMessage(_ doneMsg) tea.Cmd {
 	// Only mark success if no prior error was recorded
 	if m.executionError == "" {
 		m.executionDone = true
-		m.logs = append(m.logs, "Successfully applied configuration!")
-		m.logs = append(m.logs, "[DONE] Process completed")
-		m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-		m.Review.Viewport.GotoBottom()
+		m.logs = append(m.logs, "Successfully applied configuration!", "[DONE] Process completed")
+		m.refreshLogsViewport()
 		m.stage = stageDone
 	}
 	return nil
@@ -1947,16 +1526,7 @@ func (m *Model) handleDoneMessage(_ doneMsg) tea.Cmd {
 
 // handleExecOutput processes execution output.
 func (m *Model) handleExecOutput(msg execOutputMsg) tea.Cmd {
-	lines := strings.Split(msg.output, "\n")
-	for _, line := range lines {
-		if line != "" {
-			m.logs = append(m.logs, line)
-		}
-	}
-
-	// Update viewport with new logs
-	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-	m.Review.Viewport.GotoBottom()
+	m.appendNonEmptyOutput(msg.output)
 
 	if msg.success {
 		m.executionDone = true
@@ -1993,20 +1563,7 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 	case keyEnter:
 		if m.quitConfirmIndex == 1 { // Yes
 			if m.stage == stageExecuting && !m.executionCancelling {
-				// Cancel execution and cleanup
-				m.executionCancelling = true
-				m.executionError = "Test execution cancelled by user"
-				m.quitConfirmVisible = false
-
-				// Add cancellation message to logs
-				m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
-				if m.Review.Viewport.Width > 0 {
-					m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-					m.Review.Viewport.GotoBottom()
-				}
-
-				// Start cleanup
-				return true, m.cleanupTestExecution()
+				return true, m.startExecutionCancellation()
 			}
 			// Regular quit for other stages
 			return true, tea.Quit
@@ -2018,20 +1575,7 @@ func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cm
 		return true, nil
 	case keyYes, keyControlC:
 		if m.stage == stageExecuting && !m.executionCancelling {
-			// Cancel execution and cleanup
-			m.executionCancelling = true
-			m.executionError = "Test execution cancelled by user"
-			m.quitConfirmVisible = false
-
-			// Add cancellation message to logs
-			m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
-			if m.Review.Viewport.Width > 0 {
-				m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-				m.Review.Viewport.GotoBottom()
-			}
-
-			// Start cleanup
-			return true, m.cleanupTestExecution()
+			return true, m.startExecutionCancellation()
 		}
 		return true, tea.Quit
 	}
@@ -2502,7 +2046,12 @@ func (m *Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Initialize viewport for log display
-		m.Review.Viewport = viewport.New(100, 30)
+		viewportWidth := m.getUIInnerWidth()
+		viewportHeight := m.getUIHeight() - 4
+		if viewportHeight < 1 {
+			viewportHeight = 1
+		}
+		m.Review.Viewport = viewport.New(viewportWidth, viewportHeight)
 		m.Review.Viewport.SetContent("")
 		m.logs = []string{}
 

@@ -44,7 +44,7 @@ const (
 	// ConformanceNamespace is the dedicated namespace for conformance tests.
 	ConformanceNamespace = "conformance-tests"
 	// ConformanceImage is the Docker image used for running tests.
-	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-15550024022026"
+	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-17220024022026"
 )
 
 // kubeconfigFileRegex matches the kubeconfigFile key in YAML configuration,
