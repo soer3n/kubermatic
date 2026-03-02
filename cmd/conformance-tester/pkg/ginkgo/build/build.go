@@ -504,7 +504,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		providerConfigCopy.CloudProviderSpec = runtime.RawExtension{
 			Raw: append([]byte(nil), providerConfigCopy.CloudProviderSpec.Raw...),
 		}
-		ps, err := getProviderSpec(job.log, job.opts.Secrets, providerConfigCopy.CloudProvider)
+		ps, err := getProviderSpec(job.log, job.opts.Secrets, job.distribution, providerConfigCopy.CloudProvider)
 		if err != nil {
 			results <- scenarioResult{err: fmt.Errorf("failed to get provider spec for %s: %w", machineName, err)}
 			continue

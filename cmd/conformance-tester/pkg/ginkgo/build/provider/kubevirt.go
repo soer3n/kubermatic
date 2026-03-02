@@ -190,7 +190,7 @@ func (a KubeVirtProviderAdapter) MachineSettings(ctx context.Context, providerCo
 	return ConvertModifiersToAny(raw)
 }
 
-func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, log *zap.SugaredLogger, clusterName string) (*kubevirt.RawConfig, error) {
+func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, log *zap.SugaredLogger, clusterName string) (*kubevirt.RawConfig, error) {
 	var err error
 
 	scheme := runtime.NewScheme()
@@ -218,22 +218,35 @@ func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, log *za
 		}
 	}
 
+	osImage := "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"
+
+	switch expression := distribution; expression {
+	case providerconfig.OperatingSystemUbuntu:
+		// Ubuntu specific settings
+		osImage = "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"
+	case providerconfig.OperatingSystemRHEL:
+		// RHEL specific settings
+		osImage = "docker://quay.io/kubermatic-virt-disks/rhel:8"
+	case providerconfig.OperatingSystemFlatcar:
+		// Flatcar specific settings
+		osImage = "docker://quay.io/kubermatic-virt-disks/flatcar:3374.2.2"
+	case providerconfig.OperatingSystemRockyLinux:
+		// Rocky Linux specific settings
+		osImage = "docker://quay.io/kubermatic-virt-disks/rocky:8"
+	}
+
 	return &kubevirt.RawConfig{
 		ClusterName: providerconfig.ConfigVarString{Value: clusterName},
 		Auth: kubevirt.Auth{
 			Kubeconfig: providerconfig.ConfigVarString{Value: b64.StdEncoding.EncodeToString([]byte(secrets.Kubevirt.Kubeconfig))},
 		},
 		VirtualMachine: kubevirt.VirtualMachine{
-			// DNSPolicy: providerconfig.ConfigVarString{Value: "None"},
-			// DNSConfig: &v1.PodDNSConfig{
-			// 	Nameservers: []string{"10.97.179.24"},
-			// },
 			EnableNetworkMultiQueue: providerconfig.ConfigVarBool{Value: ptr.To(true)},
 			Template: kubevirt.Template{
 				CPUs:   providerconfig.ConfigVarString{Value: "2"},
 				Memory: providerconfig.ConfigVarString{Value: "4096Mi"},
 				PrimaryDisk: kubevirt.PrimaryDisk{
-					OsImage: providerconfig.ConfigVarString{Value: "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"},
+					OsImage: providerconfig.ConfigVarString{Value: osImage},
 					Disk: kubevirt.Disk{
 						Size:             providerconfig.ConfigVarString{Value: "20Gi"},
 						StorageClassName: providerconfig.ConfigVarString{Value: defaultStorageClass.Name},

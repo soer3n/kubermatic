@@ -24,7 +24,7 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 		log.Fatalw("Failed to load KKP configuration", zap.Error(err))
 	}
 	log.Info("generating seeds...")
-	providerConfig, err := getProviderConfig(rootCtx, log, opts.Secrets, cloudProvider)
+	providerConfig, err := getProviderConfig(rootCtx, log, opts.Secrets, providerconfig.OperatingSystemUbuntu, cloudProvider)
 	if err != nil {
 		log.Fatalw("Failed to get default kubevirt config", zap.Error(err))
 	}

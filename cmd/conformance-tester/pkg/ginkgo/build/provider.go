@@ -96,11 +96,11 @@ func getDefaultDatacenterSettings(ctx context.Context, providerConfig *providerc
 	return settings.DatacenterSetting{}, nil
 }
 
-func getProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets legacytypes.Secrets, cloudProvider providerconfig.CloudProvider) (providerConfig *providerconfig.Config, err error) {
+func getProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) (providerConfig *providerconfig.Config, err error) {
 	switch cloudProvider {
 	case providerconfig.CloudProviderKubeVirt:
 		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
-		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log, "test-cluster")
+		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, distribution, log, "test-cluster")
 		if err != nil {
 			return nil, err
 		}
@@ -112,11 +112,11 @@ func getProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets lega
 	return nil, nil
 }
 
-func getProviderSpec(log *zap.SugaredLogger, secrets legacytypes.Secrets, cloudProvider providerconfig.CloudProvider) (any, error) {
+func getProviderSpec(log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) (any, error) {
 	switch cloudProvider {
 	case providerconfig.CloudProviderKubeVirt:
 		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
-		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log, "test-cluster")
+		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, distribution, log, "test-cluster")
 		if err != nil {
 			return nil, err
 		}
