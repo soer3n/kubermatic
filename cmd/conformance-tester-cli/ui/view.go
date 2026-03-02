@@ -57,6 +57,7 @@ const (
 	colorMainWhite     = "#FFFFFF"
 	colorErrorRed      = "#FF5252"
 	colorWarningYellow = "#FFC107"
+	colorDimGray       = "#666666"
 )
 
 // Application-wide style configuration.
@@ -1086,6 +1087,201 @@ func (m Model) renderDistributionSelection(helpWithBorder string, uiWidth int) s
 	return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 }
 
+// settingsTreeRow represents one row in the flattened settings tree for pagination.
+type settingsTreeRow struct {
+	rowType   string // "provider", "group", "option", "spacing"
+	provider  string
+	groupIdx  int
+	optionIdx int
+}
+
+// buildSettingsTreeRows flattens the provider → group → options hierarchy into an ordered
+// slice of rows so we can paginate and render only the visible window.
+func buildSettingsTreeRows(
+	providers []string,
+	settingsByProvider map[string][]SettingGroup,
+	expandedProviders map[string]bool,
+	multiProvider bool,
+) []settingsTreeRow {
+	var rows []settingsTreeRow
+	for providerIdx, provider := range providers {
+		if multiProvider {
+			rows = append(rows, settingsTreeRow{rowType: "provider", provider: provider, groupIdx: -1, optionIdx: -1})
+		}
+
+		isExpanded := expandedProviders[provider]
+		if isExpanded || !multiProvider {
+			groups := settingsByProvider[provider]
+			for gi, group := range groups {
+				rows = append(rows, settingsTreeRow{rowType: "group", provider: provider, groupIdx: gi, optionIdx: -1})
+				for oi := range group.Options {
+					rows = append(rows, settingsTreeRow{rowType: "option", provider: provider, groupIdx: gi, optionIdx: oi})
+				}
+			}
+		}
+
+		if multiProvider && providerIdx < len(providers)-1 {
+			rows = append(rows, settingsTreeRow{rowType: "spacing"})
+		}
+	}
+	return rows
+}
+
+// renderSettingsTreeRow renders a single row in the settings tree.
+func (m Model) renderSettingsTreeRow(
+	row settingsTreeRow,
+	rowAbsIndex int,
+	focusedIndex int,
+	settingsByProvider map[string][]SettingGroup,
+	expandedProviders map[string]bool,
+	selected map[string]bool,
+	selectedGroups map[string]bool,
+	multiProvider bool,
+) string {
+	isFocused := rowAbsIndex == focusedIndex
+
+	switch row.rowType {
+	case "provider":
+		isExpanded := expandedProviders[row.provider]
+		expandIndicator := "▶"
+		if isExpanded {
+			expandIndicator = "▼"
+		}
+		providerHeader := fmt.Sprintf("%s %s", expandIndicator, row.provider)
+		if isFocused {
+			return styleFocusHighlight.Render(providerHeader)
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
+
+	case "group":
+		groups := settingsByProvider[row.provider]
+		if row.groupIdx < 0 || row.groupIdx >= len(groups) {
+			return ""
+		}
+		group := groups[row.groupIdx]
+		groupKey := fmt.Sprintf("%s:%s", row.provider, group.Key)
+		isGroupSelected := selectedGroups[groupKey]
+
+		checkbox := "[ ]"
+		if isGroupSelected {
+			checkbox = "[✓]"
+		}
+
+		groupHeader := fmt.Sprintf("  %s %s",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+			group.Name)
+		if isFocused {
+			return styleFocusHighlight.Render(groupHeader)
+		} else if isGroupSelected {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
+
+	case "option":
+		groups := settingsByProvider[row.provider]
+		if row.groupIdx < 0 || row.groupIdx >= len(groups) {
+			return ""
+		}
+		group := groups[row.groupIdx]
+		if row.optionIdx < 0 || row.optionIdx >= len(group.Options) {
+			return ""
+		}
+		option := group.Options[row.optionIdx]
+		selectionKey := fmt.Sprintf("%s:%s:%s", row.provider, group.Key, option)
+		isSelected := selected[selectionKey]
+
+		checkbox := "[ ]"
+		if isSelected {
+			checkbox = "[✓]"
+		}
+
+		optionLine := fmt.Sprintf("    %s %s",
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
+			option)
+		if isFocused {
+			return styleFocusHighlight.Render(optionLine)
+		} else if isSelected {
+			return lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
+
+	case "spacing":
+		return ""
+	}
+	return ""
+}
+
+// renderPaginatedSettingsBody renders the paginated settings tree body (the Provider → Group → Options section).
+// It updates the viewport's page size dynamically and returns the rendered string (without title/description/help).
+func (m Model) renderPaginatedSettingsBody(
+	b *strings.Builder,
+	providers []string,
+	settingsByProvider map[string][]SettingGroup,
+	expandedProviders map[string]bool,
+	selected map[string]bool,
+	selectedGroups map[string]bool,
+	focusedIndex int,
+	vp *SettingsViewport,
+) {
+	multiProvider := len(providers) > 1
+
+	// Build all rows
+	rows := buildSettingsTreeRows(providers, settingsByProvider, expandedProviders, multiProvider)
+	totalRows := len(rows)
+
+	if totalRows == 0 {
+		return
+	}
+
+	// Reserve lines: title(1) + blank(1) + description(1) + blank(1) + scroll-up(1) + scroll-down(1) + position(1) + trailing-newline(1) + box-border(2) = 10
+	const reservedLines = 10
+	vp.updatePageSize(m.getUIHeight(), reservedLines)
+	vp.ensureFocusVisible(focusedIndex)
+
+	showUp, showDown := vp.scrollIndicators(totalRows)
+
+	if showUp {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorDimGray)).Render("  ▲ more above") + "\n")
+	}
+
+	start, end := vp.visibleRange(totalRows)
+
+	// We need to map visual row index back to the absolute index in the full tree.
+	// The absolute index (used for focus) counts only provider/group/option rows, not spacing.
+	// Build a map of row index → absolute focus index.
+	absIndex := 0
+	absIndices := make([]int, totalRows)
+	for i, row := range rows {
+		if row.rowType == "spacing" {
+			absIndices[i] = -1 // spacing rows don't have a focus index
+		} else {
+			absIndices[i] = absIndex
+			absIndex++
+		}
+	}
+
+	for i := start; i < end; i++ {
+		row := rows[i]
+		if row.rowType == "spacing" {
+			b.WriteString("\n")
+			continue
+		}
+		line := m.renderSettingsTreeRow(row, absIndices[i], focusedIndex, settingsByProvider, expandedProviders, selected, selectedGroups, multiProvider)
+		b.WriteString(line + "\n")
+	}
+
+	if showDown {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorDimGray)).Render("  ▼ more below") + "\n")
+	}
+
+	// Position indicator
+	pos := focusedIndex + 1
+	total := absIndex // total focusable items
+	if total > 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(colorDimGray)).Render(fmt.Sprintf("  %d/%d", pos, total)) + "\n")
+	}
+}
+
 // renderDatacenterSettingsSelection renders the datacenter settings selection stage.
 func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth int) string {
 	boxHeight := m.getUIHeight()
@@ -1172,93 +1368,17 @@ func (m Model) renderDatacenterSettingsSelection(helpWithBorder string, uiWidth 
 		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 	}
 
-	// Render hierarchical structure: Provider → Group → Options
-	currentIndex := 0
-	for providerIdx, provider := range m.datacenterSettingsSelection.Providers {
-		isProviderExpanded := m.datacenterSettingsSelection.ExpandedProviders[provider]
-		isProviderFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
-
-		// Provider header with expand/collapse indicator
-		expandIndicator := "▶"
-		if isProviderExpanded {
-			expandIndicator = "▼"
-		}
-
-		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
-		if len(m.datacenterSettingsSelection.Providers) > 1 {
-			if isProviderFocused {
-				providerHeader = styleFocusHighlight.Render(providerHeader)
-			} else {
-				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
-			}
-			b.WriteString(providerHeader + "\n")
-		}
-		currentIndex++
-
-		// Render setting groups for this provider if expanded
-		if isProviderExpanded {
-			groups := m.datacenterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				isGroupFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				isGroupSelected := m.datacenterSettingsSelection.SelectedGroups[groupKey]
-
-				// Setting group with checkbox
-				checkbox := "[ ]"
-				if isGroupSelected {
-					checkbox = "[✓]"
-				}
-
-				groupHeader := fmt.Sprintf("  %s %s",
-					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-					group.Name)
-				if isGroupFocused {
-					groupHeader = styleFocusHighlight.Render(groupHeader)
-				} else if isGroupSelected {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
-				} else {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
-				}
-				b.WriteString(groupHeader + "\n")
-				currentIndex++
-
-				// Render options for this group (only if options exist)
-				// If no options, the group itself acts as a boolean flag
-				for optionIdx, option := range group.Options {
-					isOptionFocused := currentIndex == m.datacenterSettingsSelection.FocusedIndex
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					isSelected := m.datacenterSettingsSelection.Selected[selectionKey]
-
-					checkbox := "[ ]"
-					if isSelected {
-						checkbox = "[✓]"
-					}
-
-					optionLine := fmt.Sprintf("    %s %s",
-						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-						option)
-
-					if isOptionFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
-					} else if isSelected {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
-					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
-					}
-
-					b.WriteString(optionLine + "\n")
-					currentIndex++
-					_ = optionIdx // Suppress unused variable warning
-				}
-				_ = groupIdx // Suppress unused variable warning
-			}
-		}
-
-		// Add spacing between provider sections
-		if providerIdx < len(m.datacenterSettingsSelection.Providers)-1 {
-			b.WriteString("\n")
-		}
-	}
+	// Render paginated hierarchical structure: Provider → Group → Options
+	m.renderPaginatedSettingsBody(
+		&b,
+		m.datacenterSettingsSelection.Providers,
+		m.datacenterSettingsSelection.SettingsByProvider,
+		m.datacenterSettingsSelection.ExpandedProviders,
+		m.datacenterSettingsSelection.Selected,
+		m.datacenterSettingsSelection.SelectedGroups,
+		m.datacenterSettingsSelection.FocusedIndex,
+		&m.datacenterViewport,
+	)
 
 	// Pad content to ensure help bar is at the bottom
 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
@@ -1310,93 +1430,17 @@ func (m Model) renderClusterSettingsSelection(helpWithBorder string, uiWidth int
 		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 	}
 
-	// Render hierarchical structure: Provider → Group → Options
-	currentIndex := 0
-	for providerIdx, provider := range m.clusterSettingsSelection.Providers {
-		isProviderExpanded := m.clusterSettingsSelection.ExpandedProviders[provider]
-		isProviderFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
-
-		// Provider header with expand/collapse indicator
-		expandIndicator := "▶"
-		if isProviderExpanded {
-			expandIndicator = "▼"
-		}
-
-		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
-		if len(m.clusterSettingsSelection.Providers) > 1 {
-			if isProviderFocused {
-				providerHeader = styleFocusHighlight.Render(providerHeader)
-			} else {
-				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
-			}
-			b.WriteString(providerHeader + "\n")
-		}
-		currentIndex++
-
-		// Render setting groups for this provider if expanded
-		if isProviderExpanded {
-			groups := m.clusterSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				isGroupFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				isGroupSelected := m.clusterSettingsSelection.SelectedGroups[groupKey]
-
-				// Setting group with checkbox
-				checkbox := "[ ]"
-				if isGroupSelected {
-					checkbox = "[✓]"
-				}
-
-				groupHeader := fmt.Sprintf("  %s %s",
-					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-					group.Name)
-				if isGroupFocused {
-					groupHeader = styleFocusHighlight.Render(groupHeader)
-				} else if isGroupSelected {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
-				} else {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
-				}
-				b.WriteString(groupHeader + "\n")
-				currentIndex++
-
-				// Render options for this group (only if options exist)
-				// If no options, the group itself acts as a boolean flag
-				for optionIdx, option := range group.Options {
-					isOptionFocused := currentIndex == m.clusterSettingsSelection.FocusedIndex
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					isSelected := m.clusterSettingsSelection.Selected[selectionKey]
-
-					checkbox := "[ ]"
-					if isSelected {
-						checkbox = "[✓]"
-					}
-
-					optionLine := fmt.Sprintf("    %s %s",
-						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-						option)
-
-					if isOptionFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
-					} else if isSelected {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
-					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
-					}
-
-					b.WriteString(optionLine + "\n")
-					currentIndex++
-					_ = optionIdx // Suppress unused variable warning
-				}
-				_ = groupIdx // Suppress unused variable warning
-			}
-		}
-
-		// Add spacing between provider sections
-		if providerIdx < len(m.clusterSettingsSelection.Providers)-1 {
-			b.WriteString("\n")
-		}
-	}
+	// Render paginated hierarchical structure: Provider → Group → Options
+	m.renderPaginatedSettingsBody(
+		&b,
+		m.clusterSettingsSelection.Providers,
+		m.clusterSettingsSelection.SettingsByProvider,
+		m.clusterSettingsSelection.ExpandedProviders,
+		m.clusterSettingsSelection.Selected,
+		m.clusterSettingsSelection.SelectedGroups,
+		m.clusterSettingsSelection.FocusedIndex,
+		&m.clusterViewport,
+	)
 
 	// Pad content to ensure help bar is at the bottom
 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)
@@ -1490,93 +1534,17 @@ func (m Model) renderMachineDeploymentSettingsSelection(helpWithBorder string, u
 		return styleBox.Width(uiWidth).Height(boxHeight).Render(contentBody + "\n" + helpWithBorder)
 	}
 
-	// Render hierarchical structure: Provider → Group → Options
-	currentIndex := 0
-	for providerIdx, provider := range m.machineDeploymentSettingsSelection.Providers {
-		isProviderExpanded := m.machineDeploymentSettingsSelection.ExpandedProviders[provider]
-		isProviderFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
-
-		// Provider header with expand/collapse indicator
-		expandIndicator := "▶"
-		if isProviderExpanded {
-			expandIndicator = "▼"
-		}
-
-		providerHeader := fmt.Sprintf("%s %s", expandIndicator, provider)
-		if len(m.machineDeploymentSettingsSelection.Providers) > 1 {
-			if isProviderFocused {
-				providerHeader = styleFocusHighlight.Render(providerHeader)
-			} else {
-				providerHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(providerHeader)
-			}
-			b.WriteString(providerHeader + "\n")
-		}
-		currentIndex++
-
-		// Render setting groups for this provider if expanded
-		if isProviderExpanded {
-			groups := m.machineDeploymentSettingsSelection.SettingsByProvider[provider]
-			for groupIdx, group := range groups {
-				isGroupFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
-				groupKey := fmt.Sprintf("%s:%s", provider, group.Key)
-				isGroupSelected := m.machineDeploymentSettingsSelection.SelectedGroups[groupKey]
-
-				// Setting group with checkbox
-				checkbox := "[ ]"
-				if isGroupSelected {
-					checkbox = "[✓]"
-				}
-
-				groupHeader := fmt.Sprintf("  %s %s",
-					lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-					group.Name)
-				if isGroupFocused {
-					groupHeader = styleFocusHighlight.Render(groupHeader)
-				} else if isGroupSelected {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(groupHeader)
-				} else {
-					groupHeader = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(groupHeader)
-				}
-				b.WriteString(groupHeader + "\n")
-				currentIndex++
-
-				// Render options for this group (only if options exist)
-				// If no options, the group itself acts as a boolean flag
-				for optionIdx, option := range group.Options {
-					isOptionFocused := currentIndex == m.machineDeploymentSettingsSelection.FocusedIndex
-					selectionKey := fmt.Sprintf("%s:%s:%s", provider, group.Key, option)
-					isSelected := m.machineDeploymentSettingsSelection.Selected[selectionKey]
-
-					checkbox := "[ ]"
-					if isSelected {
-						checkbox = "[✓]"
-					}
-
-					optionLine := fmt.Sprintf("    %s %s",
-						lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Render(checkbox),
-						option)
-
-					if isOptionFocused {
-						optionLine = styleFocusHighlight.Render(optionLine)
-					} else if isSelected {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainBlue)).Bold(true).Render(optionLine)
-					} else {
-						optionLine = lipgloss.NewStyle().Foreground(lipgloss.Color(colorMainWhite)).Render(optionLine)
-					}
-
-					b.WriteString(optionLine + "\n")
-					currentIndex++
-					_ = optionIdx // Suppress unused variable warning
-				}
-				_ = groupIdx // Suppress unused variable warning
-			}
-		}
-
-		// Add spacing between provider sections
-		if providerIdx < len(m.machineDeploymentSettingsSelection.Providers)-1 {
-			b.WriteString("\n")
-		}
-	}
+	// Render paginated hierarchical structure: Provider → Group → Options
+	m.renderPaginatedSettingsBody(
+		&b,
+		m.machineDeploymentSettingsSelection.Providers,
+		m.machineDeploymentSettingsSelection.SettingsByProvider,
+		m.machineDeploymentSettingsSelection.ExpandedProviders,
+		m.machineDeploymentSettingsSelection.Selected,
+		m.machineDeploymentSettingsSelection.SelectedGroups,
+		m.machineDeploymentSettingsSelection.FocusedIndex,
+		&m.machineViewport,
+	)
 
 	// Pad content to ensure help bar is at the bottom
 	lines := padContentToHeight(b.String(), boxHeight-uiBoxHeightPad)

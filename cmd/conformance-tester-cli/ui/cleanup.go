@@ -55,18 +55,20 @@ func (m *Model) cleanupTestExecution() tea.Cmd {
 		}
 
 		// Delete all running jobs
+		gracePeriod := int64(deploy.GracefulDeletionPeriod.Seconds())
+		propagation := metav1.DeletePropagationForeground
+		deleteOpts := metav1.DeleteOptions{
+			GracePeriodSeconds: &gracePeriod,
+			PropagationPolicy:  &propagation,
+		}
+
 		if len(m.runningJobs) > 0 {
 			cleanupMessages = append(cleanupMessages, fmt.Sprintf("\n📋 Deleting %d job(s)...", len(m.runningJobs)))
 			for _, jobName := range m.runningJobs {
 				err := clientset.BatchV1().Jobs(deploy.ConformanceNamespace).Delete(
 					ctx,
 					jobName,
-					metav1.DeleteOptions{
-						PropagationPolicy: func() *metav1.DeletionPropagation {
-							policy := metav1.DeletePropagationForeground
-							return &policy
-						}(),
-					},
+					deleteOpts,
 				)
 				if err != nil {
 					cleanupMessages = append(cleanupMessages, fmt.Sprintf("  ⚠ Failed to delete job %s: %v", jobName, err))

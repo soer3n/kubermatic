@@ -45,6 +45,8 @@ const (
 	ConformanceNamespace = "conformance-tests"
 	// ConformanceImage is the Docker image used for running tests.
 	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-17220024022026"
+
+	GracefulDeletionPeriod = 15 * time.Minute
 )
 
 // kubeconfigFileRegex matches the kubeconfigFile key in YAML configuration,
@@ -233,7 +235,8 @@ func CreateJob(ctx context.Context, clientset *kubernetes.Clientset, config JobC
 					},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					TerminationGracePeriodSeconds: func() *int64 { v := int64(GracefulDeletionPeriod.Seconds()); return &v }(),
+					RestartPolicy:                 corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
 							Name:            "ginkgo",

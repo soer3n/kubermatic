@@ -963,6 +963,7 @@ func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, te
 		m.datacenterSettingsSelection.SettingsByProvider,
 		m.datacenterSettingsSelection.Selected,
 		m.datacenterSettingsSelection.SelectedGroups,
+		&m.datacenterViewport,
 	) {
 		return m, nil
 	}
@@ -1038,6 +1039,7 @@ func (m *Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.C
 		m.clusterSettingsSelection.SettingsByProvider,
 		m.clusterSettingsSelection.Selected,
 		m.clusterSettingsSelection.SelectedGroups,
+		&m.clusterViewport,
 	) {
 		return m, nil
 	}
@@ -1119,6 +1121,7 @@ func (m *Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Mo
 		m.machineDeploymentSettingsSelection.SettingsByProvider,
 		m.machineDeploymentSettingsSelection.Selected,
 		m.machineDeploymentSettingsSelection.SelectedGroups,
+		&m.machineViewport,
 	) {
 		return m, nil
 	}
@@ -1629,13 +1632,16 @@ func isProviderHeaderFocused(provider string, groupIdx int) bool {
 // When respectGroupExpansion is true, option rows are counted only if group.IsExpanded is true.
 func getFocusedSettingItem(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int, respectGroupExpansion bool) (string, int) {
 	currentIndex := 0
+	multiProvider := len(providers) > 1
 	for _, provider := range providers {
-		if currentIndex == focusedIndex {
-			return provider, -1
+		if multiProvider {
+			if currentIndex == focusedIndex {
+				return provider, -1
+			}
+			currentIndex++
 		}
-		currentIndex++
 
-		if expandedProviders[provider] {
+		if expandedProviders[provider] || !multiProvider {
 			groups := settingsByProvider[provider]
 			for groupIdx, group := range groups {
 				if currentIndex == focusedIndex {
@@ -1658,13 +1664,16 @@ func getFocusedSettingItem(providers []string, settingsByProvider map[string][]S
 // and (provider, groupIdx, optionIdx) for option rows.
 func getFocusedSettingOption(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int) (string, int, int) {
 	currentIndex := 0
+	multiProvider := len(providers) > 1
 	for _, provider := range providers {
-		if currentIndex == focusedIndex {
-			return provider, -1, -1
+		if multiProvider {
+			if currentIndex == focusedIndex {
+				return provider, -1, -1
+			}
+			currentIndex++
 		}
-		currentIndex++
 
-		if expandedProviders[provider] {
+		if expandedProviders[provider] || !multiProvider {
 			groups := settingsByProvider[provider]
 			for groupIdx, group := range groups {
 				if currentIndex == focusedIndex {
@@ -1785,15 +1794,21 @@ func toggleAllSettings(providers []string, settingsByProvider map[string][]Setti
 
 func getSettingsMaxFocusIndex(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool) int {
 	count := 0
+	multiProvider := len(providers) > 1
 	for _, provider := range providers {
-		count++ // Provider header
-		if expandedProviders[provider] {
+		if multiProvider {
+			count++ // Provider header (only counted when visible)
+		}
+		if expandedProviders[provider] || !multiProvider {
 			groups := settingsByProvider[provider]
 			for _, group := range groups {
 				count++                     // Setting group header
 				count += len(group.Options) // Options (always shown)
 			}
 		}
+	}
+	if count == 0 {
+		return 0
 	}
 	return count - 1
 }
@@ -1824,7 +1839,7 @@ func hasAnySelected(selection map[string]bool) bool {
 }
 
 // handleSharedSettingsKeys processes the common settings-stage keys:
-// up/down, left/right, space and select-all.
+// up/down, left/right, space, select-all, pgup/pgdown, home/end.
 // It returns true when the key was handled.
 func handleSharedSettingsKeys(
 	key string,
@@ -1837,10 +1852,12 @@ func handleSharedSettingsKeys(
 	settingsByProvider map[string][]SettingGroup,
 	selected map[string]bool,
 	selectedGroups map[string]bool,
+	vp *SettingsViewport,
 ) bool {
 	switch key {
 	case keyUp, keyDown:
 		moveSelectionFocus(focusedIndex, maxIndex, key)
+		vp.ensureFocusVisible(*focusedIndex)
 		return true
 	case keyRight:
 		provider, groupIdx := getFocusedItem()
@@ -1867,9 +1884,90 @@ func handleSharedSettingsKeys(
 	case keySelectAll:
 		toggleAllSettings(providers, settingsByProvider, selected, selectedGroups)
 		return true
+	case "pgup":
+		jump := vp.PageSize
+		if jump <= 0 {
+			jump = 10
+		}
+		*focusedIndex -= jump
+		if *focusedIndex < 0 {
+			*focusedIndex = 0
+		}
+		vp.ensureFocusVisible(*focusedIndex)
+		return true
+	case "pgdown":
+		jump := vp.PageSize
+		if jump <= 0 {
+			jump = 10
+		}
+		*focusedIndex += jump
+		if *focusedIndex > maxIndex {
+			*focusedIndex = maxIndex
+		}
+		vp.ensureFocusVisible(*focusedIndex)
+		return true
+	case "home":
+		*focusedIndex = 0
+		vp.ensureFocusVisible(*focusedIndex)
+		return true
+	case "end":
+		*focusedIndex = maxIndex
+		vp.ensureFocusVisible(*focusedIndex)
+		return true
 	}
 
 	return false
+}
+
+// ensureFocusVisible adjusts the scroll offset so the focused row is within the visible page.
+func (vp *SettingsViewport) ensureFocusVisible(focusedIndex int) {
+	if vp.PageSize <= 0 {
+		return
+	}
+	if focusedIndex < vp.ScrollOffset {
+		vp.ScrollOffset = focusedIndex
+	}
+	if focusedIndex >= vp.ScrollOffset+vp.PageSize {
+		vp.ScrollOffset = focusedIndex - vp.PageSize + 1
+	}
+	if vp.ScrollOffset < 0 {
+		vp.ScrollOffset = 0
+	}
+}
+
+// visibleRange returns the start (inclusive) and end (exclusive) indices of visible rows.
+func (vp *SettingsViewport) visibleRange(totalRows int) (int, int) {
+	if vp.PageSize <= 0 || totalRows == 0 {
+		return 0, totalRows
+	}
+	start := vp.ScrollOffset
+	if start >= totalRows {
+		start = totalRows - 1
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + vp.PageSize
+	if end > totalRows {
+		end = totalRows
+	}
+	return start, end
+}
+
+// updatePageSize recalculates the page size based on available UI height.
+// reservedLines accounts for title, help bar, borders, scroll indicators, etc.
+func (vp *SettingsViewport) updatePageSize(uiHeight, reservedLines int) {
+	vp.PageSize = uiHeight - reservedLines
+	if vp.PageSize < 3 {
+		vp.PageSize = 3
+	}
+}
+
+// scrollIndicators returns (showUp, showDown) booleans for scroll arrows.
+func (vp *SettingsViewport) scrollIndicators(totalRows int) (bool, bool) {
+	showUp := vp.ScrollOffset > 0
+	showDown := vp.ScrollOffset+vp.PageSize < totalRows
+	return showUp, showDown
 }
 
 // ----------------------------------- Common: Stage Transition Helpers -----------------------------------
@@ -1946,6 +2044,12 @@ func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) tea.Cmd {
 	}
 	m.Review.Viewport.Width = viewportWidth
 	m.Review.Viewport.Height = viewportHeight
+
+	// Recalculate settings pagination page sizes on resize
+	const settingsReservedLines = 10 // title + description + borders + scroll indicators + help bar
+	m.datacenterViewport.updatePageSize(m.getUIHeight(), settingsReservedLines)
+	m.clusterViewport.updatePageSize(m.getUIHeight(), settingsReservedLines)
+	m.machineViewport.updatePageSize(m.getUIHeight(), settingsReservedLines)
 	return nil
 }
 

@@ -72,6 +72,11 @@ type Model struct {
 
 	clusterConfiguration ClusterConfigurationSettings
 
+	// Pagination viewports for the three settings stages
+	datacenterViewport SettingsViewport
+	clusterViewport    SettingsViewport
+	machineViewport    SettingsViewport
+
 	Review  Review
 	cmdChan <-chan tea.Msg
 	program *tea.Program // Reference to the program for sending messages from goroutines
@@ -349,16 +354,9 @@ func initializeMachineDeploymentSettingsSelection(providers []string) MachineDep
 func initializeClusterSettingsSelection(providers []string) ClusterSettingsSelection {
 	descriptionsMap := ginkgoutils.GetClusterDescriptions(nil)
 
-	// Convert map to SettingGroup slice (same for all providers)
+	// Convert map to SettingGroup slice (same for all providers), sorted by name
 	var groups []SettingGroup
-	keys := make([]string, 0, len(descriptionsMap))
-	for key := range descriptionsMap {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for _, key := range keys {
-		desc := descriptionsMap[key]
+	for key, desc := range descriptionsMap {
 		groups = append(groups, SettingGroup{
 			Key:        key,
 			Name:       desc.Name,
@@ -366,6 +364,9 @@ func initializeClusterSettingsSelection(providers []string) ClusterSettingsSelec
 			IsExpanded: true, // Always show options
 		})
 	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].Name < groups[j].Name
+	})
 
 	// Create settings map for each provider (same settings for all)
 	settingsMap := make(map[string][]SettingGroup)
@@ -1363,7 +1364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				ps.SettingsFetchError = ""
 				ps.Descriptions = msg.descriptions
-				// Convert descriptions to SettingGroup structures
+				// Convert descriptions to SettingGroup structures, sorted by name
 				var settingGroups []SettingGroup
 				for key, desc := range msg.descriptions {
 					settingGroups = append(settingGroups, SettingGroup{
@@ -1372,6 +1373,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Options: desc.Options,
 					})
 				}
+				sort.Slice(settingGroups, func(i, j int) bool {
+					return settingGroups[i].Name < settingGroups[j].Name
+				})
 				m.datacenterSettingsSelection.SettingsByProvider[msg.provider] = settingGroups
 			}
 			m.datacenterSettingsSelection.ProviderSettings[msg.provider] = ps
@@ -1385,7 +1389,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				ps.SettingsFetchError = ""
 				ps.Descriptions = msg.descriptions
-				// Convert descriptions to SettingGroup structures
+				// Convert descriptions to SettingGroup structures, sorted by name
 				var settingGroups []SettingGroup
 				for key, desc := range msg.descriptions {
 					settingGroups = append(settingGroups, SettingGroup{
@@ -1394,6 +1398,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						Options: desc.Options,
 					})
 				}
+				sort.Slice(settingGroups, func(i, j int) bool {
+					return settingGroups[i].Name < settingGroups[j].Name
+				})
 				m.machineDeploymentSettingsSelection.SettingsByProvider[msg.provider] = settingGroups
 			}
 			m.machineDeploymentSettingsSelection.ProviderSettings[msg.provider] = ps

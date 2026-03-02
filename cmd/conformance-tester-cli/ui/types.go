@@ -259,6 +259,12 @@ type ReleaseSelection struct {
 	IsMinorFocused    bool                // Whether focus is on a minor version or major version
 }
 
+// SettingsViewport tracks scroll state for paginated settings stages.
+type SettingsViewport struct {
+	ScrollOffset int // First visible row index
+	PageSize     int // Number of visible rows (updated dynamically from UI height)
+}
+
 // SettingGroup represents a group of related settings with a parent name and child options.
 type SettingGroup struct {
 	Key        string   // Unique key from map (e.g., "cpuTopology")

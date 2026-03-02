@@ -37,33 +37,73 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// getKubeVirtInfraKubeconfigPath returns the resolved file path for the
+// KubeVirt infra-cluster kubeconfig entered in the provider credentials stage.
+// It honours both preset and custom credential sources and reuses the
+// processKubeVirtKubeconfig cache for temp-file management.
+func (m *Model) getKubeVirtInfraKubeconfigPath() (string, error) {
+	for _, provider := range m.providers {
+		if provider.DisplayName != "KubeVirt" || !provider.Selected {
+			continue
+		}
+
+		var kubeconfigValue string
+		if provider.HasPresetCredentials && provider.CredentialSource == CredentialSourcePreset {
+			if creds, ok := provider.PresetCredentials.(KubeVirtCredentials); ok {
+				kubeconfigValue = creds.Kubeconfig.Value()
+			}
+		} else {
+			if creds, ok := provider.Credentials.(KubeVirtCredentials); ok {
+				kubeconfigValue = creds.Kubeconfig.Value()
+			}
+		}
+
+		if kubeconfigValue == "" || kubeconfigValue == "***preset-value***" {
+			return "", fmt.Errorf("no KubeVirt infra kubeconfig provided")
+		}
+
+		return m.processKubeVirtKubeconfig(kubeconfigValue)
+	}
+	return "", fmt.Errorf("KubeVirt provider not found or not selected")
+}
+
+// resolveKubeconfigForProvider returns the kubeconfig path to use when
+// fetching settings for the given provider. For KubeVirt this is the infra-
+// cluster kubeconfig from the provider credentials; for all other providers
+// it is the management-cluster kubeconfig selected in stage 1.
+func (m *Model) resolveKubeconfigForProvider(provider string) (string, error) {
+	if strings.EqualFold(provider, "kubevirt") {
+		return m.getKubeVirtInfraKubeconfigPath()
+	}
+
+	kubeconfigPath := m.getSelectedKubeconfigPath()
+	if kubeconfigPath == "" {
+		return "", fmt.Errorf("no kubeconfig selected")
+	}
+
+	// Expand ~ prefix
+	if strings.HasPrefix(kubeconfigPath, "~/") {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("unable to access home directory: %w", err)
+		}
+		kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
+	}
+	return kubeconfigPath, nil
+}
+
 // fetchDatacenterSettingsForProvider fetches datacenter settings from the cluster for a specific provider.
 func (m *Model) fetchDatacenterSettingsForProvider(provider string) tea.Cmd {
 	return func() tea.Msg {
-		// For now, we'll use environment variable to temporarily set the kubeconfig
-		// This is a workaround since we can't modify the conformance-tester package
-		kubeconfigPath := m.getSelectedKubeconfigPath()
-		if kubeconfigPath == "" {
+		kubeconfigPath, err := m.resolveKubeconfigForProvider(provider)
+		if err != nil {
 			return datacenterSettingsLoadedMsg{
 				provider: provider,
-				err:      fmt.Errorf("no kubeconfig selected"),
+				err:      err,
 			}
-		}
-
-		// Expand path if needed
-		if strings.HasPrefix(kubeconfigPath, "~/") {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return datacenterSettingsLoadedMsg{
-					provider: provider,
-					err:      fmt.Errorf("unable to access home directory: %w", err),
-				}
-			}
-			kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
 		}
 
 		// Temporarily set KUBECONFIG environment variable
-		// Note: This is not ideal but necessary since we can't modify the conformance-tester package
 		oldKubeconfig := os.Getenv("KUBECONFIG")
 		os.Setenv("KUBECONFIG", kubeconfigPath)
 		defer func() {
@@ -100,26 +140,12 @@ func (m *Model) fetchDatacenterSettingsForProvider(provider string) tea.Cmd {
 // fetchMachineSettingsForProvider fetches machine deployment settings from the cluster for a specific provider.
 func (m *Model) fetchMachineSettingsForProvider(provider string) tea.Cmd {
 	return func() tea.Msg {
-		// For now, we'll use environment variable to temporarily set the kubeconfig
-		// This is a workaround since we can't modify the conformance-tester package
-		kubeconfigPath := m.getSelectedKubeconfigPath()
-		if kubeconfigPath == "" {
+		kubeconfigPath, err := m.resolveKubeconfigForProvider(provider)
+		if err != nil {
 			return machineSettingsLoadedMsg{
 				provider: provider,
-				err:      fmt.Errorf("no kubeconfig selected"),
+				err:      err,
 			}
-		}
-
-		// Expand path if needed
-		if strings.HasPrefix(kubeconfigPath, "~/") {
-			homeDir, err := os.UserHomeDir()
-			if err != nil {
-				return machineSettingsLoadedMsg{
-					provider: provider,
-					err:      fmt.Errorf("unable to access home directory: %w", err),
-				}
-			}
-			kubeconfigPath = filepath.Join(homeDir, kubeconfigPath[2:])
 		}
 
 		// Temporarily set KUBECONFIG environment variable
