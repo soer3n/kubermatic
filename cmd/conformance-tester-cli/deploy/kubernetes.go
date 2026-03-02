@@ -252,6 +252,7 @@ func CreateJob(ctx context.Context, clientset *kubernetes.Clientset, config JobC
 								"--ginkgo.v",
 								"--ginkgo.parallel.process=1",
 								"--ginkgo.parallel.total=1",
+								"--ginkgo.grace-period=15m",
 								"--ginkgo.focus",
 								config.ProviderName,
 								fmt.Sprintf("--ginkgo.label-filter=%s", config.ProviderLabel),
