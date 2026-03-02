@@ -34,23 +34,27 @@ import (
 )
 
 const (
-	keyEsc       = "esc"
-	keyEnter     = "enter"
-	keyRight     = "right"
-	keyLeft      = "left"
-	keyUp        = "up"
-	keyDown      = "down"
-	keyTab       = "tab"
-	keyShiftTab  = "shift+tab"
-	keyYes       = "y"
-	keyNo        = "n"
-	keyControlC  = "ctrl+c"
-	keyQuit      = "q"
-	keyI         = "i"
-	keySpace     = " "
-	keySelectAll = "ctrl+a"
-	digits       = "0123456789"
+	keyEsc         = "esc"
+	keyEnter       = "enter"
+	keyRight       = "right"
+	keyLeft        = "left"
+	keyUp          = "up"
+	keyDown        = "down"
+	keyTab         = "tab"
+	keyShiftTab    = "shift+tab"
+	keyYes         = "y"
+	keyNo          = "n"
+	keyControlC    = "ctrl+c"
+	keyQuit        = "q"
+	keyI           = "i"
+	keySpace       = " "
+	keySelectAll   = "ctrl+a"
+	mouseWheelUp   = "wheel up"
+	mouseWheelDown = "wheel down"
+	digits         = "0123456789"
 )
+
+// ----------------------------------- Stage 0: Welcome -----------------------------------
 
 func (m *Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -61,36 +65,7 @@ func (m *Model) handleWelcomePage(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// getFocusedCredentialContent returns full content for the currently focused provider credential.
-func (m *Model) getFocusedCredentialContent() string {
-	if len(m.providers) == 0 {
-		return ""
-	}
-	p := m.providers[m.providerFocusIndex]
-
-	if p.HasPresetCredentials && p.CredentialSource == CredentialSourcePreset {
-		switch creds := p.PresetCredentials.(type) {
-		case KubeVirtCredentials:
-			return creds.Kubeconfig.Value()
-		case GCPCredentials:
-			return creds.ServiceAccount.Value()
-		default:
-			// Fallback: return the masked summary text
-			return m.renderPresetCredentialsSummary(p)
-		}
-	}
-
-	switch creds := p.Credentials.(type) {
-	case KubeVirtCredentials:
-		return creds.Kubeconfig.Value()
-	case GCPCredentials:
-		return creds.ServiceAccount.Value()
-	case AWSCredentials:
-		return creds.AccessKeyID.Value() + "\n" + creds.SecretAccessKey.Value()
-	default:
-		return ""
-	}
-}
+// ----------------------------------- Stage 1: Environment Selection -----------------------------------
 
 func (m *Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -316,6 +291,82 @@ func (m *Model) handleEnvironmentSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	}
 }
 
+// kubeconfigSection groups options of the same type into a named section.
+type kubeconfigSection struct {
+	sectionType string
+	options     []KubeconfigOption
+}
+
+// kubeconfigSections returns the ordered list of non-empty kubeconfig sections.
+func (m Model) kubeconfigSections() []kubeconfigSection {
+	buckets := map[string][]KubeconfigOption{}
+	for _, opt := range m.existingEnv.KubeconfigOptions {
+		buckets[opt.Type] = append(buckets[opt.Type], opt)
+	}
+	var sections []kubeconfigSection
+	for _, t := range []string{"env", "file", "custom"} {
+		if len(buckets[t]) > 0 {
+			sections = append(sections, kubeconfigSection{t, buckets[t]})
+		}
+	}
+	return sections
+}
+
+// getKubeconfigSectionAtIndex returns the section type ("env", "file", "custom") if the given index
+// is a section header, otherwise returns empty string.
+func (m Model) getKubeconfigSectionAtIndex(index int) string {
+	currentIndex := 0
+	for _, s := range m.kubeconfigSections() {
+		if index == currentIndex {
+			return s.sectionType
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections[s.sectionType] {
+			currentIndex += len(s.options)
+		}
+	}
+	return ""
+}
+
+// getKubeconfigOptionIndexFromVisualIndex converts a visual index (including headers) to an actual option index.
+// Returns -1 if the visual index is a header.
+func (m Model) getKubeconfigOptionIndexFromVisualIndex(visualIndex int) int {
+	currentIndex := 0
+	optionIndex := 0
+	for _, s := range m.kubeconfigSections() {
+		if visualIndex == currentIndex {
+			return -1 // Header
+		}
+		currentIndex++
+		if m.existingEnv.KubeconfigExpandedSections[s.sectionType] {
+			for range s.options {
+				if visualIndex == currentIndex {
+					return optionIndex
+				}
+				currentIndex++
+				optionIndex++
+			}
+		} else {
+			optionIndex += len(s.options)
+		}
+	}
+	return -1
+}
+
+// getMaxKubeconfigVisualIndex returns the maximum visual index (including headers).
+func (m Model) getMaxKubeconfigVisualIndex() int {
+	count := 0
+	for _, s := range m.kubeconfigSections() {
+		count++ // Header
+		if m.existingEnv.KubeconfigExpandedSections[s.sectionType] {
+			count += len(s.options)
+		}
+	}
+	return count - 1
+}
+
+// ----------------------------------- Stage 2: Release Selection -----------------------------------
+
 func (m *Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case keySelectAll:
@@ -403,16 +454,7 @@ func (m *Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			minorVersions := m.releaseSelection.MinorVersions[currentMajor]
 			minorVersion := minorVersions[m.releaseSelection.FocusedMinorIndex]
 			m.releaseSelection.SelectedMinor[minorVersion] = !m.releaseSelection.SelectedMinor[minorVersion]
-
-			// Check if all minors in this major are selected
-			allMinorsSelected := true
-			for _, minor := range minorVersions {
-				if !m.releaseSelection.SelectedMinor[minor] {
-					allMinorsSelected = false
-					break
-				}
-			}
-			m.releaseSelection.SelectedMajor[currentMajor] = allMinorsSelected
+			m.syncMajorSelectionState(currentMajor)
 		} else {
 			// Toggle selection of major version (selects/deselects all minors)
 			m.releaseSelection.SelectedMajor[currentMajor] = !m.releaseSelection.SelectedMajor[currentMajor]
@@ -444,6 +486,52 @@ func (m *Model) handleReleaseSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// based on whether all its minor versions are selected.
+func (m *Model) syncMajorSelectionState(major string) {
+	minorVersions := m.releaseSelection.MinorVersions[major]
+	allSelected := true
+	for _, minor := range minorVersions {
+		if !m.releaseSelection.SelectedMinor[minor] {
+			allSelected = false
+			break
+		}
+	}
+	m.releaseSelection.SelectedMajor[major] = allSelected
+}
+
+// ----------------------------------- Stage 3: Provider Selection -----------------------------------
+
+// getFocusedCredentialContent returns full content for the currently focused provider credential.
+func (m *Model) getFocusedCredentialContent() string {
+	if len(m.providers) == 0 {
+		return ""
+	}
+	p := m.providers[m.providerFocusIndex]
+
+	if p.HasPresetCredentials && p.CredentialSource == CredentialSourcePreset {
+		switch creds := p.PresetCredentials.(type) {
+		case KubeVirtCredentials:
+			return creds.Kubeconfig.Value()
+		case GCPCredentials:
+			return creds.ServiceAccount.Value()
+		default:
+			// Fallback: return the masked summary text
+			return m.renderPresetCredentialsSummary(p)
+		}
+	}
+
+	switch creds := p.Credentials.(type) {
+	case KubeVirtCredentials:
+		return creds.Kubeconfig.Value()
+	case GCPCredentials:
+		return creds.ServiceAccount.Value()
+	case AWSCredentials:
+		return creds.AccessKeyID.Value() + "\n" + creds.SecretAccessKey.Value()
+	default:
+		return ""
+	}
 }
 
 func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -527,20 +615,7 @@ func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.providers[m.providerFocusIndex].Selected {
 			content := m.getFocusedCredentialContent()
 			if content != "" {
-				m.viewModalContent = content
-				m.viewModalTitle = m.providers[m.providerFocusIndex].DisplayName + " credentials"
-				m.viewModalVisible = true
-
-				uiInnerWidth := m.getUIInnerWidth()
-				uiInnerHeight := m.getUIInnerHeight()
-				vpHeight := uiInnerHeight
-				if vpHeight < 3 {
-					vpHeight = 3
-				}
-				m.viewModalViewport = viewport.New(uiInnerWidth, vpHeight)
-				wrappedContent := lipgloss.NewStyle().Width(uiInnerWidth).Render(m.viewModalContent)
-				m.viewModalViewport.SetContent(wrappedContent)
-				m.viewModalViewport.GotoTop()
+				m.showViewModal(m.providers[m.providerFocusIndex].DisplayName+" credentials", content)
 			}
 		}
 		return m, nil
@@ -552,22 +627,11 @@ func (m *Model) handleProviderSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.providers[m.providerFocusIndex].CredentialSource == CredentialSourcePreset {
 				return m, nil
 			}
-			// Calculate the actual credential field index
-			credentialFieldIndex := m.providerFieldIndex
-			if m.providers[m.providerFocusIndex].HasPresetCredentials {
-				// With preset: Field 0 = checkbox, Field 1 = "From Preset", Field 2 = "Enter Custom Credentials", Field 3+ = credentials
-				// So credential field 1 starts at providerFieldIndex 3
-				// Skip fields 1 and 2 (credential source selectors)
-				if m.providerFieldIndex > 2 {
-					credentialFieldIndex = m.providerFieldIndex - 2
-				} else {
-					// On fields 1 or 2 (credential source selectors), no text input
-					return m, nil
-				}
+			fIdx := credentialFieldIndex(m.providers[m.providerFocusIndex], m.providerFieldIndex)
+			if fIdx < 0 {
+				return m, nil
 			}
-			// Without preset: Field 0 = checkbox, Field 1+ = credentials
-			// credentialFieldIndex is 1-based for credential fields
-			m.providers[m.providerFocusIndex], cmd = m.updateProviderCredentialField(m.providers[m.providerFocusIndex], credentialFieldIndex, msg)
+			m.providers[m.providerFocusIndex], cmd = m.updateProviderCredentialField(m.providers[m.providerFocusIndex], fIdx, msg)
 		}
 		return m, cmd
 	}
@@ -713,18 +777,8 @@ func (m *Model) updateProviderFocus() {
 
 	// Focus the current field in the currently focused provider
 	if m.providers[m.providerFocusIndex].Selected && m.providerFieldIndex > 0 {
-		// Only focus credential input fields, not radio buttons
-		credentialFieldIndex := m.providerFieldIndex
-		if m.providers[m.providerFocusIndex].HasPresetCredentials {
-			// Fields 1 and 2 are radio buttons, fields 3+ are credential inputs
-			if m.providerFieldIndex > 2 {
-				credentialFieldIndex = m.providerFieldIndex - 2
-				m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], credentialFieldIndex)
-			}
-			// Fields 1 and 2 are radio buttons, no text input focus needed
-		} else {
-			// No preset: Field 1+ are credential inputs
-			m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], credentialFieldIndex)
+		if fIdx := credentialFieldIndex(m.providers[m.providerFocusIndex], m.providerFieldIndex); fIdx > 0 {
+			m.providers[m.providerFocusIndex] = m.focusProviderField(m.providers[m.providerFocusIndex], fIdx)
 		}
 	}
 }
@@ -740,6 +794,20 @@ func (m Model) focusProviderField(provider Provider, fieldIndex int) Provider {
 	provider, _ = m.applyProviderCredentialFieldAction(provider, fieldIndex, tea.KeyMsg{}, credentialFieldActionFocus)
 	return provider
 }
+
+// credentialFieldIndex returns the 1-based credential field index for a provider,
+// adjusting for preset selector fields. Returns -1 if the field is not a credential input.
+func credentialFieldIndex(provider Provider, fieldIndex int) int {
+	if provider.HasPresetCredentials {
+		if fieldIndex > 2 {
+			return fieldIndex - 2
+		}
+		return -1 // On radio-button fields 1 or 2
+	}
+	return fieldIndex
+}
+
+// ----------------------------------- Stage 4: Distribution Selection -----------------------------------
 
 func (m *Model) handleDistributionSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
@@ -880,336 +948,7 @@ func (m Model) getDistributionFocusedDistribution() string {
 	return ""
 }
 
-// region SettingsTreeHelpers
-
-func settingGroupKey(provider, group string) string {
-	return fmt.Sprintf("%s:%s", provider, group)
-}
-
-func settingOptionKey(provider, group, option string) string {
-	return fmt.Sprintf("%s:%s:%s", provider, group, option)
-}
-
-func isProviderHeaderFocused(provider string, groupIdx int) bool {
-	return provider != "" && groupIdx == -1
-}
-
-// getFocusedSettingItem resolves the currently focused settings-tree item.
-// It returns (provider, -1) for provider headers and (provider, groupIdx) for group headers.
-// When respectGroupExpansion is true, option rows are counted only if group.IsExpanded is true.
-func getFocusedSettingItem(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int, respectGroupExpansion bool) (string, int) {
-	currentIndex := 0
-	for _, provider := range providers {
-		if currentIndex == focusedIndex {
-			return provider, -1
-		}
-		currentIndex++
-
-		if expandedProviders[provider] {
-			groups := settingsByProvider[provider]
-			for groupIdx, group := range groups {
-				if currentIndex == focusedIndex {
-					return provider, groupIdx
-				}
-				currentIndex++
-
-				if !respectGroupExpansion || group.IsExpanded {
-					currentIndex += len(group.Options)
-				}
-			}
-		}
-	}
-
-	return "", -1
-}
-
-// getFocusedSettingOption resolves the currently focused item including option rows.
-// It returns (provider, -1, -1) for provider headers, (provider, groupIdx, -1) for group headers,
-// and (provider, groupIdx, optionIdx) for option rows.
-func getFocusedSettingOption(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int) (string, int, int) {
-	currentIndex := 0
-	for _, provider := range providers {
-		if currentIndex == focusedIndex {
-			return provider, -1, -1
-		}
-		currentIndex++
-
-		if expandedProviders[provider] {
-			groups := settingsByProvider[provider]
-			for groupIdx, group := range groups {
-				if currentIndex == focusedIndex {
-					return provider, groupIdx, -1
-				}
-				currentIndex++
-
-				for optionIdx := range group.Options {
-					if currentIndex == focusedIndex {
-						return provider, groupIdx, optionIdx
-					}
-					currentIndex++
-				}
-			}
-		}
-	}
-
-	return "", -1, -1
-}
-
-// endregion SettingsTreeHelpers
-
-// Shared settings-stage helpers.
-// region SettingsStageHelpers
-func moveSelectionFocus(focused *int, max int, key string) {
-	switch key {
-	case keyUp:
-		if *focused > 0 {
-			*focused--
-		}
-	case keyDown:
-		if *focused < max {
-			*focused++
-		}
-	}
-}
-
-func toggleFocusedSetting(groups []SettingGroup, selected map[string]bool, selectedGroups map[string]bool, provider string, groupIdx, optionIdx int) {
-	if groupIdx < 0 || groupIdx >= len(groups) {
-		return
-	}
-
-	group := groups[groupIdx]
-	groupKey := settingGroupKey(provider, group.Key)
-
-	if optionIdx == -1 {
-		if len(group.Options) == 0 {
-			selectedGroups[groupKey] = !selectedGroups[groupKey]
-			return
-		}
-
-		allSelected := true
-		for _, option := range group.Options {
-			optionKey := settingOptionKey(provider, group.Key, option)
-			if !selected[optionKey] {
-				allSelected = false
-				break
-			}
-		}
-
-		for _, option := range group.Options {
-			optionKey := settingOptionKey(provider, group.Key, option)
-			selected[optionKey] = !allSelected
-		}
-		selectedGroups[groupKey] = !allSelected
-		return
-	}
-
-	if optionIdx >= len(group.Options) {
-		return
-	}
-
-	optionKey := settingOptionKey(provider, group.Key, group.Options[optionIdx])
-	selected[optionKey] = !selected[optionKey]
-
-	allSelected := true
-	for _, option := range group.Options {
-		optKey := settingOptionKey(provider, group.Key, option)
-		if !selected[optKey] {
-			allSelected = false
-			break
-		}
-	}
-	selectedGroups[groupKey] = allSelected
-}
-
-func toggleAllSettings(providers []string, settingsByProvider map[string][]SettingGroup, selected map[string]bool, selectedGroups map[string]bool) {
-	allSelected := true
-	for _, provider := range providers {
-		groups := settingsByProvider[provider]
-		for _, group := range groups {
-			for _, option := range group.Options {
-				selectionKey := settingOptionKey(provider, group.Key, option)
-				if !selected[selectionKey] {
-					allSelected = false
-					break
-				}
-			}
-			if !allSelected {
-				break
-			}
-		}
-		if !allSelected {
-			break
-		}
-	}
-
-	for _, provider := range providers {
-		groups := settingsByProvider[provider]
-		for _, group := range groups {
-			groupKey := settingGroupKey(provider, group.Key)
-			for _, option := range group.Options {
-				selectionKey := settingOptionKey(provider, group.Key, option)
-				selected[selectionKey] = !allSelected
-			}
-			selectedGroups[groupKey] = !allSelected
-		}
-	}
-}
-
-func getSettingsMaxFocusIndex(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool) int {
-	count := 0
-	for _, provider := range providers {
-		count++ // Provider header
-		if expandedProviders[provider] {
-			groups := settingsByProvider[provider]
-			for _, group := range groups {
-				count++                     // Setting group header
-				count += len(group.Options) // Options (always shown)
-			}
-		}
-	}
-	return count - 1
-}
-
-func setProviderExpanded(provider string, groupIdx int, expandedProviders map[string]bool, expanded bool) {
-	if provider != "" && groupIdx == -1 {
-		expandedProviders[provider] = expanded
-	}
-}
-
-func selectedProviderNames(providers []Provider) []string {
-	selectedProviders := make([]string, 0)
-	for _, provider := range providers {
-		if provider.Selected {
-			selectedProviders = append(selectedProviders, provider.DisplayName)
-		}
-	}
-	return selectedProviders
-}
-
-func hasAnySelected(selection map[string]bool) bool {
-	for _, selected := range selection {
-		if selected {
-			return true
-		}
-	}
-	return false
-}
-
-// handleSharedSettingsKeys processes the common settings-stage keys:
-// up/down, left/right, space and select-all.
-// It returns true when the key was handled.
-func handleSharedSettingsKeys(
-	key string,
-	focusedIndex *int,
-	maxIndex int,
-	getFocusedItem func() (string, int),
-	getFocusedOption func() (string, int, int),
-	expandedProviders map[string]bool,
-	providers []string,
-	settingsByProvider map[string][]SettingGroup,
-	selected map[string]bool,
-	selectedGroups map[string]bool,
-) bool {
-	switch key {
-	case keyUp, keyDown:
-		moveSelectionFocus(focusedIndex, maxIndex, key)
-		return true
-	case keyRight:
-		provider, groupIdx := getFocusedItem()
-		setProviderExpanded(provider, groupIdx, expandedProviders, true)
-		return true
-	case keyLeft:
-		provider, groupIdx := getFocusedItem()
-		setProviderExpanded(provider, groupIdx, expandedProviders, false)
-		return true
-	case keySpace:
-		provider, groupIdx := getFocusedItem()
-		if isProviderHeaderFocused(provider, groupIdx) {
-			return true
-		}
-
-		provider, groupIdx, optionIdx := getFocusedOption()
-		if provider == "" {
-			return true
-		}
-
-		groups := settingsByProvider[provider]
-		toggleFocusedSetting(groups, selected, selectedGroups, provider, groupIdx, optionIdx)
-		return true
-	case keySelectAll:
-		toggleAllSettings(providers, settingsByProvider, selected, selectedGroups)
-		return true
-	}
-
-	return false
-}
-
-// endregion SettingsStageHelpers
-
-// Stage transition helpers (initialize loading state + fetch commands).
-// region StageTransitionHelpers
-func (m *Model) buildDatacenterSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(selectedProviders))
-	for _, provider := range selectedProviders {
-		if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
-			ps.LoadingSettings = true
-			ps.SettingsFetchError = ""
-			m.datacenterSettingsSelection.ProviderSettings[provider] = ps
-		}
-		cmds = append(cmds, m.fetchDatacenterSettingsForProvider(provider))
-	}
-	return cmds
-}
-
-func (m *Model) buildMachineSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(selectedProviders))
-	for _, provider := range selectedProviders {
-		if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
-			ps.LoadingSettings = true
-			ps.SettingsFetchError = ""
-			m.machineDeploymentSettingsSelection.ProviderSettings[provider] = ps
-		}
-		cmds = append(cmds, m.fetchMachineSettingsForProvider(provider))
-	}
-	return cmds
-}
-
-// endregion StageTransitionHelpers
-
-// Execution log helpers.
-// region ExecutionLogHelpers
-func (m *Model) refreshLogsViewport() {
-	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
-	m.Review.Viewport.GotoBottom()
-}
-
-func (m *Model) appendLogLine(line string) {
-	m.logs = append(m.logs, line)
-	m.refreshLogsViewport()
-}
-
-func (m *Model) appendNonEmptyOutput(output string) {
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if line != "" {
-			m.logs = append(m.logs, line)
-		}
-	}
-	m.refreshLogsViewport()
-}
-
-func (m *Model) startExecutionCancellation() tea.Cmd {
-	m.executionCancelling = true
-	m.executionError = "Test execution cancelled by user"
-	m.quitConfirmVisible = false
-	m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
-	if m.Review.Viewport.Width > 0 {
-		m.refreshLogsViewport()
-	}
-	return m.cleanupTestExecution()
-}
-
-// endregion ExecutionLogHelpers
+// ----------------------------------- Stage 5: Datacenter Settings Selection -----------------------------------
 
 // handleDatacenterSettingsSelection handles input for the datacenter settings selection stage.
 func (m *Model) handleDatacenterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1283,6 +1022,8 @@ func (m Model) getDatacenterFocusedOption() (string, int, int) {
 		m.datacenterSettingsSelection.FocusedIndex,
 	)
 }
+
+// ----------------------------------- Stage 6: Cluster Settings Selection -----------------------------------
 
 // handleClusterSettingsSelection handles input for the cluster settings selection stage.
 func (m *Model) handleClusterSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1363,6 +1104,8 @@ func (m Model) getClusterFocusedOption() (string, int, int) {
 	)
 }
 
+// ----------------------------------- Stage 7: Machine Deployment Settings -----------------------------------
+
 // handleMachineDeploymentSettingsSelection handles input for the machine deployment settings selection stage.
 func (m *Model) handleMachineDeploymentSettingsSelection(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if handleSharedSettingsKeys(
@@ -1431,156 +1174,7 @@ func (m Model) getMachineDeploymentFocusedOption() (string, int, int) {
 	)
 }
 
-// handleWindowSize manages viewport resizing.
-func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) tea.Cmd {
-	m.terminalWidth = msg.Width
-	m.terminalHeight = msg.Height
-	viewportWidth := m.getUIInnerWidth()
-	viewportHeight := m.getUIHeight() - 4
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-	m.Review.Viewport.Width = viewportWidth
-	m.Review.Viewport.Height = viewportHeight
-	return nil
-}
-
-// handleStart initializes execution.
-func (m *Model) handleStart(msg startMsg) tea.Cmd {
-	m.cmdChan = msg.ch
-	viewportWidth := m.getUIInnerWidth()
-	viewportHeight := m.getUIHeight() - 4
-	if viewportHeight < 1 {
-		viewportHeight = 1
-	}
-	if m.Review.Viewport.Width == 0 {
-		m.Review.Viewport = viewport.New(viewportWidth, viewportHeight)
-	} else {
-		m.Review.Viewport.Width = viewportWidth
-		m.Review.Viewport.Height = viewportHeight
-	}
-	return streamLogs(m.cmdChan)
-}
-
-// handleLog processes log messages.
-func (m *Model) handleLog(msg logMsg) tea.Cmd {
-	m.appendLogLine(msg.line)
-	return streamLogs(m.cmdChan)
-}
-
-// // handleError processes error messages.
-// func (m *Model) handleError(msg errMsg) tea.Cmd {
-// 	m.executionError = fmt.Sprintf("The bootstrapping process for Kubermatic Virtualization has encountered an issue. For more details, please review the log file located at /tmp/%s.", kubeone.DefaultLogFileName)
-// 	m.executionDone = true
-// 	m.logs = append(m.logs, fmt.Sprintf("[ERROR] %v", msg.err))
-// 	m.stage = stageDone
-// 	return nil
-// }
-
-// handleDone processes key input in the done stage.
-func (m Model) handleDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case keyQuit:
-		return m, tea.Quit
-	}
-	return m, nil
-}
-
-// handleExecuting processes key input in the executing stage.
-func (m *Model) handleExecuting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case keyControlC:
-		// Don't show quit confirmation if already cancelling
-		if !m.executionCancelling {
-			m.quitConfirmVisible = true
-			m.quitConfirmIndex = 0 // Default to "No"
-		}
-		return m, nil
-	}
-
-	// Allow user to scroll through logs if viewport is present
-	if m.Review.Viewport.TotalLineCount() > 0 {
-		switch msg.String() {
-		case keyUp:
-			m.Review.Viewport.LineUp(1)
-			return m, nil
-		case keyDown:
-			m.Review.Viewport.LineDown(1)
-			return m, nil
-		}
-	}
-	return m, nil
-}
-
-// handleDoneMessage processes completion messages from doneMsg.
-func (m *Model) handleDoneMessage(_ doneMsg) tea.Cmd {
-	// Only mark success if no prior error was recorded
-	if m.executionError == "" {
-		m.executionDone = true
-		m.logs = append(m.logs, "Successfully applied configuration!", "[DONE] Process completed")
-		m.refreshLogsViewport()
-		m.stage = stageDone
-	}
-	return nil
-}
-
-// handleExecOutput processes execution output.
-func (m *Model) handleExecOutput(msg execOutputMsg) tea.Cmd {
-	m.appendNonEmptyOutput(msg.output)
-
-	if msg.success {
-		m.executionDone = true
-		m.stage = stageDone
-	}
-	if msg.err != nil {
-		m.executionError = msg.err.Error()
-	}
-	return nil
-}
-
-func streamLogs(ch <-chan tea.Msg) tea.Cmd {
-	return func() tea.Msg {
-		msg, ok := <-ch
-		if !ok {
-			return doneMsg{success: true}
-		}
-		return msg
-	}
-}
-
-func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
-	switch msg.String() {
-	case keyLeft, keyShiftTab:
-		if m.quitConfirmIndex > 0 {
-			m.quitConfirmIndex--
-		}
-		return true, nil
-	case keyRight, keyTab:
-		if m.quitConfirmIndex < 1 {
-			m.quitConfirmIndex++
-		}
-		return true, nil
-	case keyEnter:
-		if m.quitConfirmIndex == 1 { // Yes
-			if m.stage == stageExecuting && !m.executionCancelling {
-				return true, m.startExecutionCancellation()
-			}
-			// Regular quit for other stages
-			return true, tea.Quit
-		}
-		m.quitConfirmVisible = false
-		return true, nil
-	case keyEsc, keyNo:
-		m.quitConfirmVisible = false
-		return true, nil
-	case keyYes, keyControlC:
-		if m.stage == stageExecuting && !m.executionCancelling {
-			return true, m.startExecutionCancellation()
-		}
-		return true, tea.Quit
-	}
-	return false, nil
-}
+// ----------------------------------- Stage 8: Cluster Configuration -----------------------------------
 
 // handleClusterConfiguration handles input for the cluster configuration stage.
 func (m *Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1597,21 +1191,12 @@ func (m *Model) handleClusterConfiguration(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 		return m, nil
 
-	case keyLeft:
-		// Collapse category if focused on a category header
+	case keyLeft, keyRight:
+		// Expand/collapse category if focused on a category header
 		catIdx, _, itemType := m.getClusterConfigFocusedItem()
 		if itemType == "category" && catIdx >= 0 && catIdx < len(m.clusterConfiguration.Categories) {
 			categoryName := m.clusterConfiguration.Categories[catIdx].Name
-			m.clusterConfiguration.ExpandedCategories[categoryName] = false
-		}
-		return m, nil
-
-	case keyRight:
-		// Expand category if focused on a category header
-		catIdx, _, itemType := m.getClusterConfigFocusedItem()
-		if itemType == "category" && catIdx >= 0 && catIdx < len(m.clusterConfiguration.Categories) {
-			categoryName := m.clusterConfiguration.Categories[catIdx].Name
-			m.clusterConfiguration.ExpandedCategories[categoryName] = true
+			m.clusterConfiguration.ExpandedCategories[categoryName] = (msg.String() == keyRight)
 		}
 		return m, nil
 
@@ -1802,245 +1387,34 @@ func (m Model) parseConfigValue(setting *ConfigSetting, value string) error {
 	return nil
 }
 
-// getKubeconfigSectionAtIndex returns the section type ("env", "file", "custom") if the given index
-// is a section header, otherwise returns empty string
-func (m Model) getKubeconfigSectionAtIndex(index int) string {
-	currentIndex := 0
-
-	// Count env options
-	var envOptions, fileOptions, customOptions []KubeconfigOption
-	for _, option := range m.existingEnv.KubeconfigOptions {
-		switch option.Type {
-		case "env":
-			envOptions = append(envOptions, option)
-		case "file":
-			fileOptions = append(fileOptions, option)
-		case "custom":
-			customOptions = append(customOptions, option)
-		}
-	}
-
-	// Check if index is env section header
-	if len(envOptions) > 0 {
-		if index == currentIndex {
-			return "env"
-		}
-		currentIndex++
-		if m.existingEnv.KubeconfigExpandedSections["env"] {
-			currentIndex += len(envOptions)
-		}
-	}
-
-	// Check if index is file section header
-	if len(fileOptions) > 0 {
-		if index == currentIndex {
-			return "file"
-		}
-		currentIndex++
-		if m.existingEnv.KubeconfigExpandedSections["file"] {
-			currentIndex += len(fileOptions)
-		}
-	}
-
-	// Check if index is custom section header
-	if len(customOptions) > 0 {
-		if index == currentIndex {
-			return "custom"
-		}
-	}
-
-	return ""
-}
-
-// getKubeconfigOptionIndexFromVisualIndex converts a visual index (including headers) to an actual option index
-// Returns -1 if the visual index is a header
-func (m Model) getKubeconfigOptionIndexFromVisualIndex(visualIndex int) int {
-	currentIndex := 0
-	optionIndex := 0
-
-	// Count env options
-	var envOptions, fileOptions, customOptions []KubeconfigOption
-	for _, option := range m.existingEnv.KubeconfigOptions {
-		switch option.Type {
-		case "env":
-			envOptions = append(envOptions, option)
-		case "file":
-			fileOptions = append(fileOptions, option)
-		case "custom":
-			customOptions = append(customOptions, option)
-		}
-	}
-
-	// Process env section
-	if len(envOptions) > 0 {
-		if visualIndex == currentIndex {
-			return -1 // This is the header
-		}
-		currentIndex++
-		if m.existingEnv.KubeconfigExpandedSections["env"] {
-			for i := 0; i < len(envOptions); i++ {
-				if visualIndex == currentIndex {
-					return optionIndex
-				}
-				currentIndex++
-				optionIndex++
-			}
-		} else {
-			optionIndex += len(envOptions)
-		}
-	}
-
-	// Process file section
-	if len(fileOptions) > 0 {
-		if visualIndex == currentIndex {
-			return -1 // This is the header
-		}
-		currentIndex++
-		if m.existingEnv.KubeconfigExpandedSections["file"] {
-			for i := 0; i < len(fileOptions); i++ {
-				if visualIndex == currentIndex {
-					return optionIndex
-				}
-				currentIndex++
-				optionIndex++
-			}
-		} else {
-			optionIndex += len(fileOptions)
-		}
-	}
-
-	// Process custom section
-	if len(customOptions) > 0 {
-		if visualIndex == currentIndex {
-			return -1 // This is the header
-		}
-		currentIndex++
-		if m.existingEnv.KubeconfigExpandedSections["custom"] {
-			for i := 0; i < len(customOptions); i++ {
-				if visualIndex == currentIndex {
-					return optionIndex
-				}
-				currentIndex++
-				optionIndex++
-			}
-		}
-	}
-
-	return -1
-}
-
-// getMaxKubeconfigVisualIndex returns the maximum visual index (including headers)
-func (m Model) getMaxKubeconfigVisualIndex() int {
-	count := 0
-
-	// Count env options
-	var envOptions, fileOptions, customOptions []KubeconfigOption
-	for _, option := range m.existingEnv.KubeconfigOptions {
-		switch option.Type {
-		case "env":
-			envOptions = append(envOptions, option)
-		case "file":
-			fileOptions = append(fileOptions, option)
-		case "custom":
-			customOptions = append(customOptions, option)
-		}
-	}
-
-	// Count env section
-	if len(envOptions) > 0 {
-		count++ // Header
-		if m.existingEnv.KubeconfigExpandedSections["env"] {
-			count += len(envOptions)
-		}
-	}
-
-	// Count file section
-	if len(fileOptions) > 0 {
-		count++ // Header
-		if m.existingEnv.KubeconfigExpandedSections["file"] {
-			count += len(fileOptions)
-		}
-	}
-
-	// Count custom section
-	if len(customOptions) > 0 {
-		count++ // Header
-		if m.existingEnv.KubeconfigExpandedSections["custom"] {
-			count += len(customOptions)
-		}
-	}
-
-	return count - 1 // Convert count to max index
-}
+// ----------------------------------- Stage 9: Review Settings -----------------------------------
 
 // handleReviewSettings handles input for the review settings stage with nested provider structure.
 func (m *Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	providerReviews := m.generateReviewYAML()
-
-	// Calculate total navigable items
-	totalItems := 0
-	for _, providerReview := range providerReviews {
-		totalItems++ // Provider header
-		if m.Review.ExpandedProviders[providerReview.ProviderName] {
-			totalItems += len(providerReview.Sections) // Section headers when provider is expanded
-		}
-	}
-	totalItems++ // Add the save checkbox
-	maxIndex := totalItems - 1
+	maxIndex := m.getReviewMaxFocusIndex(providerReviews)
 
 	switch msg.String() {
 	case keyUp:
-		// Move focus up
 		if m.Review.FocusedIndex > 0 {
 			m.Review.FocusedIndex--
 		}
 		return m, nil
 
 	case keyDown:
-		// Move focus down
 		if m.Review.FocusedIndex < maxIndex {
 			m.Review.FocusedIndex++
 		}
 		return m, nil
 
 	case keyLeft, keyRight, keySpace:
-		// Toggle expand/collapse for focused item (provider or section)
-		currentIndex := 0
-		for _, providerReview := range providerReviews {
-			// Check if we're at the provider level
-			if currentIndex == m.Review.FocusedIndex {
-				// Toggle provider expansion
-				m.Review.ExpandedProviders[providerReview.ProviderName] = !m.Review.ExpandedProviders[providerReview.ProviderName]
-				return m, nil
-			}
-			currentIndex++
-
-			// Check sections if provider is expanded
-			if m.Review.ExpandedProviders[providerReview.ProviderName] {
-				for _, section := range providerReview.Sections {
-					if currentIndex == m.Review.FocusedIndex {
-						// Toggle section expansion
-						sectionKey := fmt.Sprintf("%s:%s", providerReview.ProviderName, section.Name)
-						m.Review.ExpandedSections[sectionKey] = !m.Review.ExpandedSections[sectionKey]
-						return m, nil
-					}
-					currentIndex++
-				}
-			}
-		}
-		// Check if we're at the save checkbox
-		if currentIndex == m.Review.FocusedIndex {
-			// Toggle save checkbox
-			m.Review.SaveToFile = !m.Review.SaveToFile
-			return m, nil
-		}
+		m.toggleReviewFocusedItem(providerReviews)
 		return m, nil
 
 	case keyEnter:
 		// Save provider configurations if checkbox is enabled
 		if m.Review.SaveToFile {
 			if err := m.saveProviderConfigurations(); err != nil {
-				// Log error but continue
 				m.executionError = fmt.Sprintf("Warning: Failed to save configuration files: %v", err)
 			}
 		}
@@ -2060,10 +1434,549 @@ func (m *Model) handleReviewSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.executeConformanceTests()
 
 	case keyEsc:
-		// Go back to cluster configuration
 		m.stage = stageClusterConfiguration
 		return m, nil
 	}
 
 	return m, nil
 }
+
+// getReviewMaxFocusIndex returns the maximum navigable index for the review stage.
+func (m Model) getReviewMaxFocusIndex(providerReviews []ProviderReview) int {
+	count := 0
+	for _, pr := range providerReviews {
+		count++ // Provider header
+		if m.Review.ExpandedProviders[pr.ProviderName] {
+			count += len(pr.Sections)
+		}
+	}
+	count++ // Save checkbox
+	return count - 1
+}
+
+// toggleReviewFocusedItem toggles expansion for the currently focused review item
+// (provider header, section header, or save checkbox).
+func (m *Model) toggleReviewFocusedItem(providerReviews []ProviderReview) {
+	currentIndex := 0
+	for _, pr := range providerReviews {
+		if currentIndex == m.Review.FocusedIndex {
+			m.Review.ExpandedProviders[pr.ProviderName] = !m.Review.ExpandedProviders[pr.ProviderName]
+			return
+		}
+		currentIndex++
+
+		if m.Review.ExpandedProviders[pr.ProviderName] {
+			for _, section := range pr.Sections {
+				if currentIndex == m.Review.FocusedIndex {
+					sectionKey := fmt.Sprintf("%s:%s", pr.ProviderName, section.Name)
+					m.Review.ExpandedSections[sectionKey] = !m.Review.ExpandedSections[sectionKey]
+					return
+				}
+				currentIndex++
+			}
+		}
+	}
+	// Save checkbox
+	if currentIndex == m.Review.FocusedIndex {
+		m.Review.SaveToFile = !m.Review.SaveToFile
+	}
+}
+
+// ----------------------------------- Stage 10: Executing & Done -----------------------------------
+
+// handleDone processes key input in the done stage.
+func (m Model) handleDone(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyQuit:
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleExecuting processes key input in the executing stage.
+func (m *Model) handleExecuting(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case keyControlC:
+		// Don't show quit confirmation if already cancelling
+		if !m.executionCancelling {
+			m.quitConfirmVisible = true
+			m.quitConfirmIndex = 0 // Default to "No"
+		}
+		return m, nil
+	}
+
+	// Allow user to scroll through logs if viewport is present
+	if m.Review.Viewport.TotalLineCount() > 0 {
+		switch msg.String() {
+		case keyUp, mouseWheelUp:
+			m.Review.Viewport.ScrollUp(1)
+			return m, nil
+		case keyDown, mouseWheelDown:
+			m.Review.Viewport.ScrollDown(1)
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+// handleDoneMessage processes completion messages from doneMsg.
+func (m *Model) handleDoneMessage(_ doneMsg) tea.Cmd {
+	// Only mark success if no prior error was recorded
+	if m.executionError == "" {
+		m.executionDone = true
+		m.logs = append(m.logs, "Successfully applied configuration!", "[DONE] Process completed")
+		m.refreshLogsViewport()
+		m.stage = stageDone
+	}
+	return nil
+}
+
+// handleExecOutput processes execution output.
+func (m *Model) handleExecOutput(msg execOutputMsg) tea.Cmd {
+	m.appendNonEmptyOutput(msg.output)
+
+	if msg.success {
+		m.executionDone = true
+		m.stage = stageDone
+	}
+	if msg.err != nil {
+		m.executionError = msg.err.Error()
+	}
+	return nil
+}
+
+func streamLogs(ch <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return doneMsg{success: true}
+		}
+		return msg
+	}
+}
+
+// confirmQuit returns the appropriate quit command: cancellation during execution, or tea.Quit otherwise.
+func (m *Model) confirmQuit() tea.Cmd {
+	if m.stage == stageExecuting && !m.executionCancelling {
+		return m.startExecutionCancellation()
+	}
+	return tea.Quit
+}
+
+func (m *Model) handleQuitConfirmation(msg tea.KeyMsg) (handled bool, cmd tea.Cmd) {
+	switch msg.String() {
+	case keyLeft, keyShiftTab:
+		if m.quitConfirmIndex > 0 {
+			m.quitConfirmIndex--
+		}
+		return true, nil
+	case keyRight, keyTab:
+		if m.quitConfirmIndex < 1 {
+			m.quitConfirmIndex++
+		}
+		return true, nil
+	case keyEnter:
+		if m.quitConfirmIndex == 1 { // Yes
+			return true, m.confirmQuit()
+		}
+		m.quitConfirmVisible = false
+		return true, nil
+	case keyEsc, keyNo:
+		m.quitConfirmVisible = false
+		return true, nil
+	case keyYes, keyControlC:
+		return true, m.confirmQuit()
+	}
+	return false, nil
+}
+
+// ----------------------------------- Common: UI Helpers -----------------------------------
+
+// showViewModal initialises and displays the view modal with the given title and content.
+func (m *Model) showViewModal(title, content string) {
+	m.viewModalContent = content
+	m.viewModalTitle = title
+	m.viewModalVisible = true
+
+	uiInnerWidth := m.getUIInnerWidth()
+	uiInnerHeight := m.getUIInnerHeight()
+	vpHeight := uiInnerHeight
+	if vpHeight < 3 {
+		vpHeight = 3
+	}
+	m.viewModalViewport = viewport.New(uiInnerWidth, vpHeight)
+	wrappedContent := lipgloss.NewStyle().Width(uiInnerWidth).Render(content)
+	m.viewModalViewport.SetContent(wrappedContent)
+	m.viewModalViewport.GotoTop()
+}
+
+// ----------------------------------- Common: Settings Tree Helpers -----------------------------------
+
+func settingGroupKey(provider, group string) string {
+	return fmt.Sprintf("%s:%s", provider, group)
+}
+
+func settingOptionKey(provider, group, option string) string {
+	return fmt.Sprintf("%s:%s:%s", provider, group, option)
+}
+
+func isProviderHeaderFocused(provider string, groupIdx int) bool {
+	return provider != "" && groupIdx == -1
+}
+
+// getFocusedSettingItem resolves the currently focused settings-tree item.
+// It returns (provider, -1) for provider headers and (provider, groupIdx) for group headers.
+// When respectGroupExpansion is true, option rows are counted only if group.IsExpanded is true.
+func getFocusedSettingItem(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int, respectGroupExpansion bool) (string, int) {
+	currentIndex := 0
+	for _, provider := range providers {
+		if currentIndex == focusedIndex {
+			return provider, -1
+		}
+		currentIndex++
+
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == focusedIndex {
+					return provider, groupIdx
+				}
+				currentIndex++
+
+				if !respectGroupExpansion || group.IsExpanded {
+					currentIndex += len(group.Options)
+				}
+			}
+		}
+	}
+
+	return "", -1
+}
+
+// getFocusedSettingOption resolves the currently focused item including option rows.
+// It returns (provider, -1, -1) for provider headers, (provider, groupIdx, -1) for group headers,
+// and (provider, groupIdx, optionIdx) for option rows.
+func getFocusedSettingOption(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool, focusedIndex int) (string, int, int) {
+	currentIndex := 0
+	for _, provider := range providers {
+		if currentIndex == focusedIndex {
+			return provider, -1, -1
+		}
+		currentIndex++
+
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
+			for groupIdx, group := range groups {
+				if currentIndex == focusedIndex {
+					return provider, groupIdx, -1
+				}
+				currentIndex++
+
+				for optionIdx := range group.Options {
+					if currentIndex == focusedIndex {
+						return provider, groupIdx, optionIdx
+					}
+					currentIndex++
+				}
+			}
+		}
+	}
+
+	return "", -1, -1
+}
+
+// ----------------------------------- Common: Settings Stage Helpers -----------------------------------
+
+func moveSelectionFocus(focused *int, max int, key string) {
+	switch key {
+	case keyUp:
+		if *focused > 0 {
+			*focused--
+		}
+	case keyDown:
+		if *focused < max {
+			*focused++
+		}
+	}
+}
+
+func toggleFocusedSetting(groups []SettingGroup, selected map[string]bool, selectedGroups map[string]bool, provider string, groupIdx, optionIdx int) {
+	if groupIdx < 0 || groupIdx >= len(groups) {
+		return
+	}
+
+	group := groups[groupIdx]
+	groupKey := settingGroupKey(provider, group.Key)
+
+	if optionIdx == -1 {
+		if len(group.Options) == 0 {
+			selectedGroups[groupKey] = !selectedGroups[groupKey]
+			return
+		}
+
+		allSelected := true
+		for _, option := range group.Options {
+			optionKey := settingOptionKey(provider, group.Key, option)
+			if !selected[optionKey] {
+				allSelected = false
+				break
+			}
+		}
+
+		for _, option := range group.Options {
+			optionKey := settingOptionKey(provider, group.Key, option)
+			selected[optionKey] = !allSelected
+		}
+		selectedGroups[groupKey] = !allSelected
+		return
+	}
+
+	if optionIdx >= len(group.Options) {
+		return
+	}
+
+	optionKey := settingOptionKey(provider, group.Key, group.Options[optionIdx])
+	selected[optionKey] = !selected[optionKey]
+
+	allSelected := true
+	for _, option := range group.Options {
+		optKey := settingOptionKey(provider, group.Key, option)
+		if !selected[optKey] {
+			allSelected = false
+			break
+		}
+	}
+	selectedGroups[groupKey] = allSelected
+}
+
+func toggleAllSettings(providers []string, settingsByProvider map[string][]SettingGroup, selected map[string]bool, selectedGroups map[string]bool) {
+	allSelected := true
+	for _, provider := range providers {
+		groups := settingsByProvider[provider]
+		for _, group := range groups {
+			for _, option := range group.Options {
+				selectionKey := settingOptionKey(provider, group.Key, option)
+				if !selected[selectionKey] {
+					allSelected = false
+					break
+				}
+			}
+			if !allSelected {
+				break
+			}
+		}
+		if !allSelected {
+			break
+		}
+	}
+
+	for _, provider := range providers {
+		groups := settingsByProvider[provider]
+		for _, group := range groups {
+			groupKey := settingGroupKey(provider, group.Key)
+			for _, option := range group.Options {
+				selectionKey := settingOptionKey(provider, group.Key, option)
+				selected[selectionKey] = !allSelected
+			}
+			selectedGroups[groupKey] = !allSelected
+		}
+	}
+}
+
+func getSettingsMaxFocusIndex(providers []string, settingsByProvider map[string][]SettingGroup, expandedProviders map[string]bool) int {
+	count := 0
+	for _, provider := range providers {
+		count++ // Provider header
+		if expandedProviders[provider] {
+			groups := settingsByProvider[provider]
+			for _, group := range groups {
+				count++                     // Setting group header
+				count += len(group.Options) // Options (always shown)
+			}
+		}
+	}
+	return count - 1
+}
+
+func setProviderExpanded(provider string, groupIdx int, expandedProviders map[string]bool, expanded bool) {
+	if provider != "" && groupIdx == -1 {
+		expandedProviders[provider] = expanded
+	}
+}
+
+func selectedProviderNames(providers []Provider) []string {
+	selectedProviders := make([]string, 0)
+	for _, provider := range providers {
+		if provider.Selected {
+			selectedProviders = append(selectedProviders, provider.DisplayName)
+		}
+	}
+	return selectedProviders
+}
+
+func hasAnySelected(selection map[string]bool) bool {
+	for _, selected := range selection {
+		if selected {
+			return true
+		}
+	}
+	return false
+}
+
+// handleSharedSettingsKeys processes the common settings-stage keys:
+// up/down, left/right, space and select-all.
+// It returns true when the key was handled.
+func handleSharedSettingsKeys(
+	key string,
+	focusedIndex *int,
+	maxIndex int,
+	getFocusedItem func() (string, int),
+	getFocusedOption func() (string, int, int),
+	expandedProviders map[string]bool,
+	providers []string,
+	settingsByProvider map[string][]SettingGroup,
+	selected map[string]bool,
+	selectedGroups map[string]bool,
+) bool {
+	switch key {
+	case keyUp, keyDown:
+		moveSelectionFocus(focusedIndex, maxIndex, key)
+		return true
+	case keyRight:
+		provider, groupIdx := getFocusedItem()
+		setProviderExpanded(provider, groupIdx, expandedProviders, true)
+		return true
+	case keyLeft:
+		provider, groupIdx := getFocusedItem()
+		setProviderExpanded(provider, groupIdx, expandedProviders, false)
+		return true
+	case keySpace:
+		provider, groupIdx := getFocusedItem()
+		if isProviderHeaderFocused(provider, groupIdx) {
+			return true
+		}
+
+		provider, groupIdx, optionIdx := getFocusedOption()
+		if provider == "" {
+			return true
+		}
+
+		groups := settingsByProvider[provider]
+		toggleFocusedSetting(groups, selected, selectedGroups, provider, groupIdx, optionIdx)
+		return true
+	case keySelectAll:
+		toggleAllSettings(providers, settingsByProvider, selected, selectedGroups)
+		return true
+	}
+
+	return false
+}
+
+// ----------------------------------- Common: Stage Transition Helpers -----------------------------------
+
+func (m *Model) buildDatacenterSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(selectedProviders))
+	for _, provider := range selectedProviders {
+		if ps, ok := m.datacenterSettingsSelection.ProviderSettings[provider]; ok {
+			ps.LoadingSettings = true
+			ps.SettingsFetchError = ""
+			m.datacenterSettingsSelection.ProviderSettings[provider] = ps
+		}
+		cmds = append(cmds, m.fetchDatacenterSettingsForProvider(provider))
+	}
+	return cmds
+}
+
+func (m *Model) buildMachineSettingsFetchCmds(selectedProviders []string) []tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(selectedProviders))
+	for _, provider := range selectedProviders {
+		if ps, ok := m.machineDeploymentSettingsSelection.ProviderSettings[provider]; ok {
+			ps.LoadingSettings = true
+			ps.SettingsFetchError = ""
+			m.machineDeploymentSettingsSelection.ProviderSettings[provider] = ps
+		}
+		cmds = append(cmds, m.fetchMachineSettingsForProvider(provider))
+	}
+	return cmds
+}
+
+// ----------------------------------- Common: Execution & Log Helpers -----------------------------------
+
+func (m *Model) refreshLogsViewport() {
+	m.Review.Viewport.SetContent(strings.Join(m.logs, "\n"))
+	m.Review.Viewport.GotoBottom()
+}
+
+func (m *Model) appendLogLine(line string) {
+	m.logs = append(m.logs, line)
+	m.refreshLogsViewport()
+}
+
+func (m *Model) appendNonEmptyOutput(output string) {
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if line != "" {
+			m.logs = append(m.logs, line)
+		}
+	}
+	m.refreshLogsViewport()
+}
+
+func (m *Model) startExecutionCancellation() tea.Cmd {
+	m.executionCancelling = true
+	m.executionError = "Test execution cancelled by user"
+	m.quitConfirmVisible = false
+	m.logs = append(m.logs, "\n⚠️  Cancellation requested - cleaning up resources...")
+	if m.Review.Viewport.Width > 0 {
+		m.refreshLogsViewport()
+	}
+	return m.cleanupTestExecution()
+}
+
+// ----------------------------------- Common: Window, Messages & Quit -----------------------------------
+
+// handleWindowSize manages viewport resizing.
+func (m *Model) handleWindowSize(msg tea.WindowSizeMsg) tea.Cmd {
+	m.terminalWidth = msg.Width
+	m.terminalHeight = msg.Height
+	viewportWidth := m.getUIInnerWidth()
+	viewportHeight := m.getUIHeight() - 4
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	m.Review.Viewport.Width = viewportWidth
+	m.Review.Viewport.Height = viewportHeight
+	return nil
+}
+
+// handleStart initializes execution.
+func (m *Model) handleStart(msg startMsg) tea.Cmd {
+	m.cmdChan = msg.ch
+	viewportWidth := m.getUIInnerWidth()
+	viewportHeight := m.getUIHeight() - 4
+	if viewportHeight < 1 {
+		viewportHeight = 1
+	}
+	if m.Review.Viewport.Width == 0 {
+		m.Review.Viewport = viewport.New(viewportWidth, viewportHeight)
+	} else {
+		m.Review.Viewport.Width = viewportWidth
+		m.Review.Viewport.Height = viewportHeight
+	}
+	return streamLogs(m.cmdChan)
+}
+
+// handleLog processes log messages.
+func (m *Model) handleLog(msg logMsg) tea.Cmd {
+	m.appendLogLine(msg.line)
+	return streamLogs(m.cmdChan)
+}
+
+// // handleError processes error messages.
+// func (m *Model) handleError(msg errMsg) tea.Cmd {
+// 	m.executionError = fmt.Sprintf("The bootstrapping process for Kubermatic Virtualization has encountered an issue. For more details, please review the log file located at /tmp/%s.", kubeone.DefaultLogFileName)
+// 	m.executionDone = true
+// 	m.logs = append(m.logs, fmt.Sprintf("[ERROR] %v", msg.err))
+// 	m.stage = stageDone
+// 	return nil
+// }
