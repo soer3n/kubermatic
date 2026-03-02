@@ -19,6 +19,7 @@ import (
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 )
 
 var defaultDatacenterSettings = settings.DatacenterSetting{
@@ -28,11 +29,78 @@ var defaultDatacenterSettings = settings.DatacenterSetting{
 	},
 }
 
+func getDefaultDatacenterSettings(ctx context.Context, providerConfig *providerconfig.Config, secrets legacytypes.Secrets) (settings.DatacenterSetting, error) {
+	switch providerConfig.CloudProvider {
+	case providerconfig.CloudProviderKubeVirt:
+		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
+		discoveredSettings, err := kubevirtProvider.DiscoverDefaultDatacenterSettings(ctx, providerConfig, secrets)
+		if err != nil {
+			return settings.DatacenterSetting{}, fmt.Errorf("failed to discover default datacenter settings: %w", err)
+		}
+		infraStorageClasses := []kubermaticv1.KubeVirtInfraStorageClass{}
+		vpcs := []kubermaticv1.VPC{}
+
+		for _, sc := range discoveredSettings.StorageClasses {
+			newSc := kubermaticv1.KubeVirtInfraStorageClass{
+				Name: sc.Name,
+			}
+			v, ok := sc.ObjectMeta.Annotations["storageclass.kubernetes.io/is-default-class"]
+			if ok && v == "true" {
+				newSc.IsDefaultClass = ptr.To(true)
+			} else {
+				newSc.IsDefaultClass = ptr.To(false)
+			}
+			infraStorageClasses = append(infraStorageClasses, newSc)
+		}
+
+		for _, vpc := range discoveredSettings.VPCs {
+			vpcs = append(vpcs, kubermaticv1.VPC{
+				Name:    vpc.Name,
+				Subnets: vpc.Subnets,
+			})
+		}
+		return settings.DatacenterSetting{
+			Name: "default",
+			Modifier: func(dc *kubermaticv1.Datacenter) {
+				dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{
+					ProviderNetwork: &kubermaticv1.ProviderNetwork{
+						Name: "default",
+						VPCs: vpcs,
+					},
+					InfraStorageClasses: infraStorageClasses,
+					Images: kubermaticv1.KubeVirtImageSources{
+						HTTP: &kubermaticv1.KubeVirtHTTPSource{
+							OperatingSystems: map[providerconfig.OperatingSystem]kubermaticv1.OSVersions{
+								providerconfig.OperatingSystemUbuntu: {
+									"20.04": "docker://quay.io/kubermatic-virt-disks/ubuntu:20.04",
+									"22.04": "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04",
+								},
+								providerconfig.OperatingSystemRHEL: {
+									"8": "docker://quay.io/kubermatic-virt-disks/rhel:8",
+									"9": "docker://quay.io/kubermatic-virt-disks/rhel:9",
+								},
+								providerconfig.OperatingSystemFlatcar: {
+									"3374.2.2": "docker://quay.io/kubermatic-virt-disks/flatcar:3374.2.2",
+								},
+								providerconfig.OperatingSystemRockyLinux: {
+									"8": "docker://quay.io/kubermatic-virt-disks/rocky:8",
+									"9": "docker://quay.io/kubermatic-virt-disks/rocky:9",
+								},
+							},
+						},
+					},
+				}
+			},
+		}, nil
+	}
+	return settings.DatacenterSetting{}, nil
+}
+
 func getProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets legacytypes.Secrets, cloudProvider providerconfig.CloudProvider) (providerConfig *providerconfig.Config, err error) {
 	switch cloudProvider {
 	case providerconfig.CloudProviderKubeVirt:
 		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
-		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log)
+		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log, "test-cluster")
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +116,7 @@ func getProviderSpec(log *zap.SugaredLogger, secrets legacytypes.Secrets, cloudP
 	switch cloudProvider {
 	case providerconfig.CloudProviderKubeVirt:
 		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
-		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log)
+		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, log, "test-cluster")
 		if err != nil {
 			return nil, err
 		}

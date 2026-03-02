@@ -18,7 +18,7 @@ import (
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpts *options.RuntimeOptions, legacyOpts *legacytypes.Options, opts *options.Options, infraClient ctrlclient.Client, projectName string, cloudProvider providerconfig.CloudProvider) (map[string]*Scenario, map[string]map[string][]string, map[string]map[string][]string, *kubermaticv1.Seed) {
+func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpts *options.RuntimeOptions, legacyOpts *legacytypes.Options, opts *options.Options, infraClient ctrlclient.Client, projectName string, cloudProvider providerconfig.CloudProvider) (map[string]*Scenario, map[string]map[string][]string, map[string]map[string][]string, map[string]string, *kubermaticv1.Seed) {
 	kkpConfig, err := options.LoadKubermaticConfiguration()
 	if err != nil {
 		log.Fatalw("Failed to load KKP configuration", zap.Error(err))
@@ -28,10 +28,17 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 	if err != nil {
 		log.Fatalw("Failed to get default kubevirt config", zap.Error(err))
 	}
+	if len(legacyOpts.PublicKeys) > 0 {
+		providerConfig.SSHPublicKeys = []string{string(legacyOpts.PublicKeys[0])}
+	}
 	datacenterNameMappings := make(map[string]string)
+	defaultDatacenterSettings, err := getDefaultDatacenterSettings(rootCtx, providerConfig, opts.Secrets)
+	if err != nil {
+		log.Fatalw("Failed to get default datacenter settings", zap.Error(err))
+	}
 	includedSeeds, excludedSeeds := buildDefaultSeedSettings(GenericDatacenterSettings(rootCtx, providerConfig, opts.Secrets), kkpConfig, log, defaultDatacenterSettings, opts.Excluded.DatacenterDescriptions, opts.Included.DatacenterDescriptions)
 	seed := &kubermaticv1.Seed{}
-	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: "kubermatic", Namespace: "kubermatic"}, seed)
+	err = runtimeOpts.SeedClusterClient.Get(rootCtx, apitypes.NamespacedName{Name: legacyOpts.KubermaticSeedName, Namespace: legacyOpts.KubermaticNamespace}, seed)
 	if err != nil {
 		log.Fatalw("Failed to get seed", zap.Error(err))
 	}
@@ -85,7 +92,19 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 	log.Info("generating scenarios...")
 	machineSettings := MachineSettings(rootCtx, providerConfig, legacyOpts.KubermaticNamespace, opts.Secrets, &opts.Resources)
 	machineSettings = append(machineSettings, ResourceMachineSettings(rootCtx, providerConfig, legacyOpts.KubermaticNamespace, opts.Secrets, &opts.Resources)...)
-	_, _, includedMachineDescriptions, excludedMachineDescriptions, scenarios, _ := buildNewScenarios(scenarios, machineSettings, newClusters, opts, log, providerConfig, resolver, nil, rootCtx, legacyOpts.Distributions, opts.Excluded.MachineDescriptions, opts.Included.MachineDescriptions)
+	_, _, includedMachineDescriptions, excludedMachineDescriptions, scenarios, _, _, _ := buildNewScenarios(scenarios, machineSettings, newClusters, opts, log, providerConfig, resolver, nil, rootCtx, legacyOpts.EnableDistributions, opts.Excluded.MachineDescriptions, opts.Included.MachineDescriptions)
 
-	return scenarios, includedMachineDescriptions, excludedMachineDescriptions, seed
+	// for _, scenario := range scenarios {
+	// 	if !scenario.Exclude {
+	// 		log.Infof("Including scenario %s: %s", scenario.ScenarioName, scenario.Description)
+	// 		for machineName, machineSpec := range scenario.Machines {
+	// 			pr := &providerconfig.Config{}
+	// 			json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, pr)
+	// 			xr := &kubevirt.RawConfig{}
+	// 			json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
+	// 			log.Infof("Provider spec for machine %s: %s", machineName, xr.VirtualMachine.Template)
+	// 		}
+	// 	}
+	// }
+	return scenarios, includedMachineDescriptions, excludedMachineDescriptions, datacenterNameMappings, seed
 }

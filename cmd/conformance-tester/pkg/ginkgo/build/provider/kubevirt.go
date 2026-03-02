@@ -144,6 +144,15 @@ func (k *KubeVirtProvider) DiscoverDefaultDatacenterSettings(ctx context.Context
 	}
 	// If VPC CRD does not exist, settings.VPCs will remain empty
 
+	var scsList storagev1.StorageClassList
+	if err := client.List(ctx, &scsList); err != nil {
+		return nil, fmt.Errorf("failed to list storage classes: %w", err)
+	}
+
+	for _, sc := range scsList.Items {
+		defaultSettings.StorageClasses = append(defaultSettings.StorageClasses, sc)
+	}
+
 	return defaultSettings, nil
 }
 
@@ -151,23 +160,26 @@ func (k *KubeVirtProvider) BuildDefaultDatacenterSettings(defaultSettings *setti
 	modifiers := []settings.DatacenterSetting{}
 
 	for _, setting := range defaultSettings.VPCs {
-		modifiers = append(modifiers, settings.DatacenterSetting{
-			Name:  fmt.Sprintf("with vpc %s", setting.Name),
-			Group: "vpc",
-			Modifier: func(dc *kubermaticv1.Datacenter) {
-				if dc.Spec.Kubevirt == nil {
-					dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
-				}
-				if dc.Spec.Kubevirt.ProviderNetwork == nil {
-					dc.Spec.Kubevirt.ProviderNetwork = &kubermaticv1.ProviderNetwork{}
-				}
-				dc.Spec.Kubevirt.ProviderNetwork.VPCs = append(dc.Spec.Kubevirt.ProviderNetwork.VPCs, kubermaticv1.VPC{
-					Name:    setting.Name,
-					Subnets: setting.Subnets,
-				})
-			},
-		})
-
+		for _, subnet := range setting.Subnets {
+			modifiers = append(modifiers, settings.DatacenterSetting{
+				Name:  fmt.Sprintf("with subnet %s in vpc %s", subnet.Name, setting.Name),
+				Group: "vpc",
+				Modifier: func(dc *kubermaticv1.Datacenter) {
+					if dc.Spec.Kubevirt == nil {
+						dc.Spec.Kubevirt = &kubermaticv1.DatacenterSpecKubevirt{}
+					}
+					if dc.Spec.Kubevirt.ProviderNetwork == nil {
+						dc.Spec.Kubevirt.ProviderNetwork = &kubermaticv1.ProviderNetwork{}
+					}
+					dc.Spec.Kubevirt.ProviderNetwork.VPCs = []kubermaticv1.VPC{
+						{
+							Name:    setting.Name,
+							Subnets: []kubermaticv1.Subnet{{Name: subnet.Name, CIDR: subnet.CIDR}},
+						},
+					}
+				},
+			})
+		}
 	}
 
 	return modifiers
@@ -178,7 +190,7 @@ func (a KubeVirtProviderAdapter) MachineSettings(ctx context.Context, providerCo
 	return ConvertModifiersToAny(raw)
 }
 
-func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, log *zap.SugaredLogger) (*kubevirt.RawConfig, error) {
+func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, log *zap.SugaredLogger, clusterName string) (*kubevirt.RawConfig, error) {
 	var err error
 
 	scheme := runtime.NewScheme()
@@ -207,15 +219,15 @@ func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, log *za
 	}
 
 	return &kubevirt.RawConfig{
-		ClusterName: providerconfig.ConfigVarString{Value: "test-cluster"},
+		ClusterName: providerconfig.ConfigVarString{Value: clusterName},
 		Auth: kubevirt.Auth{
 			Kubeconfig: providerconfig.ConfigVarString{Value: b64.StdEncoding.EncodeToString([]byte(secrets.Kubevirt.Kubeconfig))},
 		},
 		VirtualMachine: kubevirt.VirtualMachine{
-			DNSPolicy: providerconfig.ConfigVarString{Value: "None"},
-			DNSConfig: &v1.PodDNSConfig{
-				Nameservers: []string{"10.97.179.24"},
-			},
+			// DNSPolicy: providerconfig.ConfigVarString{Value: "None"},
+			// DNSConfig: &v1.PodDNSConfig{
+			// 	Nameservers: []string{"10.97.179.24"},
+			// },
 			EnableNetworkMultiQueue: providerconfig.ConfigVarBool{Value: ptr.To(true)},
 			Template: kubevirt.Template{
 				CPUs:   providerconfig.ConfigVarString{Value: "2"},
@@ -389,8 +401,10 @@ func (k *KubeVirtProvider) buildDefaultMachineSettings(defaultSettings *DefaultM
 			Name:  fmt.Sprintf("with primary disk storage class set to %s", sc),
 			Group: "primary-disk-sc",
 			Modify: func(spec *kubevirt.RawConfig) {
+				if len(spec.VirtualMachine.Template.PrimaryDisk.Size.Value) == 0 {
+					spec.VirtualMachine.Template.PrimaryDisk.Size.Value = "20Gi"
+				}
 				spec.VirtualMachine.Template.PrimaryDisk.StorageClassName.Value = sc
-				spec.VirtualMachine.Template.PrimaryDisk.Size.Value = "20Gi"
 			},
 		})
 		mods = append(mods, settings.MachineSpecModifier[*kubevirt.RawConfig]{

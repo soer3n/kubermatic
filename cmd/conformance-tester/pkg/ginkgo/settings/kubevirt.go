@@ -133,8 +133,7 @@ var MachineSettings = []MachineSpecModifier[*kubevirt.RawConfig]{
 		Name:  "with primary disk OS image from a container",
 		Group: "os-image",
 		Modify: func(spec *kubevirt.RawConfig) {
-			spec.VirtualMachine.Template.PrimaryDisk.OsImage.Value = "container"
-			spec.VirtualMachine.Template.PrimaryDisk.Source.Value = "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"
+			spec.VirtualMachine.Template.PrimaryDisk.OsImage.Value = "docker://quay.io/kubermatic-virt-disks/ubuntu:22.04"
 			// This assumes some default image is set elsewhere.
 		},
 	},

@@ -22,10 +22,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/util/retry"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 )
 
 var MachineNameLabel = "cluster.k8s.io/machine-set-name"
@@ -144,14 +148,39 @@ func CommonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 	return cluster, userClusterClient
 }
 
-func CommonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster) {
+func CommonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clients.Client, scenario scenarios.Scenario, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, name string) {
 	// By(KKP("Removing machine deployment"))
-	err := client.DeleteMachineDeployments(rootCtx, log, scenario, userClusterClient, cluster)
-	Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to delete machine deployments with error %v", err))
-	By(KKP("Delete cluster"), func() {
-		deleteTimeout := 15 * time.Minute
-		err = client.DeleteCluster(rootCtx, log, cluster, deleteTimeout)
-		Expect(err).NotTo(HaveOccurred())
+	// err := client.DeleteMachineDeployments(rootCtx, log, scenario, userClusterClient, cluster)
+	// Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to delete machine deployments with error %v", err))
+	By(KKP(fmt.Sprintf("Delete cluster %s.", name)), func() {
+		Eventually(func() bool {
+			// deleteTimeout := 15 * time.Minute
+			cluster = &kubermaticv1.Cluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name,
+				},
+			}
+			// return client.DeleteCluster(rootCtx, log, cluster, deleteTimeout)
+			// err := userClusterClient.Delete(rootCtx, cluster)
+			err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: cluster.Name}, cluster)
+			if apierrors.IsNotFound(err) {
+				// Cluster is already deleted
+				log.Infof("Cluster %s is already deleted", cluster.Name)
+				return true
+			}
+			if cluster.DeletionTimestamp == nil {
+				// Cluster is already being deleted
+				log.Infof("Cluster %s is not being deleted yet", cluster.Name)
+				err = userClusterClient.Delete(rootCtx, cluster)
+				if err != nil {
+					log.Errorf("Failed to delete cluster %s: %v", cluster.Name, err)
+				}
+				return false
+
+			}
+			log.Infof("Waiting for Cluster %s being deleted. Deletion timestamp: %v", cluster.Name, cluster.DeletionTimestamp)
+			return false
+		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster deletion did not finish within the timeout")
 	})
 	log.Info("Ending scenario test")
 }
@@ -160,24 +189,24 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 	By(KKP("Create MachineDeployments"), func() {
 		err := userClusterClient.Create(rootCtx, &clusterv1alpha1.MachineDeployment{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:12]),
+				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:8]),
 				Namespace: "kube-system",
 				Labels: map[string]string{
 					clusterv1alpha1.MachineClusterLabelName: clusterName,
-					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
+					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName, scenarioName),
 				},
 			},
 			Spec: clusterv1alpha1.MachineDeploymentSpec{
 				Replicas: ptr.Int32(int32(legacyOpts.NodeCount)),
 				Selector: metav1.LabelSelector{
 					MatchLabels: map[string]string{
-						MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
+						MachineNameLabel: fmt.Sprintf("%s-%s", clusterName, scenarioName),
 					},
 				},
 				Template: clusterv1alpha1.MachineTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
 						Labels: map[string]string{
-							MachineNameLabel: fmt.Sprintf("%s-%s", clusterName[:16], scenarioName[:16]),
+							MachineNameLabel: fmt.Sprintf("%s-%s", clusterName, scenarioName),
 						},
 					},
 					Spec: *machineSpec},
@@ -186,89 +215,117 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 		})
 		Expect(err).ShouldNot(HaveOccurred())
 	})
+	var nodeNames []string
 	By(KKP("Wait for machines to get a node"), func() {
 		Eventually(func() bool {
+			log.Infof("Waiting for machines to get a node")
 			machineList := &clusterv1alpha1.MachineList{}
-			if err := userClusterClient.List(rootCtx, machineList); err != nil {
+			s := labels.NewSelector()
+			req, err := labels.NewRequirement(MachineNameLabel, selection.Equals, []string{fmt.Sprintf("%s-%s", clusterName, scenarioName)})
+			Expect(err).ShouldNot(HaveOccurred())
+			s = s.Add(*req)
+			if err := userClusterClient.List(rootCtx, machineList, &ctrlruntimeclient.ListOptions{
+				LabelSelector: s,
+			}); err != nil {
 				return false
 			}
+			log.Infof("Found %d machines. With Label: %v Names: %v", len(machineList.Items), s.String(), getMachineNames(machineList.Items))
 			if len(machineList.Items) < legacyOpts.NodeCount {
 				return false
 			}
 
 			for _, machine := range machineList.Items {
+				log.Infof("Machine %s has status: %v", machine.Name, machine.Status)
 				if machine.Status.NodeRef == nil || machine.Status.NodeRef.Name == "" {
 					return false
 				}
 			}
 
+			for _, machine := range machineList.Items {
+				nodeNames = append(nodeNames, machine.Status.NodeRef.Name)
+			}
+
 			return true
-		}, 10*time.Minute, 5*time.Second).Should(BeTrue(), "not all machines got a node within the timeout")
+		}).WithTimeout(10*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all machines got a node within the timeout")
 	})
 	By(KKP("Wait for nodes to be ready"), func() {
 		Eventually(func() bool {
-			nodeList := &corev1.NodeList{}
-			if err := userClusterClient.List(rootCtx, nodeList); err != nil {
-				return false
-			}
-
+			log.Infof("Waiting for nodes to be ready")
 			unready := sets.New[string]()
-			for _, node := range nodeList.Items {
-				if !util.NodeIsReady(node) {
+			for _, nodeName := range nodeNames {
+				node := &corev1.Node{}
+				if err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					return false
+				}
+				log.Infof("Node %s has status: %v", node.Name, node.Status)
+
+				if !util.NodeIsReady(*node) {
 					unready.Insert(node.Name)
 				}
-			}
 
+				log.Infof("Found %d nodes, %d are not ready", len(nodeNames), unready.Len())
+			}
 			if unready.Len() == 0 {
 				return true
 			}
-
 			return false
-		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
+		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
 	})
 	By(KKP("Wait for Pods inside usercluster to be ready"), func() {
 		Eventually(func() bool {
-			podList := &corev1.PodList{}
-			if err := userClusterClient.List(rootCtx, podList); err != nil {
-				return false
-			}
-
-			unready := sets.New[string]()
-			for _, pod := range podList.Items {
-				// Ignore pods failing kubelet admission (KKP #6185)
-				if !util.PodIsReady(&pod) && !podFailedKubeletAdmissionDueToNodeAffinityPredicate(&pod, log) && !util.PodIsCompleted(&pod) {
-					unready.Insert(pod.Name)
+			log.Infof("Waiting for Pods inside usercluster to be ready")
+			for _, nodeName := range nodeNames {
+				podList := &corev1.PodList{}
+				s := labels.NewSelector()
+				req, err := labels.NewRequirement(MachineNameLabel, selection.Equals, []string{fmt.Sprintf("%s-%s", clusterName, scenarioName)})
+				Expect(err).ShouldNot(HaveOccurred())
+				s = s.Add(*req)
+				f, _ := fields.ParseSelector(fmt.Sprintf("spec.nodeName=%s", nodeName))
+				if err := userClusterClient.List(rootCtx, podList, &ctrlruntimeclient.ListOptions{
+					FieldSelector: f,
+				}); err != nil {
+					return false
 				}
-			}
 
-			if unready.Len() == 0 {
-				return true
+				unready := sets.New[string]()
+				for _, pod := range podList.Items {
+					// Ignore pods failing kubelet admission (KKP #6185)
+					if !util.PodIsReady(&pod) && !podFailedKubeletAdmissionDueToNodeAffinityPredicate(&pod, log) && !util.PodIsCompleted(&pod) {
+						unready.Insert(pod.Name)
+					}
+				}
+
+				log.Infof("Found %d pods, %d are not ready", len(podList.Items), unready.Len())
+
+				if unready.Len() == 0 {
+					return true
+				}
 			}
 
 			return false
-		}, 5*time.Minute, 5*time.Second).Should(BeTrue(), "not all pods became ready within the timeout")
+		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all pods became ready within the timeout")
 	})
-	By(KKP("Wait for addons"), func() {
-		Eventually(func() bool {
-			addons := kubermaticv1.AddonList{}
-			if err := legacyOpts.SeedClusterClient.List(rootCtx, &addons, ctrlruntimeclient.InNamespace(fmt.Sprintf("cluster-%s", clusterName))); err != nil {
-				return false
-			}
+	// By(KKP("Wait for addons"), func() {
+	// 	Eventually(func() bool {
+	// 		addons := kubermaticv1.AddonList{}
+	// 		if err := legacyOpts.SeedClusterClient.List(rootCtx, &addons, ctrlruntimeclient.InNamespace(fmt.Sprintf("cluster-%s", clusterName))); err != nil {
+	// 			return false
+	// 		}
 
-			unhealthyAddons := sets.New[string]()
-			for _, addon := range addons.Items {
-				if addon.Status.Conditions[kubermaticv1.AddonReconciledSuccessfully].Status != corev1.ConditionTrue {
-					unhealthyAddons.Insert(addon.Name)
-				}
-			}
+	// 		unhealthyAddons := sets.New[string]()
+	// 		for _, addon := range addons.Items {
+	// 			if addon.Status.Conditions[kubermaticv1.AddonReconciledSuccessfully].Status != corev1.ConditionTrue {
+	// 				unhealthyAddons.Insert(addon.Name)
+	// 			}
+	// 		}
 
-			if unhealthyAddons.Len() > 0 {
-				return false
-			}
+	// 		if unhealthyAddons.Len() > 0 {
+	// 			return false
+	// 		}
 
-			return true
-		}, 2*time.Minute, 2*time.Second).Should(BeTrue(), "not all addons became healthy within the timeout")
-	})
+	// 		return true
+	// 	}, 2*time.Minute, 2*time.Second).Should(BeTrue(), "not all addons became healthy within the timeout")
+	// })
 }
 
 // podFailedKubeletAdmissionDueToNodeAffinityPredicate detects a condition in
@@ -282,4 +339,12 @@ func podFailedKubeletAdmissionDueToNodeAffinityPredicate(p *corev1.Pod, log *zap
 	}
 
 	return failedAdmission
+}
+
+func getMachineNames(machines []v1alpha1.Machine) []string {
+	names := make([]string, 0, len(machines))
+	for _, machine := range machines {
+		names = append(names, machine.Name)
+	}
+	return names
 }

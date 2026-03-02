@@ -157,14 +157,16 @@ func TestMain(m *testing.M) {
 
 func TestScenarios(t *testing.T) {
 	RegisterFailHandler(CustomFail)
-	RunSpecs(t, "Conformance Tester Scenarios Suite")
+	RunSpecs(t, "Conformance Tester Scenarios Suite KubeVirt")
 }
 
 func CustomFail(message string, callerSkip ...int) {
-	log.Infof("Fail called: %s", message)
+	log.Infof("Fail called: %+v", message)
+	Fail(message, callerSkip...)
 }
 
 var _ = SynchronizedBeforeSuite(func() {
+	defer GinkgoRecover()
 	By("Preparing test environment and creating clusters")
 	utils.PrepareSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, entries, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters)
 }, func(data []byte) {
@@ -175,12 +177,12 @@ var _ = SynchronizedBeforeSuite(func() {
 var _ = SynchronizedAfterSuite(func() {
 	// per-node no-op (could emit per-node logs here)
 }, func() {
+	defer GinkgoRecover()
 	By("Cleaning up created clusters")
-	utils.PostProcessingSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters, skipClusterDeletion)
+	utils.PostProcessingSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, entries, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters, skipClusterDeletion)
 })
 
 var _ = ReportBeforeSuite(func(r Report) {})
 
 var _ = ReportAfterSuite("ReportAfterSuite", func(r Report) {
-	By("Reporting test results")
 })

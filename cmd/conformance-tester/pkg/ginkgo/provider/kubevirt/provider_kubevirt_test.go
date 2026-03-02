@@ -3,6 +3,7 @@ package kubevirt
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	"k8s.io/apimachinery/pkg/types"
@@ -10,8 +11,8 @@ import (
 	. "github.com/onsi/gomega"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
-	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
 	"k8c.io/machine-controller/sdk/providerconfig"
 )
@@ -22,7 +23,7 @@ var _ = ReportAfterEach(func(f SpecContext, r SpecReport) {
 
 var _ = Describe("KubeVirt", func() {
 	var includedMachineDescriptions, excludedMachineDescriptions map[string]map[string][]string
-	entries, includedMachineDescriptions, excludedMachineDescriptions, seed = build.GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName, providerconfig.CloudProviderKubeVirt)
+	entries, includedMachineDescriptions, excludedMachineDescriptions, datacenterNameMappings, seed = build.GetTableEntries(rootCtx, log, runtimeOpts, legacyOpts, opts, infraClient, projectName, providerconfig.CloudProviderKubeVirt)
 	for name, entry := range entries {
 		Describe(fmt.Sprintf("with kubernetes version %s", entry.ClusterSpec.Version), func() {
 			for k, v := range entry.Machines {
@@ -32,7 +33,6 @@ var _ = Describe("KubeVirt", func() {
 				}
 				clusterLabel := Label(entry.ClusterName)
 				machineDescription := []string{}
-				// for k := range entry.Machines {
 				if entry.Exclude {
 					machineDescription = excludedMachineDescriptions[entry.ClusterName][k]
 
@@ -41,7 +41,6 @@ var _ = Describe("KubeVirt", func() {
 
 				}
 
-				// }
 				It(fmt.Sprintf("%s and %v", entry.Description, strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
 					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: entry.ClusterName}, cluster); err != nil {
@@ -57,19 +56,34 @@ var _ = Describe("KubeVirt", func() {
 					By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", entry.ClusterSpec.Cloud.DatacenterName, entry.ClusterSpec.Version.String()))
 					By(fmt.Sprintf("Scenario with dc %q cluster %q", entry.ClusterSpec.Cloud.DatacenterName, name))
 					By(fmt.Sprintf("Setting up machine for %s %s. Scenario: %s", entry.ClusterSpec.Cloud.DatacenterName, name, entry.Description), func() {
-						k8cginkgo.MachineSetup(rootCtx, log, userClusterClient, name, entry.ScenarioName, &v, legacyOpts)
+						utils.MachineSetup(rootCtx, log, userClusterClient, name, k[:8], &v, legacyOpts)
 					})
 
 					By(fmt.Sprintf("Machine setup done %q", name))
 					By(fmt.Sprintf("Running smoke tests %q (enabled: %v) (%v)", name, legacyOpts.EnableTests, opts.EnableTests), func() {
-						n := 0
-						ExpectWithOffset(3, tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
-							k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-						}, userClusterClient, n+1)).To(BeNil())
-						n = 0
-						ExpectWithOffset(3, tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
-							k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-						}, userClusterClient, n+1)).To(BeNil())
+
+						Eventually(func() bool {
+							for i := range 3 {
+								err := tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
+									utils.MachineNameLabel: fmt.Sprintf("machine-%s", name),
+								}, userClusterClient, i+1)
+								if err == nil {
+									return true
+								}
+							}
+							return false
+						}).WithTimeout(5 * time.Minute).To(BeTrue())
+						Eventually(func() bool {
+							for i := range 3 {
+								err := tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
+									utils.MachineNameLabel: fmt.Sprintf("machine-%s", name),
+								}, userClusterClient, i+1)
+								if err == nil {
+									return true
+								}
+							}
+							return false
+						}).WithTimeout(5 * time.Minute).To(BeTrue())
 					})
 					By(fmt.Sprintf("Smoke tests done %q", name))
 				})

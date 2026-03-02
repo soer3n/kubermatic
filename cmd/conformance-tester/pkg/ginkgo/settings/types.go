@@ -5,6 +5,7 @@ import (
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/machine-controller/sdk/providerconfig"
+	v1 "k8s.io/api/storage/v1"
 
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
@@ -24,7 +25,8 @@ type DatacenterSetting struct {
 }
 
 type DefaultDatacenterSettings struct {
-	VPCs []VPC
+	VPCs           []VPC
+	StorageClasses []v1.StorageClass
 }
 
 type VPC struct {

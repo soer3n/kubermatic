@@ -19,7 +19,6 @@ import (
 	"k8c.io/kubermatic/v2/pkg/validation"
 	"k8c.io/kubermatic/v2/pkg/version"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
-	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8c.io/machine-controller/sdk/userdata"
@@ -160,7 +159,9 @@ func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, k
 			if dc, exists := seed.Spec.Datacenters[key]; exists {
 				delete(seed.Spec.Datacenters, key)
 				seed.Spec.Datacenters[combinedName] = dc
-				finalSeeds[combinedName] = seed
+				finalSeed := seed
+				mergo.Merge(finalSeed, defaultDst, mergo.WithOverride)
+				finalSeeds[combinedName] = finalSeed
 			}
 		}
 		return finalSeeds
@@ -499,7 +500,11 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		ignoredGroups := map[string]bool{
 			"affinity": true,
 		}
-		ps, err := getProviderSpec(job.log, job.opts.Secrets, job.providerConfig.CloudProvider)
+		providerConfigCopy := *job.providerConfig
+		providerConfigCopy.CloudProviderSpec = runtime.RawExtension{
+			Raw: append([]byte(nil), providerConfigCopy.CloudProviderSpec.Raw...),
+		}
+		ps, err := getProviderSpec(job.log, job.opts.Secrets, providerConfigCopy.CloudProvider)
 		if err != nil {
 			results <- scenarioResult{err: fmt.Errorf("failed to get provider spec for %s: %w", machineName, err)}
 			continue
@@ -511,13 +516,12 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		}
 
 		// Create a base machine spec for this group.
-		machine, err := getDefaultMachineSpec(job.rootCtx, job.log, job.providerConfig, job.opts.Secrets)
+		machine, err := getDefaultMachineSpec(job.rootCtx, job.log, &providerConfigCopy, job.opts.Secrets)
 		if err != nil {
 			job.log.Errorw("Failed to get default machine spec", "machine", machineName, zap.Error(err))
 			results <- scenarioResult{err: err}
 			continue
 		}
-
 		psb, err := json.Marshal(ps)
 		if err != nil {
 			job.log.Errorw("Failed to marshal provider spec", "machine", machineName, zap.Error(err))
@@ -525,7 +529,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 			continue
 		}
 		pconfig := providerconfig.Config{
-			CloudProvider: job.providerConfig.CloudProvider,
+			CloudProvider: providerConfigCopy.CloudProvider,
 			CloudProviderSpec: runtime.RawExtension{
 				Raw: psb,
 			},
@@ -551,6 +555,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		pconfig.CloudProvider = job.providerConfig.CloudProvider
 		pconfig.OperatingSystemSpec = osspec
 		pconfig.OperatingSystem = job.distribution
+		pconfig.SSHPublicKeys = job.providerConfig.SSHPublicKeys
 		reencodedPConfig, err := json.Marshal(pconfig)
 		if err != nil {
 			err = fmt.Errorf("failed to re-marshal provider config: %w", err)
@@ -561,12 +566,31 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		machine.ProviderSpec.Value.Raw = reencodedPConfig
 		machine.Versions.Kubelet = job.version.String()
 
+		// r := &kubevirt.RawConfig{}
+		// json.Unmarshal(psb, r)
+		// pr := &providerconfig.Config{}
+		// json.Unmarshal(reencodedPConfig, pr)
+		// xr := &kubevirt.RawConfig{}
+		// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
+
 		p := getProvider(job.providerConfig.CloudProvider, job.resolver)
 		machineSpec, err := p.AddDefaults(job.log, *machine)
 		if err != nil {
 			results <- scenarioResult{err: fmt.Errorf("failed to add defaults to machine: %w", err)}
 			continue
 		}
+
+		// pr = &providerconfig.Config{}
+		// json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, pr)
+		// xr = &kubevirt.RawConfig{}
+		// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
+
+		// log.Infof("Including machine %s with kubelet version %s", machineName, machineSpec.Versions.Kubelet)
+		// r := &kubevirt.RawConfig{}
+		// json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, r)
+		// // log.Infof("Included scenario machine spec: %s", r.VirtualMachine.Template)
+		// r = &kubevirt.RawConfig{}
+		// json.Unmarshal(machine.ProviderSpec.Value.Raw, r)
 
 		// if err := p.Validate(job.rootCtx, job.log, machineSpec); err != nil {
 		// 	job.log.Infof("Skipping invalid machine spec for %q: %v", machineName, err)
@@ -604,6 +628,8 @@ func buildNewScenarios(
 	map[string]map[string][]string,
 	map[string]map[string][]string,
 	map[string]*Scenario,
+	map[string]v1alpha1.MachineSpec,
+	map[string]v1alpha1.MachineSpec,
 	iter.Seq[string]) {
 	finalScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
 	finalMachineDescriptions := make(map[string]map[string][]string)
@@ -735,6 +761,11 @@ func buildNewScenarios(
 					localMachineDescriptions[result.clusterKey][result.dedupKey] = append(localMachineDescriptions[result.clusterKey][result.dedupKey], result.machineName)
 				}
 			} else {
+				// pr := &providerconfig.Config{}
+				// json.Unmarshal(result.machineSpec.ProviderSpec.Value.Raw, pr)
+				// xr := &kubevirt.RawConfig{}
+				// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
+				// log.Infof("Generated %s scenario machine spec: %s", groupLabel, xr.VirtualMachine.Template)
 				localScenarios[result.clusterKey][result.dedupKey] = result.machineSpec
 				localMachineDescriptions[result.clusterKey][result.dedupKey] = []string{result.machineName}
 			}
@@ -742,18 +773,16 @@ func buildNewScenarios(
 		return localScenarios, localMachineDescriptions
 	}
 
-	includedScenarios, includedDescriptions := combineModifiers(included, "included")
+	log.Infof("Generating scenarios with excluded grouping...")
 	excludedScenarios, excludedDescriptions := combineModifiers(excluded, "excluded")
+	log.Info("")
+	log.Infof("Generating scenarios with included grouping...")
+	includedScenarios, includedDescriptions := combineModifiers(included, "included")
 
 	includedScenarioMds := map[string]v1alpha1.MachineSpec{}
 	excludedScenarioMds := map[string]v1alpha1.MachineSpec{}
 	for _, v := range includedScenarios {
 		includedScenarioMds = v
-		for _, md := range v {
-			r := &kubevirt.RawConfig{}
-			json.Unmarshal(md.ProviderSpec.Value.Raw, r)
-			log.Infof("Generated included scenario machine spec: %s", r.VirtualMachine.Template)
-		}
 		break
 	}
 	for _, v := range excludedScenarios {
@@ -768,8 +797,6 @@ func buildNewScenarios(
 			s.Machines = includedScenarioMds
 		}
 	}
-
-	// TODO: adjust title accordingly...
 
 	// Merge both maps
 	for clusterKey, deduped := range includedScenarios {
@@ -811,5 +838,5 @@ func buildNewScenarios(
 		finalMachineDescriptionsSlice = maps.Keys(v)
 		break
 	}
-	return includedScenarios, excludedScenarios, includedDescriptions, excludedDescriptions, scenarios, finalMachineDescriptionsSlice
+	return includedScenarios, excludedScenarios, includedDescriptions, excludedDescriptions, scenarios, includedScenarioMds, excludedScenarioMds, finalMachineDescriptionsSlice
 }

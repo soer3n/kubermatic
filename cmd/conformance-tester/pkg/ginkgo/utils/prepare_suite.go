@@ -84,7 +84,7 @@ func PrepareSuite(
 			defer wg.Done()
 			defer func() { <-sem }() // release the slot
 			if !skipClusterCreation {
-				cluster.Ensure(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts)
+				cluster.Ensure(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts, client)
 			}
 			if skipClusterCreation && updateClusters {
 				cluster.Update(name, spec)

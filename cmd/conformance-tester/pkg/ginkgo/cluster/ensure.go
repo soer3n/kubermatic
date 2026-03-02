@@ -14,6 +14,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/tests"
@@ -38,6 +39,7 @@ func Ensure(rootCtx context.Context,
 	legacyOpts *legacytypes.Options,
 	runtimeOpts *options.RuntimeOptions,
 	opts *options.Options,
+	client clients.Client,
 ) {
 	By(fmt.Sprintf("Ensuring cluster %s\n", name))
 	currentOpts := *legacyOpts // copy
