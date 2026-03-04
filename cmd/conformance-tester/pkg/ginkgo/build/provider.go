@@ -2,6 +2,7 @@ package build
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -123,6 +124,28 @@ func getProviderSpec(log *zap.SugaredLogger, secrets legacytypes.Secrets, distri
 		return rawConfig, nil
 	}
 	return nil, nil
+}
+
+// getProviderSpecBytes returns the JSON-serialized provider spec for caching.
+func getProviderSpecBytes(log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) ([]byte, error) {
+	ps, err := getProviderSpec(log, secrets, distribution, cloudProvider)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(ps)
+}
+
+// newProviderSpecFromCache unmarshals cached JSON bytes into a fresh provider spec instance.
+func newProviderSpecFromCache(cachedBytes []byte, cloudProvider providerconfig.CloudProvider) (any, error) {
+	switch cloudProvider {
+	case providerconfig.CloudProviderKubeVirt:
+		var config kubevirt.RawConfig
+		if err := json.Unmarshal(cachedBytes, &config); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal cached kubevirt config: %w", err)
+		}
+		return &config, nil
+	}
+	return nil, fmt.Errorf("unsupported cloud provider: %s", cloudProvider)
 }
 
 func getProvider(provider providerconfig.CloudProvider, resolver *configvar.Resolver) cloudprovidertypes.Provider {

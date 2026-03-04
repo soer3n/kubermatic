@@ -56,13 +56,14 @@ type Scenario struct {
 }
 
 type scenarioJob struct {
-	combination    []settings.MachineSpecModifier[any]
-	clusterKey     string
-	version        semver.Semver
-	log            *zap.SugaredLogger
-	rootCtx        context.Context
-	resolver       *configvar.Resolver
-	opts           *options.Options
-	providerConfig *providerconfig.Config
-	distribution   providerconfig.OperatingSystem
+	combination             []settings.MachineSpecModifier[any]
+	clusterKey              string
+	version                 semver.Semver
+	log                     *zap.SugaredLogger
+	rootCtx                 context.Context
+	resolver                *configvar.Resolver
+	opts                    *options.Options
+	providerConfig          *providerconfig.Config
+	distribution            providerconfig.OperatingSystem
+	cachedProviderSpecBytes []byte // pre-computed provider spec JSON to avoid repeated API calls
 }

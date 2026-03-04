@@ -1,6 +1,7 @@
 package kubevirt
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -41,7 +42,16 @@ var _ = Describe("KubeVirt", func() {
 
 				}
 
-				It(fmt.Sprintf("%s and os %v-%v and %v", entry.Description, entry.ClusterName[:12], k[:8], strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
+				// Extract OS distribution from the machine's provider config
+				osDistro := "unknown"
+				if v.ProviderSpec.Value != nil {
+					var pc providerconfig.Config
+					if err := json.Unmarshal(v.ProviderSpec.Value.Raw, &pc); err == nil {
+						osDistro = string(pc.OperatingSystem)
+					}
+				}
+
+				It(fmt.Sprintf("%s and os %v and datacenter %v and %v", entry.Description, osDistro, k[:8], strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
 					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: entry.ClusterName}, cluster); err != nil {
 						log.Errorf("Failed to get cluster %s: %v", name, err)

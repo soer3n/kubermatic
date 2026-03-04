@@ -87,8 +87,14 @@ func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, k
 		}
 		// Process individual settings (from groups and ungrouped)
 		allIndividualSettings := ungroupedSettings
-		for _, group := range groupedSettings {
-			allIndividualSettings = append(allIndividualSettings, group...)
+		// Sort group names for deterministic iteration order
+		var sortedGroupNames []string
+		for name := range groupedSettings {
+			sortedGroupNames = append(sortedGroupNames, name)
+		}
+		sort.Strings(sortedGroupNames)
+		for _, groupName := range sortedGroupNames {
+			allIndividualSettings = append(allIndividualSettings, groupedSettings[groupName]...)
 		}
 		descriptions := make(map[string][]string)
 		parentKeys := []string{"default"}
@@ -325,8 +331,9 @@ func buildNewClusters(
 
 		var longestKey string
 		maxLen := 0
-		for k, s := range groupedModifiers {
-			if len(s) > maxLen {
+		for _, k := range groupNames {
+			s := groupedModifiers[k]
+			if len(s) > maxLen || (len(s) == maxLen && (longestKey == "" || k < longestKey)) {
 				maxLen = len(s)
 				longestKey = k
 			}
@@ -334,10 +341,11 @@ func buildNewClusters(
 		if maxLen == 0 {
 			return map[string]*kubermaticv1.ClusterSpec{}, map[string][]string{}
 		}
-		// Combine modifiers and descriptions by index
+		// Combine modifiers and descriptions by index (using sorted group names for determinism)
 		combinedModifiers := make([][]settings.ClusterSpecModifier, len(groupedModifiers[longestKey]))
 		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
-		for _, modifiers := range groupedModifiers {
+		for _, groupName := range groupNames {
+			modifiers := groupedModifiers[groupName]
 			for idx, modifier := range modifiers {
 				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
 				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.Name)
@@ -510,9 +518,9 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		providerConfigCopy.CloudProviderSpec = runtime.RawExtension{
 			Raw: append([]byte(nil), providerConfigCopy.CloudProviderSpec.Raw...),
 		}
-		ps, err := getProviderSpec(job.log, job.opts.Secrets, job.distribution, providerConfigCopy.CloudProvider)
+		ps, err := newProviderSpecFromCache(job.cachedProviderSpecBytes, providerConfigCopy.CloudProvider)
 		if err != nil {
-			results <- scenarioResult{err: fmt.Errorf("failed to get provider spec for %s: %w", machineName, err)}
+			results <- scenarioResult{err: fmt.Errorf("failed to get provider spec from cache for %s: %w", machineName, err)}
 			continue
 		}
 		for _, modifier := range job.combination {
@@ -572,43 +580,15 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		machine.ProviderSpec.Value.Raw = reencodedPConfig
 		machine.Versions.Kubelet = job.version.String()
 
-		// r := &kubevirt.RawConfig{}
-		// json.Unmarshal(psb, r)
-		// pr := &providerconfig.Config{}
-		// json.Unmarshal(reencodedPConfig, pr)
-		// xr := &kubevirt.RawConfig{}
-		// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
-
-		p := getProvider(job.providerConfig.CloudProvider, job.resolver)
-		machineSpec, err := p.AddDefaults(job.log, *machine)
-		if err != nil {
-			results <- scenarioResult{err: fmt.Errorf("failed to add defaults to machine: %w", err)}
-			continue
-		}
-
-		// pr = &providerconfig.Config{}
-		// json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, pr)
-		// xr = &kubevirt.RawConfig{}
-		// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
-
-		// log.Infof("Including machine %s with kubelet version %s", machineName, machineSpec.Versions.Kubelet)
-		// r := &kubevirt.RawConfig{}
-		// json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, r)
-		// // log.Infof("Included scenario machine spec: %s", r.VirtualMachine.Template)
-		// r = &kubevirt.RawConfig{}
-		// json.Unmarshal(machine.ProviderSpec.Value.Raw, r)
-
-		// if err := p.Validate(job.rootCtx, job.log, machineSpec); err != nil {
-		// 	job.log.Infof("Skipping invalid machine spec for %q: %v", machineName, err)
-		// 	results <- scenarioResult{err: nil} // Skippable
-		// 	continue
-		// }
+		// Skip AddDefaults here — it makes API calls (builds REST config, fetches StorageClass
+		// for topology labels) which are expensive per-job. These runtime defaults (namespace
+		// annotation, topology labels) will be applied when the machine is actually created.
 
 		results <- scenarioResult{
 			clusterKey:  job.clusterKey,
 			machineName: machineName,
 			dedupKey:    dedupKey,
-			machineSpec: machineSpec,
+			machineSpec: *machine,
 			err:         nil,
 		}
 	}
@@ -670,6 +650,19 @@ func buildNewScenarios(
 		}
 	}
 
+	// Pre-compute provider spec bytes per distribution to avoid repeated API calls.
+	// This is shared across both included and excluded combineModifiers calls.
+	providerSpecCache := make(map[providerconfig.OperatingSystem][]byte)
+	for distro := range operatingSystems {
+		d := providerconfig.OperatingSystem(distro)
+		specBytes, err := getProviderSpecBytes(log, opts.Secrets, d, providerConfig.CloudProvider)
+		if err != nil {
+			log.Errorw("Failed to pre-compute provider spec", "distribution", d, zap.Error(err))
+			continue
+		}
+		providerSpecCache[d] = specBytes
+	}
+
 	// Helper to group/combine a set of modifiers
 	combineModifiers := func(modifiers []settings.MachineSpecModifier[any], groupLabel string) (map[string]map[string]v1alpha1.MachineSpec, map[string]map[string][]string) {
 		localScenarios := make(map[string]map[string]v1alpha1.MachineSpec)
@@ -688,8 +681,9 @@ func buildNewScenarios(
 
 		var longestKey string
 		maxLen := 0
-		for k, s := range groupedModifiers {
-			if len(s) > maxLen {
+		for _, k := range groupNames {
+			s := groupedModifiers[k]
+			if len(s) > maxLen || (len(s) == maxLen && (longestKey == "" || k < longestKey)) {
 				maxLen = len(s)
 				longestKey = k
 			}
@@ -697,10 +691,11 @@ func buildNewScenarios(
 		if maxLen == 0 {
 			return map[string]map[string]v1alpha1.MachineSpec{}, map[string]map[string][]string{}
 		}
-		// Combine modifiers and descriptions by index
+		// Combine modifiers and descriptions by index (using sorted group names for determinism)
 		combinedModifiers := make([][]settings.MachineSpecModifier[any], len(groupedModifiers[longestKey]))
 		combinedDescriptions := make([][]string, len(groupedModifiers[longestKey]))
-		for _, modifiers := range groupedModifiers {
+		for _, groupName := range groupNames {
+			modifiers := groupedModifiers[groupName]
 			for idx, modifier := range modifiers {
 				combinedModifiers[idx] = append(combinedModifiers[idx], modifier)
 				combinedDescriptions[idx] = append(combinedDescriptions[idx], modifier.Name)
@@ -727,16 +722,21 @@ func buildNewScenarios(
 						jobCombination := make([]settings.MachineSpecModifier[any], len(mods))
 						copy(jobCombination, mods)
 						d := providerconfig.OperatingSystem(distro)
+						cachedBytes, ok := providerSpecCache[d]
+						if !ok {
+							continue
+						}
 						jobs <- scenarioJob{
-							combination:    jobCombination,
-							clusterKey:     clusterKey,
-							version:        clusterSpec.Version,
-							log:            log,
-							rootCtx:        rootCtx,
-							resolver:       resolver,
-							opts:           opts,
-							providerConfig: providerConfig,
-							distribution:   d,
+							combination:             jobCombination,
+							clusterKey:              clusterKey,
+							version:                 clusterSpec.Version,
+							log:                     log,
+							rootCtx:                 rootCtx,
+							resolver:                resolver,
+							opts:                    opts,
+							providerConfig:          providerConfig,
+							distribution:            d,
+							cachedProviderSpecBytes: cachedBytes,
 						}
 					}
 				}
