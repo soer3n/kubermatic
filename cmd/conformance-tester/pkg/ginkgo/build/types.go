@@ -25,6 +25,8 @@ type clusterResult struct {
 type clusterJob struct {
 	combination    []settings.ClusterSpecModifier
 	dcKey          string
+	dcName         string                  // hashed datacenter name in the seed
+	datacenter     kubermaticv1.Datacenter // resolved datacenter config
 	seed           kubermaticv1.Seed
 	kubeVersion    *version.Version
 	log            *zap.SugaredLogger

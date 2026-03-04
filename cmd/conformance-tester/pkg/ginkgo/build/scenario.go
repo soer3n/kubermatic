@@ -47,17 +47,18 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 		seed.Spec.Datacenters = map[string]kubermaticv1.Datacenter{}
 	}
 
-	seedKeys := make([]string, 0, len(includedSeeds)+len(excludedSeeds))
-	includedKeys := make([]string, 0, len(includedSeeds))
+	seedKeys := make([]string, 0, len(includedSeeds))
 	for k := range includedSeeds {
-		seedKeys = append(seedKeys, k)
-		includedKeys = append(includedKeys, k)
-	}
-	for k := range excludedSeeds {
 		seedKeys = append(seedKeys, k)
 	}
 	sort.Strings(seedKeys)
 
+	// Only register included seed datacenters in the live seed.
+	// Excluded datacenters are resolved directly from excludedSeeds
+	// in buildNewClusters, so they don't need to be in the live seed.
+	// includedKeys collects the hashed names actually registered in the seed,
+	// so PostProcessingSuite can remove exactly those entries during cleanup.
+	includedKeys := make([]string, 0, len(includedSeeds))
 	for _, key := range seedKeys {
 		s := includedSeeds[key]
 		for dcName, dc := range s.Spec.Datacenters {
@@ -68,16 +69,7 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 			dc.Country = "conformance"
 			dc.Location = dcName
 			seed.Spec.Datacenters[hashedName] = dc
-		}
-		s = excludedSeeds[key]
-		for dcName, dc := range s.Spec.Datacenters {
-			hasher := sha1.New()
-			hasher.Write([]byte(dcName))
-			hashedName := hex.EncodeToString(hasher.Sum(nil))[:10]
-			datacenterNameMappings[dcName] = hashedName
-			dc.Country = "conformance"
-			dc.Location = dcName
-			seed.Spec.Datacenters[hashedName] = dc
+			includedKeys = append(includedKeys, hashedName)
 		}
 	}
 

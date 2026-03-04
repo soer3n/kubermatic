@@ -221,19 +221,25 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			}
 		}
 
-		dcName := ""
+		dcName := job.dcName
+		currentSeedDatacenter := job.datacenter
 
-		for k, v := range job.seed.Spec.Datacenters {
-			if v.Location == job.dcKey {
-				dcName = k
+		// Create a local deep copy of the seed to avoid concurrent map writes
+		// when multiple workers add excluded datacenters.
+		localSeed := *job.seed.DeepCopy()
+
+		// Ensure the datacenter is present in the seed copy for DefaultClusterSpec/ValidateClusterSpec.
+		// This is needed for excluded datacenters that aren't registered in the live seed.
+		if _, exists := localSeed.Spec.Datacenters[dcName]; !exists {
+			if localSeed.Spec.Datacenters == nil {
+				localSeed.Spec.Datacenters = make(map[string]kubermaticv1.Datacenter)
 			}
-
+			localSeed.Spec.Datacenters[dcName] = currentSeedDatacenter
 		}
 
 		// Now, continue with the full baseSpec for the actual cluster creation,
 		// but use the sanitizedSpec for generating the dedup key.
 		clusterSettingSpec := baseSpec
-		currentSeedDatacenter := job.seed.Spec.Datacenters[dcName]
 		p, c, err := getClusterProvider(job.providerConfig.CloudProvider, dcName, &currentSeedDatacenter, job.opts.Secrets)
 		if err != nil {
 			results <- clusterResult{err: fmt.Errorf("failed to get cluster provider for %s: %w", dcName, err)}
@@ -245,7 +251,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		clusterSettingSpec.ContainerRuntime = "containerd"
 		clusterSettingSpec.Version = semver.Semver(job.kubeVersion.Version.String())
 
-		if err := defaulting.DefaultClusterSpec(job.rootCtx, clusterSettingSpec, nil, nil, &job.seed, job.kkpConfig, p); err != nil {
+		if err := defaulting.DefaultClusterSpec(job.rootCtx, clusterSettingSpec, nil, nil, &localSeed, job.kkpConfig, p); err != nil {
 			results <- clusterResult{err: fmt.Errorf("failed to default cluster spec %s: %w", clusterName, err)}
 			continue
 		}
@@ -263,7 +269,10 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 			continue
 		}
 		specBytesHash := fmt.Sprintf("%x", sha256.Sum256(specBytes))
-		f := fmt.Sprintf("%s-%s", clusterSettingSpec.Cloud.DatacenterName[:6], specBytesHash[:6])
+		// Hash the datacenter name to get a unique prefix, since raw description names
+		// (used for excluded DCs) may share the same first 6 characters.
+		dcNameHash := fmt.Sprintf("%x", sha256.Sum256([]byte(clusterSettingSpec.Cloud.DatacenterName)))
+		f := fmt.Sprintf("%s-%s", dcNameHash[:6], specBytesHash[:6])
 		dedupKey := fmt.Sprintf("k8c-%s-%s", f, strings.ReplaceAll(job.kubeVersion.Version.String(), ".", "-"))
 
 		results <- clusterResult{
@@ -375,15 +384,31 @@ func buildNewClusters(
 		// Start a goroutine to generate combinations and send all jobs
 		go func(seed *kubermaticv1.Seed) {
 			defer close(jobs)
+			// Helper to resolve dcName (hashed) and datacenter from seed by matching Location
+			resolveDC := func(seed *kubermaticv1.Seed, dcKey string) (string, kubermaticv1.Datacenter, bool) {
+				for k, v := range seed.Spec.Datacenters {
+					if v.Location == dcKey {
+						return k, v, true
+					}
+				}
+				return "", kubermaticv1.Datacenter{}, false
+			}
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
 					if groupLabel == "included" {
 						for dcKey := range includedSeeds {
+							dcName, dc, ok := resolveDC(seed, dcKey)
+							if !ok {
+								log.Warnf("Skipping included dcKey %q: not found in seed", dcKey)
+								continue
+							}
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
 							copy(jobCombination, mods)
 							jobs <- clusterJob{
 								combination:    jobCombination,
 								dcKey:          dcKey,
+								dcName:         dcName,
+								datacenter:     dc,
 								seed:           *seed,
 								kubeVersion:    kubeVersion,
 								log:            log,
@@ -396,12 +421,30 @@ func buildNewClusters(
 						}
 					}
 					if groupLabel == "excluded" {
-						for dcKey := range excludedSeeds {
+						for dcKey, dcSeed := range excludedSeeds {
+							// For excluded seeds, resolve the datacenter directly from
+							// the excludedSeeds map, so they don't need to be registered
+							// in the live seed object.
+							var dcName string
+							var dc kubermaticv1.Datacenter
+							found := false
+							for name, d := range dcSeed.Spec.Datacenters {
+								dcName = name
+								dc = d
+								found = true
+								break
+							}
+							if !found {
+								log.Warnf("Skipping excluded dcKey %q: no datacenters in seed", dcKey)
+								continue
+							}
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
 							copy(jobCombination, mods)
 							jobs <- clusterJob{
 								combination:    jobCombination,
 								dcKey:          dcKey,
+								dcName:         dcName,
+								datacenter:     dc,
 								seed:           *seed,
 								kubeVersion:    kubeVersion,
 								log:            log,
@@ -782,7 +825,6 @@ func buildNewScenarios(
 
 	log.Infof("Generating scenarios with excluded grouping...")
 	excludedScenarios, excludedDescriptions := combineModifiers(excluded, "excluded")
-	log.Info("")
 	log.Infof("Generating scenarios with included grouping...")
 	includedScenarios, includedDescriptions := combineModifiers(included, "included")
 

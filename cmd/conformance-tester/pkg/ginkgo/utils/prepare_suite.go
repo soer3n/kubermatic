@@ -13,7 +13,6 @@ import (
 
 	kubermaticv1 "k8c.io/kubermatic/sdk/v2/apis/kubermatic/v1"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/clients"
-	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/cluster"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
@@ -38,12 +37,12 @@ func PrepareSuite(
 	updateClusters bool,
 ) {
 	var client clients.Client
-	By(k8cginkgo.KKP("Creating a KKP client"), func() {
+	By(KKP("Creating a KKP client"), func() {
 		client = clients.NewKubeClient(&legacyOpts)
 		Expect(client.Setup(rootCtx, log)).To(Succeed())
 	})
 
-	By(k8cginkgo.KKP("Ensuring a project exists"), func() {
+	By(KKP("Ensuring a project exists"), func() {
 		if legacyOpts.KubermaticProject == "" {
 			p, err := client.CreateProject(rootCtx, log, projectName)
 			Expect(err).NotTo(HaveOccurred())
@@ -54,11 +53,11 @@ func PrepareSuite(
 		fmt.Fprintf(GinkgoWriter, "Using project %q\n", legacyOpts.KubermaticProject)
 	})
 
-	By(k8cginkgo.KKP("Ensuring SSH keys exist"), func() {
+	By(KKP("Ensuring SSH keys exist"), func() {
 		Expect(client.EnsureSSHKeys(rootCtx, log)).To(Succeed())
 	})
 
-	By(k8cginkgo.KKP("Attaching datacenters to seed"), func() {
+	By(KKP("Attaching datacenters to seed"), func() {
 		err := legacyOpts.SeedClusterClient.Update(rootCtx, seed)
 		Expect(err).NotTo(HaveOccurred(), "Failed to update seed")
 	})

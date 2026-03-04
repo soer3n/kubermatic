@@ -409,12 +409,14 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 				if err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: nodeName}, node); err != nil {
 					return false
 				}
+				if _, ok := node.Labels[MachineNameLabel]; !ok {
+					node.Labels[MachineNameLabel] = fmt.Sprintf("%s-%s", clusterName, scenarioName)
+					if err := userClusterClient.Update(rootCtx, node); err != nil {
+						return false
+					}
+				}
 				if !util.NodeIsReady(*node) {
 					continue
-				}
-				node.Labels[MachineNameLabel] = fmt.Sprintf("%s-%s", clusterName, scenarioName)
-				if err := userClusterClient.Update(rootCtx, node); err != nil {
-					return false
 				}
 			}
 			return true
