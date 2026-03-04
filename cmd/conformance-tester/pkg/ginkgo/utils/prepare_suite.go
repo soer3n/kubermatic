@@ -66,7 +66,7 @@ func PrepareSuite(
 	suiteCfg, reporterCfg := GinkgoConfiguration()
 	By(fmt.Sprintf("parallel=%d", suiteCfg.ParallelTotal))
 	By(fmt.Sprintf("Reporter: %#v", reporterCfg))
-	By(fmt.Sprintf("Creating clusters for datacenters and kube versions: %v", maps.Keys(newClusters)))
+	By(fmt.Sprintf("Creating/updating clusters for datacenters and kube versions: %v", maps.Keys(newClusters)))
 
 	var wg sync.WaitGroup
 	maxConcurrent := 4 // Set your desired concurrency limit
@@ -87,7 +87,7 @@ func PrepareSuite(
 				cluster.Ensure(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts, client)
 			}
 			if skipClusterCreation && updateClusters {
-				cluster.Update(name, spec)
+				cluster.Update(rootCtx, log, name, spec.Cloud.DatacenterName, project, spec, &legacyOpts, runtimeOpts, &opts, client)
 			}
 		}(name, legacyOpts.KubermaticProject, clusterSpec)
 	}

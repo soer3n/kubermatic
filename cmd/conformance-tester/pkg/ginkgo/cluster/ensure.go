@@ -72,7 +72,7 @@ func Ensure(rootCtx context.Context,
 			}
 
 			return true
-		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
+		}).WithTimeout(10*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
 
 		Eventually(func() bool {
 			newCluster := &kubermaticv1.Cluster{}

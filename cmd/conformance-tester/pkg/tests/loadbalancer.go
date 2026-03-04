@@ -78,6 +78,7 @@ func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.
 			Namespace: ns.Name,
 			Annotations: map[string]string{
 				"load-balancer.hetzner.cloud/location": "nbg1",
+				"metallb.io/ip-allocated-from-pool":    "default",
 			},
 		},
 		Spec: corev1.ServiceSpec{

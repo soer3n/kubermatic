@@ -41,7 +41,7 @@ var _ = Describe("KubeVirt", func() {
 
 				}
 
-				It(fmt.Sprintf("%s and %v", entry.Description, strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
+				It(fmt.Sprintf("%s and os %v-%v and %v", entry.Description, entry.ClusterName[:12], k[:8], strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
 					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: entry.ClusterName}, cluster); err != nil {
 						log.Errorf("Failed to get cluster %s: %v", name, err)
@@ -55,35 +55,30 @@ var _ = Describe("KubeVirt", func() {
 					}
 					By(fmt.Sprintf("Running tests for datacenter %q kubeVersion %q", entry.ClusterSpec.Cloud.DatacenterName, entry.ClusterSpec.Version.String()))
 					By(fmt.Sprintf("Scenario with dc %q cluster %q", entry.ClusterSpec.Cloud.DatacenterName, name))
-					By(fmt.Sprintf("Setting up machine for %s %s. Scenario: %s", entry.ClusterSpec.Cloud.DatacenterName, name, entry.Description), func() {
-						utils.MachineSetup(rootCtx, log, userClusterClient, name, k[:8], &v, legacyOpts)
-					})
+					if skipClusterCreation && updateClusters {
+						By(fmt.Sprintf("Updating machine %s for %s %s. Scenario: %s", k, entry.ClusterSpec.Cloud.DatacenterName, name, entry.Description), func() {
+							utils.MachineUpdate(rootCtx, log, userClusterClient, cluster, name, k[:8], &v, legacyOpts)
+						})
+					} else {
+						By(fmt.Sprintf("Setting up machine %s for %s %s. Scenario: %s", k, entry.ClusterSpec.Cloud.DatacenterName, name, entry.Description), func() {
+							utils.MachineSetup(rootCtx, log, userClusterClient, name, k[:8], &v, legacyOpts)
+						})
+					}
 
 					By(fmt.Sprintf("Machine setup done %q", name))
+					attemp := 1
+					if skipClusterCreation && updateClusters {
+						attemp += attemp
+					}
 					By(fmt.Sprintf("Running smoke tests %q (enabled: %v) (%v)", name, legacyOpts.EnableTests, opts.EnableTests), func() {
+						var err error
+						legacyOpts.CustomTestTimeout = 10 * time.Minute
+						err = tests.TestStorage(rootCtx, log, legacyOpts, cluster, nil, userClusterClient, attemp)
+						Expect(err).NotTo(HaveOccurred(), "PersistentVolume test failed after multiple attempts")
 
-						Eventually(func() bool {
-							for i := range 3 {
-								err := tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
-									utils.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-								}, userClusterClient, i+1)
-								if err == nil {
-									return true
-								}
-							}
-							return false
-						}).WithTimeout(5 * time.Minute).To(BeTrue())
-						Eventually(func() bool {
-							for i := range 3 {
-								err := tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
-									utils.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-								}, userClusterClient, i+1)
-								if err == nil {
-									return true
-								}
-							}
-							return false
-						}).WithTimeout(5 * time.Minute).To(BeTrue())
+						// Do a simple LoadBalancer test
+						err = tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, nil, userClusterClient, attemp)
+						Expect(err).NotTo(HaveOccurred(), "LoadBalancer test failed after multiple attempts")
 					})
 					By(fmt.Sprintf("Smoke tests done %q", name))
 				})

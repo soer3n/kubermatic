@@ -77,5 +77,8 @@ var DefaultClusterSettings = kubermaticv1.Cluster{
 	Spec: kubermaticv1.ClusterSpec{
 		ContainerRuntime: "containerd",
 		ExposeStrategy:   kubermaticv1.ExposeStrategyTunneling,
+		ClusterNetwork: kubermaticv1.ClusterNetworkingConfig{
+			ProxyMode: "iptables",
+		},
 	},
 }

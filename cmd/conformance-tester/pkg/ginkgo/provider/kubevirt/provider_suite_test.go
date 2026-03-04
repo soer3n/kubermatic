@@ -21,6 +21,7 @@ import (
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/metrics"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	kubermaticlog "k8c.io/kubermatic/v2/pkg/log"
 	kkpreconciling "k8c.io/kubermatic/v2/pkg/resources/reconciling"
@@ -151,6 +152,11 @@ func TestMain(m *testing.M) {
 	log.Infof("Excluded cluster descriptions: %v", opts.Excluded.ClusterDescriptions)
 	log.Infof("Included machine descriptions: %v", opts.Included.MachineDescriptions)
 	log.Infof("Excluded machine descriptions: %v", opts.Excluded.MachineDescriptions)
+	log.Infof("skip cluster creation: %v", skipClusterCreation)
+	log.Infof("skip cluster deletion: %v", skipClusterDeletion)
+	log.Infof("update clusters: %v", updateClusters)
+
+	metrics.Setup("", "", "") // empty endpoint = no pusher, but curries "prowjob" label away
 
 	os.Exit(m.Run())
 }

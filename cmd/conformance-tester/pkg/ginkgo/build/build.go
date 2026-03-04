@@ -8,6 +8,7 @@ import (
 	"iter"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -181,6 +182,7 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		for _, modifier := range job.combination {
 			modifierNames = append(modifierNames, modifier.Name)
 		}
+		sort.Strings(modifierNames)
 		clusterName := strings.Join(modifierNames, " & ")
 		if clusterName == "" {
 			clusterName = "default"
@@ -358,6 +360,9 @@ func buildNewClusters(
 			defer close(jobs)
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
+					if !slices.Contains(opts.Releases, kubeVersion.Version.String()) {
+						continue
+					}
 					if groupLabel == "included" {
 						for dcKey := range includedSeeds {
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
@@ -490,6 +495,7 @@ func scenarioWorker(jobs <-chan scenarioJob, results chan<- scenarioResult, wg *
 		for _, modifier := range job.combination {
 			modifierNames = append(modifierNames, modifier.Name)
 		}
+		sort.Strings(modifierNames)
 		machineName := strings.Join(modifierNames, " & ")
 		if machineName == "" {
 			machineName = "default"
@@ -761,11 +767,6 @@ func buildNewScenarios(
 					localMachineDescriptions[result.clusterKey][result.dedupKey] = append(localMachineDescriptions[result.clusterKey][result.dedupKey], result.machineName)
 				}
 			} else {
-				// pr := &providerconfig.Config{}
-				// json.Unmarshal(result.machineSpec.ProviderSpec.Value.Raw, pr)
-				// xr := &kubevirt.RawConfig{}
-				// json.Unmarshal(pr.CloudProviderSpec.Raw, xr)
-				// log.Infof("Generated %s scenario machine spec: %s", groupLabel, xr.VirtualMachine.Template)
 				localScenarios[result.clusterKey][result.dedupKey] = result.machineSpec
 				localMachineDescriptions[result.clusterKey][result.dedupKey] = []string{result.machineName}
 			}
@@ -794,7 +795,13 @@ func buildNewScenarios(
 		if s.Exclude {
 			s.Machines = excludedScenarioMds
 		} else {
-			s.Machines = includedScenarioMds
+			m := map[string]v1alpha1.MachineSpec{}
+			for clusterKey, machineSpec := range includedScenarioMds {
+				machineSpecCopy := machineSpec.DeepCopy()
+				machineSpecCopy.Versions.Kubelet = s.ClusterSpec.Version.String()
+				m[clusterKey] = *machineSpecCopy
+			}
+			s.Machines = m
 		}
 	}
 

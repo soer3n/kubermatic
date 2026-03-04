@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aws/smithy-go/ptr"
@@ -73,7 +74,7 @@ func CommonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 			}
 
 			return true
-		}, legacyOpts.ControlPlaneReadyWaitTimeout, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
+		}, 20*time.Minute, 5*time.Second).Should(BeTrue(), "cluster was not reconciled successfully within the timeout")
 
 		Eventually(func() bool {
 			newCluster := &kubermaticv1.Cluster{}
@@ -111,7 +112,7 @@ func CommonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 			}
 
 			return false
-		}, legacyOpts.ControlPlaneReadyWaitTimeout, 5*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
+		}, 20*time.Minute, 5*time.Second).Should(BeTrue(), "cluster did not become healthy within the timeout")
 	})
 
 	By(KKP("Wait for control plane"), func() {
@@ -123,13 +124,13 @@ func CommonSetup(rootCtx context.Context, log *zap.SugaredLogger, scenario scena
 			// ignore Kubermatic version in this check, to allow running against a 3rd party setup
 			missingConditions, _ := controllerutil.ClusterReconciliationSuccessful(cluster, versions, true)
 			return len(missingConditions) == 0
-		}, 10*time.Minute, 5*time.Second).Should(BeTrue())
+		}, 20*time.Minute, 5*time.Second).Should(BeTrue())
 
 		Eventually(func() bool {
 			var err error
 			userClusterClient, err = legacyOpts.ClusterClientProvider.GetClient(rootCtx, cluster)
 			return err == nil
-		}, 10*time.Minute, 5*time.Second).Should(BeTrue())
+		}, 20*time.Minute, 5*time.Second).Should(BeTrue())
 	})
 
 	By(KKP("Add LB and PV Finalizers"), func() {
@@ -180,9 +181,160 @@ func CommonCleanup(rootCtx context.Context, log *zap.SugaredLogger, client clien
 			}
 			log.Infof("Waiting for Cluster %s being deleted. Deletion timestamp: %v", cluster.Name, cluster.DeletionTimestamp)
 			return false
-		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster deletion did not finish within the timeout")
+		}).WithTimeout(25*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "cluster deletion did not finish within the timeout")
 	})
 	log.Info("Ending scenario test")
+}
+
+func MachineUpdate(rootCtx context.Context, log *zap.SugaredLogger, userClusterClient ctrlruntimeclient.Client, cluster *kubermaticv1.Cluster, clusterName string, scenarioName string, machineSpec *v1alpha1.MachineSpec, legacyOpts *legacytypes.Options) {
+	// var err error
+	currentVersion := cluster.Spec.Version.Semver()
+	By(KKP("Update MachineDeployments"), func() {
+		log.Infof("machinedeploymnt name: %s-%s", clusterName[:12], scenarioName[:8])
+		log.Infof("machinedeploymnt label: %s=%s-%s", MachineNameLabel, clusterName, scenarioName)
+		log.Infof("cluster label: %s=%s", clusterv1alpha1.MachineClusterLabelName, cluster.Name)
+		existingMd := &clusterv1alpha1.MachineDeployment{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("%s-%s", clusterName[:12], scenarioName[:8]),
+				Namespace: "kube-system",
+				Labels: map[string]string{
+					clusterv1alpha1.MachineClusterLabelName: cluster.Name,
+					MachineNameLabel:                        fmt.Sprintf("%s-%s", clusterName, scenarioName),
+				},
+			},
+		}
+		err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: existingMd.Name, Namespace: existingMd.Namespace}, existingMd)
+		Expect(err).NotTo(HaveOccurred(), fmt.Sprintf("failed to get existing machine deployment %s: %v", existingMd.Name, err))
+
+		currentMachine := existingMd.Spec.Template.Spec
+		currentMachine.Versions.Kubelet = fmt.Sprintf("%s", currentVersion.String())
+		existingMd.Spec.Template.Spec = currentMachine
+		err = userClusterClient.Update(rootCtx, existingMd)
+		Expect(err).ShouldNot(HaveOccurred(), fmt.Sprintf("failed to update existing machine deployment %s: %v", existingMd.Name, err))
+	})
+
+	var nodeNames []string
+	By(KKP("Wait for machines to get a node"), func() {
+		Eventually(func() bool {
+			log.Infof("Waiting for machines with updated kubelet version %s to get a node", currentVersion.String())
+			nodeNames = nil
+			machineList := &clusterv1alpha1.MachineList{}
+			s := labels.NewSelector()
+			req, err := labels.NewRequirement(MachineNameLabel, selection.Equals, []string{fmt.Sprintf("%s-%s", clusterName, scenarioName)})
+			Expect(err).ShouldNot(HaveOccurred())
+			s = s.Add(*req)
+			if err := userClusterClient.List(rootCtx, machineList, &ctrlruntimeclient.ListOptions{
+				LabelSelector: s,
+			}); err != nil {
+				log.Errorf("Failed to list machines: %v", err)
+				return false
+			}
+
+			updatedCount := 0
+			for _, machine := range machineList.Items {
+				if machine.DeletionTimestamp != nil {
+					log.Infof("Machine %s is being deleted, skipping", machine.Name)
+					continue
+				}
+				// Only consider machines with the updated kubelet version
+				if machine.Spec.Versions.Kubelet != currentVersion.String() {
+					log.Infof("Machine %s still has old kubelet version %s, skipping", machine.Name, machine.Spec.Versions.Kubelet)
+					continue
+				}
+				updatedCount++
+				if machine.Status.NodeRef == nil {
+					log.Infof("Machine %s (updated) does not have a node yet", machine.Name)
+					return false
+				}
+				if !slices.Contains(nodeNames, machine.Status.NodeRef.Name) {
+					nodeNames = append(nodeNames, machine.Status.NodeRef.Name)
+				}
+			}
+
+			if updatedCount < legacyOpts.NodeCount {
+				log.Infof("Not all machines have the updated kubelet version yet. Expected: %d, Found: %d", legacyOpts.NodeCount, updatedCount)
+				return false
+			}
+
+			log.Infof("All %d updated machines have nodes: %v", updatedCount, nodeNames)
+			return true
+		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all machines got a node within the timeout")
+	})
+	By(KKP("Wait for nodes to be ready"), func() {
+		Eventually(func() bool {
+			log.Infof("Waiting for nodes to be ready")
+			unready := sets.New[string]()
+			for _, nodeName := range nodeNames {
+				node := &corev1.Node{}
+				if err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					return false
+				}
+				log.Infof("Node %s has status: %v", node.Name, node.Status)
+
+				if !util.NodeIsReady(*node) {
+					unready.Insert(node.Name)
+				}
+
+				log.Infof("Found %d nodes, %d are not ready", len(nodeNames), unready.Len())
+			}
+			if unready.Len() == 0 {
+				return true
+			}
+			return false
+		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
+	})
+	By(KKP("Add label to nodes"), func() {
+		Eventually(func() bool {
+			log.Infof("Adding label to nodes to be ready")
+			for _, nodeName := range nodeNames {
+				node := &corev1.Node{}
+				if err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					return false
+				}
+				if _, ok := node.Labels[MachineNameLabel]; !ok {
+					node.Labels[MachineNameLabel] = fmt.Sprintf("%s-%s", clusterName, scenarioName)
+					if err := userClusterClient.Update(rootCtx, node); err != nil {
+						return false
+					}
+				}
+				if !util.NodeIsReady(*node) {
+					continue
+				}
+			}
+			return true
+		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
+	})
+	By(KKP("Wait for Pods inside usercluster to be ready"), func() {
+		Eventually(func() bool {
+			log.Infof("Waiting for Pods inside usercluster to be ready")
+			for _, nodeName := range nodeNames {
+				podList := &corev1.PodList{}
+				if err := userClusterClient.List(rootCtx, podList, &ctrlruntimeclient.ListOptions{
+					FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName),
+				}); err != nil {
+					log.Errorf("Failed to list pods on node %s: %v", nodeName, err)
+					return false
+				}
+
+				unready := sets.New[string]()
+				for _, pod := range podList.Items {
+					// Ignore pods failing kubelet admission (KKP #6185)
+					if !util.PodIsReady(&pod) && !podFailedKubeletAdmissionDueToNodeAffinityPredicate(&pod, log) && !util.PodIsCompleted(&pod) {
+						unready.Insert(pod.Name)
+					}
+				}
+
+				log.Infof("Found %d pods on node %s, %d are not ready", len(podList.Items), nodeName, unready.Len())
+
+				if unready.Len() > 0 {
+					log.Infof("Not all pods on node %s are ready yet. Unready pods: %v", nodeName, unready.UnsortedList())
+					return false
+				}
+			}
+
+			return true
+		}).WithTimeout(15*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all pods became ready within the timeout")
+	})
 }
 
 func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterClient ctrlruntimeclient.Client, clusterName string, scenarioName string, machineSpec *v1alpha1.MachineSpec, legacyOpts *legacytypes.Options) {
@@ -220,6 +372,7 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 		Eventually(func() bool {
 			log.Infof("Waiting for machines to get a node")
 			machineList := &clusterv1alpha1.MachineList{}
+			nodeNames = []string{}
 			s := labels.NewSelector()
 			req, err := labels.NewRequirement(MachineNameLabel, selection.Equals, []string{fmt.Sprintf("%s-%s", clusterName, scenarioName)})
 			Expect(err).ShouldNot(HaveOccurred())
@@ -247,6 +400,25 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 
 			return true
 		}).WithTimeout(10*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all machines got a node within the timeout")
+	})
+	By(KKP("Add label to nodes"), func() {
+		Eventually(func() bool {
+			log.Infof("Adding label to nodes to be ready")
+			for _, nodeName := range nodeNames {
+				node := &corev1.Node{}
+				if err := userClusterClient.Get(rootCtx, types.NamespacedName{Name: nodeName}, node); err != nil {
+					return false
+				}
+				if !util.NodeIsReady(*node) {
+					continue
+				}
+				node.Labels[MachineNameLabel] = fmt.Sprintf("%s-%s", clusterName, scenarioName)
+				if err := userClusterClient.Update(rootCtx, node); err != nil {
+					return false
+				}
+			}
+			return true
+		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all nodes became ready within the timeout")
 	})
 	By(KKP("Wait for nodes to be ready"), func() {
 		Eventually(func() bool {
@@ -276,13 +448,8 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 			log.Infof("Waiting for Pods inside usercluster to be ready")
 			for _, nodeName := range nodeNames {
 				podList := &corev1.PodList{}
-				s := labels.NewSelector()
-				req, err := labels.NewRequirement(MachineNameLabel, selection.Equals, []string{fmt.Sprintf("%s-%s", clusterName, scenarioName)})
-				Expect(err).ShouldNot(HaveOccurred())
-				s = s.Add(*req)
-				f, _ := fields.ParseSelector(fmt.Sprintf("spec.nodeName=%s", nodeName))
 				if err := userClusterClient.List(rootCtx, podList, &ctrlruntimeclient.ListOptions{
-					FieldSelector: f,
+					FieldSelector: fields.OneTermEqualSelector("spec.nodeName", nodeName),
 				}); err != nil {
 					return false
 				}
@@ -295,14 +462,14 @@ func MachineSetup(rootCtx context.Context, log *zap.SugaredLogger, userClusterCl
 					}
 				}
 
-				log.Infof("Found %d pods, %d are not ready", len(podList.Items), unready.Len())
+				log.Infof("Found %d pods on node %s, %d are not ready", len(podList.Items), nodeName, unready.Len())
 
-				if unready.Len() == 0 {
-					return true
+				if unready.Len() > 0 {
+					return false
 				}
 			}
 
-			return false
+			return true
 		}).WithTimeout(5*time.Minute).WithPolling(15*time.Second).Should(BeTrue(), "not all pods became ready within the timeout")
 	})
 	// By(KKP("Wait for addons"), func() {

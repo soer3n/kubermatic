@@ -47,6 +47,7 @@ type scenarioResult struct {
 type Scenario struct {
 	ClusterName  string
 	ScenarioName string
+	Distribution string
 	Description  string
 	ProjectName  string
 	Exclude      bool

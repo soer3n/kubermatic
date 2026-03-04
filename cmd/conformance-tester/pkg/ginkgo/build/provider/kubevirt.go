@@ -232,7 +232,7 @@ func (k *KubeVirtProvider) GetDefaultConfig(secrets legacytypes.Secrets, distrib
 		osImage = "docker://quay.io/kubermatic-virt-disks/flatcar:3374.2.2"
 	case providerconfig.OperatingSystemRockyLinux:
 		// Rocky Linux specific settings
-		osImage = "docker://quay.io/kubermatic-virt-disks/rocky:8"
+		osImage = "docker://quay.io/kubermatic-virt-disks/rockylinux:8"
 	}
 
 	return &kubevirt.RawConfig{
