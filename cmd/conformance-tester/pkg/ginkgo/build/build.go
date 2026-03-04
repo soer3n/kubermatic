@@ -8,7 +8,6 @@ import (
 	"iter"
 	"maps"
 	"os"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -161,7 +160,17 @@ func buildDefaultSeedSettings(datacenterSettings []settings.DatacenterSetting, k
 		// Rebuild the final map with combined names
 		finalSeeds := make(map[string]kubermaticv1.Seed)
 		for key, descs := range descriptions {
-			combinedName := strings.Join(descs, " and ")
+			// Filter out "default" from the description list when other descriptions exist
+			filteredDescs := descs
+			if len(descs) > 1 {
+				filteredDescs = make([]string, 0, len(descs))
+				for _, d := range descs {
+					if d != "default" {
+						filteredDescs = append(filteredDescs, d)
+					}
+				}
+			}
+			combinedName := strings.Join(filteredDescs, " and ")
 			seed := seeds[key]
 			if dc, exists := seed.Spec.Datacenters[key]; exists {
 				delete(seed.Spec.Datacenters, key)
@@ -368,9 +377,6 @@ func buildNewClusters(
 			defer close(jobs)
 			for _, mods := range combinedModifiers {
 				for _, kubeVersion := range versions {
-					if !slices.Contains(opts.Releases, kubeVersion.Version.String()) {
-						continue
-					}
 					if groupLabel == "included" {
 						for dcKey := range includedSeeds {
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))

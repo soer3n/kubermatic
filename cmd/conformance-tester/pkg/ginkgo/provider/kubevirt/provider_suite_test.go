@@ -21,7 +21,6 @@ import (
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/options"
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/utils"
-	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/metrics"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	kubermaticlog "k8c.io/kubermatic/v2/pkg/log"
 	kkpreconciling "k8c.io/kubermatic/v2/pkg/resources/reconciling"
@@ -75,6 +74,7 @@ var (
 	finalClusterDescriptions map[string][]string
 	datacenterNameMappings   map[string]string
 	seed                     *kubermaticv1.Seed
+	seedKeys                 []string
 	entries                  map[string]*build.Scenario
 	projectName              string
 )
@@ -156,8 +156,6 @@ func TestMain(m *testing.M) {
 	log.Infof("skip cluster deletion: %v", skipClusterDeletion)
 	log.Infof("update clusters: %v", updateClusters)
 
-	metrics.Setup("", "", "") // empty endpoint = no pusher, but curries "prowjob" label away
-
 	os.Exit(m.Run())
 }
 
@@ -185,7 +183,7 @@ var _ = SynchronizedAfterSuite(func() {
 }, func() {
 	defer GinkgoRecover()
 	By("Cleaning up created clusters")
-	utils.PostProcessingSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, entries, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters, skipClusterDeletion)
+	utils.PostProcessingSuite(rootCtx, log, *legacyOpts, runtimeOpts, *opts, seed, seedKeys, entries, kkpConfig, projectName, defaultSeedSettings, newClusters, finalClusterDescriptions, datacenterNameMappings, skipClusterCreation, updateClusters, skipClusterDeletion)
 })
 
 var _ = ReportBeforeSuite(func(r Report) {})

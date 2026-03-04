@@ -57,11 +57,11 @@ var _ = Describe("KubeVirt", func() {
 						n := 0
 						ExpectWithOffset(3, tests.TestStorage(rootCtx, log, legacyOpts, cluster, map[string]string{
 							k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-						}, userClusterClient, n+1)).To(BeNil())
+						}, userClusterClient, "", n+1)).To(BeNil())
 						n = 0
 						ExpectWithOffset(3, tests.TestLoadBalancer(rootCtx, log, legacyOpts, cluster, map[string]string{
 							k8cginkgo.MachineNameLabel: fmt.Sprintf("machine-%s", name),
-						}, userClusterClient, n+1)).To(BeNil())
+						}, userClusterClient, "", n+1)).To(BeNil())
 					})
 					By(fmt.Sprintf("Smoke tests done %q", name))
 					time.Sleep(500 * time.Millisecond)

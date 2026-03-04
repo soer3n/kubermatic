@@ -94,7 +94,7 @@ func GetGinkgoLabels(log *zap.SugaredLogger, provider string) (ProviderSettings,
 	}
 	returnProviderSettings := ProviderSettings{}
 
-	scenarios, _, _, _, _ := GetTableEntries(context.Background(), log, runtimeOpts, legacyOpts, opts, client, "dummy", providerconfig.CloudProvider(provider))
+	scenarios, _, _, _, _, _ := GetTableEntries(context.Background(), log, runtimeOpts, legacyOpts, opts, client, "dummy", providerconfig.CloudProvider(provider))
 	includedScenarios := make(map[string]*Scenario)
 	includedMachineSpecs := make(map[string]string)
 	for k, v := range scenarios {

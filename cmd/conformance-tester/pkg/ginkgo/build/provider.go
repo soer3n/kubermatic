@@ -13,22 +13,12 @@ import (
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	kubermaticprovider "k8c.io/kubermatic/v2/pkg/provider"
 	kubermatickubevirtprovider "k8c.io/kubermatic/v2/pkg/provider/cloud/kubevirt"
-	mckubevirtprovider "k8c.io/machine-controller/pkg/cloudprovider/provider/kubevirt"
-	cloudprovidertypes "k8c.io/machine-controller/pkg/cloudprovider/types"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
-	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/ptr"
 )
-
-var defaultDatacenterSettings = settings.DatacenterSetting{
-	Name: "default",
-	Modifier: func(dc *kubermaticv1.Datacenter) {
-		dc.Location = "Default datacenter"
-	},
-}
 
 func getDefaultDatacenterSettings(ctx context.Context, providerConfig *providerconfig.Config, secrets legacytypes.Secrets) (settings.DatacenterSetting, error) {
 	switch providerConfig.CloudProvider {
@@ -97,10 +87,10 @@ func getDefaultDatacenterSettings(ctx context.Context, providerConfig *providerc
 	return settings.DatacenterSetting{}, nil
 }
 
-func getProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) (providerConfig *providerconfig.Config, err error) {
+func GetProviderConfig(ctx context.Context, log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) (providerConfig *providerconfig.Config, err error) {
 	switch cloudProvider {
 	case providerconfig.CloudProviderKubeVirt:
-		kubevirtProvider := provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt)
+		kubevirtProvider := provider.KubeVirtProvider(string(providerconfig.CloudProviderKubeVirt))
 		rawConfig, err := kubevirtProvider.GetDefaultConfig(secrets, distribution, log, "test-cluster")
 		if err != nil {
 			return nil, err
@@ -126,7 +116,6 @@ func getProviderSpec(log *zap.SugaredLogger, secrets legacytypes.Secrets, distri
 	return nil, nil
 }
 
-// getProviderSpecBytes returns the JSON-serialized provider spec for caching.
 func getProviderSpecBytes(log *zap.SugaredLogger, secrets legacytypes.Secrets, distribution providerconfig.OperatingSystem, cloudProvider providerconfig.CloudProvider) ([]byte, error) {
 	ps, err := getProviderSpec(log, secrets, distribution, cloudProvider)
 	if err != nil {
@@ -146,14 +135,6 @@ func newProviderSpecFromCache(cachedBytes []byte, cloudProvider providerconfig.C
 		return &config, nil
 	}
 	return nil, fmt.Errorf("unsupported cloud provider: %s", cloudProvider)
-}
-
-func getProvider(provider providerconfig.CloudProvider, resolver *configvar.Resolver) cloudprovidertypes.Provider {
-	switch provider {
-	case providerconfig.CloudProviderKubeVirt:
-		return mckubevirtprovider.New(resolver)
-	}
-	return nil
 }
 
 func getClusterProvider(provider providerconfig.CloudProvider, dcName string, dc *kubermaticv1.Datacenter, secrets legacytypes.Secrets) (kubermaticprovider.CloudProvider, kubermaticv1.CloudSpec, error) {

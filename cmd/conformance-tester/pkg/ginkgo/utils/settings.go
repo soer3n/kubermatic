@@ -1,9 +1,14 @@
 package utils
 
 import (
+	"context"
 	"strings"
 
+	"go.uber.org/zap"
 	k8cginkgo "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo"
+	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/build"
+	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
+	"k8c.io/machine-controller/sdk/providerconfig"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -11,6 +16,76 @@ var DefaultMachineResources = k8cginkgo.ResourceSettings{
 	Cpu:      []int{2},
 	Memory:   []string{"4Gi"},
 	DiskSize: []string{"20Gi"},
+}
+
+type Description struct {
+	Name    string   `yaml:"name,omitempty"`
+	Options []string `yaml:"options,omitempty"`
+}
+
+func GetMachineDescriptions(provider string, secrets legacytypes.Secrets) map[string]Description {
+	providerConfig, err := build.GetProviderConfig(context.Background(), &zap.SugaredLogger{}, secrets, providerconfig.OperatingSystemUbuntu, providerconfig.CloudProvider(provider))
+	if err != nil {
+		panic(err)
+	}
+	settings := build.MachineSettings(context.Background(), providerConfig, "", secrets, nil)
+
+	groupedSettings := map[string]Description{}
+	groupedSettingsDesc := map[string][]string{}
+	for _, modifier := range settings {
+		groupedSettingsDesc[modifier.Group] = append(groupedSettingsDesc[modifier.Group], modifier.Name)
+	}
+
+	for group, descs := range groupedSettingsDesc {
+		strippedDescs := stripPrefix(descs)
+		if len(strippedDescs) == 1 {
+			strippedDescs = nil
+		}
+		groupedSettings[group] = Description{
+			Name:    longestCommonPrefixTokens(descs, " "),
+			Options: strippedDescs,
+		}
+	}
+	return groupedSettings
+}
+
+func GetDatacenterDescriptions(provider string, secrets legacytypes.Secrets) map[string]Description {
+	// settings := build.GenericDatacenterSettings(context.Background(), client, "kubermatic")
+	groupedSettings := map[string]Description{}
+	// groupedSettingsDesc := map[string][]string{}
+	// for _, modifier := range settings {
+	// 	groupedSettingsDesc[modifier.Group] = append(groupedSettingsDesc[modifier.Group], modifier.Name)
+	// }
+
+	// for group, descs := range groupedSettingsDesc {
+	// 	strippedDescs := stripPrefix(descs)
+	// 	if len(strippedDescs) == 1 {
+	// 		strippedDescs = nil
+	// 	}
+	// 	groupedSettings[group] = Description{
+	// 		Name:    longestCommonPrefix(descs),
+	// 		Options: strippedDescs,
+	// 	}
+	// }
+	return groupedSettings
+}
+
+func longestCommonPrefix(strs []string) string {
+	if len(strs) == 0 {
+		return ""
+	}
+
+	prefix := strs[0]
+
+	for _, s := range strs[1:] {
+		for len(prefix) > 0 && !strings.HasPrefix(s, prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+		if prefix == "" {
+			return ""
+		}
+	}
+	return prefix
 }
 
 func GetClusterDescriptions(client ctrlclient.Client) map[string]k8cginkgo.Description {

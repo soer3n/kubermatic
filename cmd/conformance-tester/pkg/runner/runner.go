@@ -541,7 +541,7 @@ func (r *TestRunner) testCluster(
 		3*time.Second,
 		maxTestAttempts,
 		func(attempt int) error {
-			return tests.TestStorage(ctx, log, r.opts, cluster, nil, userClusterClient, attempt)
+			return tests.TestStorage(ctx, log, r.opts, cluster, nil, userClusterClient, "", attempt)
 		},
 	)); err != nil {
 		log.Errorf("Failed to verify that PVC's work: %v", err)
@@ -555,7 +555,7 @@ func (r *TestRunner) testCluster(
 		3*time.Second,
 		maxTestAttempts,
 		func(attempt int) error {
-			return tests.TestLoadBalancer(ctx, log, r.opts, cluster, nil, userClusterClient, attempt)
+			return tests.TestLoadBalancer(ctx, log, r.opts, cluster, nil, userClusterClient, "", attempt)
 		},
 	)); err != nil {
 		log.Errorf("Failed to verify that LoadBalancers work: %v", err)

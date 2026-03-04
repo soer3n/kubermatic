@@ -51,7 +51,7 @@ func supportsStorage(cluster *kubermaticv1.Cluster) bool {
 		cluster.Spec.Cloud.Kubevirt != nil
 }
 
-func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, attempt int) error {
+func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, prefix string, attempt int) error {
 	if !opts.Tests.Has(ctypes.StorageTests) {
 		log.Info("Storage tests disabled, skipping.")
 		return nil
@@ -68,6 +68,9 @@ func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Optio
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fmt.Sprintf("pvc-test-%d", attempt),
 		},
+	}
+	if prefix != "" {
+		ns.Name = fmt.Sprintf("%s-%s", prefix, ns.Name)
 	}
 	if err := userClusterClient.Create(ctx, ns); err != nil {
 		return fmt.Errorf("failed to create namespace: %w", err)
@@ -90,6 +93,7 @@ func TestStorage(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Optio
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					NodeSelector: nodeSelector,
 					Containers: []corev1.Container{
 						{
 							Name:  "busybox",

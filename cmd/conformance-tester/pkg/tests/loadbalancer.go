@@ -48,7 +48,7 @@ func supportsLoadBalancer(cluster *kubermaticv1.Cluster) bool {
 		cluster.Spec.Cloud.Openstack != nil
 }
 
-func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, attempt int) error {
+func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.Options, cluster *kubermaticv1.Cluster, nodeSelector map[string]string, userClusterClient ctrlruntimeclient.Client, prefix string, attempt int) error {
 	if !opts.Tests.Has(ctypes.LoadbalancerTests) {
 		log.Info("LoadBalancers tests disabled, skipping.")
 		return nil
@@ -65,6 +65,9 @@ func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fmt.Sprintf("lb-test-%d", attempt),
 		},
+	}
+	if prefix != "" {
+		ns.Name = fmt.Sprintf("%s-%s", prefix, ns.Name)
 	}
 	if err := userClusterClient.Create(ctx, ns); err != nil {
 		return fmt.Errorf("failed to create namespace: %w", err)
@@ -103,6 +106,7 @@ func TestLoadBalancer(ctx context.Context, log *zap.SugaredLogger, opts *ctypes.
 			Labels:    labels,
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: nodeSelector,
 			Containers: []corev1.Container{
 				{
 					Name:  "hello-kubernetes",

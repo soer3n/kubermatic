@@ -25,6 +25,7 @@ func PostProcessingSuite(
 	runtimeOpts *options.RuntimeOptions,
 	opts options.Options,
 	seed *kubermaticv1.Seed,
+	seedKeys []string,
 	entries map[string]*build.Scenario,
 	kkpConfig *kubermaticv1.KubermaticConfiguration,
 	projectName string,
@@ -70,7 +71,7 @@ func PostProcessingSuite(
 		if err != nil {
 			log.Errorf("Failed to get seed 'kubermatic' for cleanup: %v", err)
 		} else {
-			for _, hashedName := range datacenterNameMappings {
+			for _, hashedName := range seedKeys {
 				log.Infof("Removing datacenter with hashed name %q from seed 'kubermatic'", hashedName)
 				delete(seed.Spec.Datacenters, hashedName)
 			}
