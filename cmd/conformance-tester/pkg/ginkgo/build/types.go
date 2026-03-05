@@ -23,18 +23,19 @@ type clusterResult struct {
 }
 
 type clusterJob struct {
-	combination    []settings.ClusterSpecModifier
-	dcKey          string
-	dcName         string                  // hashed datacenter name in the seed
-	datacenter     kubermaticv1.Datacenter // resolved datacenter config
-	seed           kubermaticv1.Seed
-	kubeVersion    *version.Version
-	log            *zap.SugaredLogger
-	rootCtx        context.Context
-	opts           *options.Options
-	kkpConfig      *kubermaticv1.KubermaticConfiguration
-	versionManager *version.Manager
-	providerConfig *providerconfig.Config
+	combination        []settings.ClusterSpecModifier
+	cloudSpecModifiers []settings.CloudSpecModifier
+	dcKey              string
+	dcName             string                  // hashed datacenter name in the seed
+	datacenter         kubermaticv1.Datacenter // resolved datacenter config
+	seed               kubermaticv1.Seed
+	kubeVersion        *version.Version
+	log                *zap.SugaredLogger
+	rootCtx            context.Context
+	opts               *options.Options
+	kkpConfig          *kubermaticv1.KubermaticConfiguration
+	versionManager     *version.Manager
+	providerConfig     *providerconfig.Config
 }
 
 // scenarioResult is used to pass data from a producer to a consumer.

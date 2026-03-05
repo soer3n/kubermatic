@@ -230,3 +230,21 @@ func GenericDatacenterSettings(ctx context.Context, providerConfig *providerconf
 	}
 	return generatedDatacenterSettings
 }
+
+func GenericCloudSpecSettings(ctx context.Context, providerConfig *providerconfig.Config, secrets legacytypes.Secrets) []settings.CloudSpecModifier {
+	var p settings.ProviderInterface
+	switch providerConfig.CloudProvider {
+	case providerconfig.CloudProviderKubeVirt:
+		p = provider.NewKubeVirtProviderAdapter(provider.KubeVirtProvider(providerconfig.CloudProviderKubeVirt))
+	}
+	discoverdSettings, err := p.DiscoverDefaultDatacenterSettings(ctx, providerConfig, secrets)
+	if err != nil {
+		panic(fmt.Errorf("failed to discover default cloud spec settings: %w", err))
+	}
+	generatedCloudSpecSettings := p.BuildCloudSpecSettings(discoverdSettings)
+	// Append static cloud spec settings
+	for _, s := range settings.CloudSpecSettings {
+		generatedCloudSpecSettings = append(generatedCloudSpecSettings, s)
+	}
+	return generatedCloudSpecSettings
+}

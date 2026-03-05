@@ -19,6 +19,7 @@ import (
 	"k8c.io/kubermatic/v2/pkg/validation"
 	"k8c.io/kubermatic/v2/pkg/version"
 	"k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+	"k8c.io/machine-controller/sdk/cloudprovider/kubevirt"
 	"k8c.io/machine-controller/sdk/providerconfig"
 	"k8c.io/machine-controller/sdk/providerconfig/configvar"
 	"k8c.io/machine-controller/sdk/userdata"
@@ -197,6 +198,9 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		for _, modifier := range job.combination {
 			modifierNames = append(modifierNames, modifier.Name)
 		}
+		for _, modifier := range job.cloudSpecModifiers {
+			modifierNames = append(modifierNames, modifier.Name)
+		}
 		sort.Strings(modifierNames)
 		clusterName := strings.Join(modifierNames, " & ")
 		if clusterName == "" {
@@ -218,6 +222,11 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		for _, modifier := range job.combination {
 			if !ignoredGroups[modifier.Group] {
 				modifier.Modify(sanitizedSpec)
+			}
+		}
+		for _, modifier := range job.cloudSpecModifiers {
+			if !ignoredGroups[modifier.Group] {
+				modifier.Modify(&sanitizedSpec.Cloud)
 			}
 		}
 
@@ -247,6 +256,12 @@ func clusterWorker(jobs <-chan clusterJob, results chan<- clusterResult, wg *syn
 		}
 
 		clusterSettingSpec.Cloud = c
+
+		// Apply cloud spec modifiers (e.g. VPCName, SubnetName, StorageClasses).
+		for _, modifier := range job.cloudSpecModifiers {
+			modifier.Modify(&clusterSettingSpec.Cloud)
+		}
+
 		clusterSettingSpec.HumanReadableName = clusterName
 		clusterSettingSpec.ContainerRuntime = "containerd"
 		clusterSettingSpec.Version = semver.Semver(job.kubeVersion.Version.String())
@@ -288,6 +303,7 @@ func buildNewClusters(
 	rootCtx context.Context,
 	versions []*version.Version,
 	clusterModifiers []settings.ClusterSpecModifier,
+	cloudSpecModifiers []settings.CloudSpecModifier,
 	includedSeeds map[string]kubermaticv1.Seed,
 	excludedSeeds map[string]kubermaticv1.Seed,
 	seed *kubermaticv1.Seed,
@@ -333,8 +349,26 @@ func buildNewClusters(
 		}
 	}
 
+	// Separate cloud spec modifiers into included and excluded
+	var includedCloudSpec, excludedCloudSpec []settings.CloudSpecModifier
+	for _, m := range cloudSpecModifiers {
+		if len(includedDescSet) > 0 {
+			if _, ok := includedDescSet[m.Name]; ok {
+				includedCloudSpec = append(includedCloudSpec, m)
+			} else {
+				excludedCloudSpec = append(excludedCloudSpec, m)
+			}
+		} else {
+			if _, ok := descSet[m.Name]; !ok {
+				includedCloudSpec = append(includedCloudSpec, m)
+			} else {
+				excludedCloudSpec = append(excludedCloudSpec, m)
+			}
+		}
+	}
+
 	// Helper to group/combine a set of modifiers
-	combineModifiers := func(modifiers []settings.ClusterSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
+	combineModifiers := func(modifiers []settings.ClusterSpecModifier, cloudSpecMods []settings.CloudSpecModifier, groupLabel string) (map[string]*kubermaticv1.ClusterSpec, map[string][]string) {
 		// Group modifiers by their group name.
 		groupedModifiers := make(map[string][]settings.ClusterSpecModifier)
 		for _, m := range modifiers {
@@ -405,18 +439,19 @@ func buildNewClusters(
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
 							copy(jobCombination, mods)
 							jobs <- clusterJob{
-								combination:    jobCombination,
-								dcKey:          dcKey,
-								dcName:         dcName,
-								datacenter:     dc,
-								seed:           *seed,
-								kubeVersion:    kubeVersion,
-								log:            log,
-								rootCtx:        rootCtx,
-								opts:           opts,
-								kkpConfig:      kkpConfig,
-								versionManager: versionManager,
-								providerConfig: providerConfig,
+								combination:        jobCombination,
+								cloudSpecModifiers: cloudSpecMods,
+								dcKey:              dcKey,
+								dcName:             dcName,
+								datacenter:         dc,
+								seed:               *seed,
+								kubeVersion:        kubeVersion,
+								log:                log,
+								rootCtx:            rootCtx,
+								opts:               opts,
+								kkpConfig:          kkpConfig,
+								versionManager:     versionManager,
+								providerConfig:     providerConfig,
 							}
 						}
 					}
@@ -441,18 +476,19 @@ func buildNewClusters(
 							jobCombination := make([]settings.ClusterSpecModifier, len(mods))
 							copy(jobCombination, mods)
 							jobs <- clusterJob{
-								combination:    jobCombination,
-								dcKey:          dcKey,
-								dcName:         dcName,
-								datacenter:     dc,
-								seed:           *seed,
-								kubeVersion:    kubeVersion,
-								log:            log,
-								rootCtx:        rootCtx,
-								opts:           opts,
-								kkpConfig:      kkpConfig,
-								versionManager: versionManager,
-								providerConfig: providerConfig,
+								combination:        jobCombination,
+								cloudSpecModifiers: cloudSpecMods,
+								dcKey:              dcKey,
+								dcName:             dcName,
+								datacenter:         dc,
+								seed:               *seed,
+								kubeVersion:        kubeVersion,
+								log:                log,
+								rootCtx:            rootCtx,
+								opts:               opts,
+								kkpConfig:          kkpConfig,
+								versionManager:     versionManager,
+								providerConfig:     providerConfig,
 							}
 						}
 					}
@@ -511,8 +547,8 @@ func buildNewClusters(
 		return localClusters, localClusterDescriptions
 	}
 
-	includedClusters, combinedIncludedDescriptions := combineModifiers(included, "included")
-	excludedClusters, excludedDescriptions := combineModifiers(excluded, "excluded")
+	includedClusters, combinedIncludedDescriptions := combineModifiers(included, includedCloudSpec, "included")
+	excludedClusters, excludedDescriptions := combineModifiers(excluded, excludedCloudSpec, "excluded")
 
 	scenarios := map[string]*Scenario{}
 
@@ -850,6 +886,51 @@ func buildNewScenarios(
 				m[clusterKey] = *machineSpecCopy
 			}
 			s.Machines = m
+		}
+
+		// Propagate VPC/Subnet from the cluster's CloudSpec to each machine's ProviderNetwork.
+		if s.ClusterSpec != nil && s.ClusterSpec.Cloud.Kubevirt != nil &&
+			(s.ClusterSpec.Cloud.Kubevirt.VPCName != "" || s.ClusterSpec.Cloud.Kubevirt.SubnetName != "") {
+			vpcName := s.ClusterSpec.Cloud.Kubevirt.VPCName
+			subnetName := s.ClusterSpec.Cloud.Kubevirt.SubnetName
+			for machineKey, machineSpec := range s.Machines {
+				if machineSpec.ProviderSpec.Value == nil || machineSpec.ProviderSpec.Value.Raw == nil {
+					continue
+				}
+				var pconfig providerconfig.Config
+				if err := json.Unmarshal(machineSpec.ProviderSpec.Value.Raw, &pconfig); err != nil {
+					log.Warnw("Failed to unmarshal provider config for VPC propagation", "machine", machineKey, zap.Error(err))
+					continue
+				}
+				var rawCfg kubevirt.RawConfig
+				if err := json.Unmarshal(pconfig.CloudProviderSpec.Raw, &rawCfg); err != nil {
+					log.Warnw("Failed to unmarshal kubevirt raw config for VPC propagation", "machine", machineKey, zap.Error(err))
+					continue
+				}
+				rawCfg.VirtualMachine.ProviderNetwork = &kubevirt.ProviderNetwork{
+					Name: vpcName,
+					VPC: kubevirt.VPC{
+						Name: vpcName,
+						Subnet: &kubevirt.Subnet{
+							Name: subnetName,
+						},
+					},
+				}
+				rawBytes, err := json.Marshal(rawCfg)
+				if err != nil {
+					log.Warnw("Failed to re-marshal kubevirt raw config after VPC propagation", "machine", machineKey, zap.Error(err))
+					continue
+				}
+				pconfig.CloudProviderSpec = runtime.RawExtension{Raw: rawBytes}
+				pconfigBytes, err := json.Marshal(pconfig)
+				if err != nil {
+					log.Warnw("Failed to re-marshal provider config after VPC propagation", "machine", machineKey, zap.Error(err))
+					continue
+				}
+				updatedSpec := machineSpec.DeepCopy()
+				updatedSpec.ProviderSpec.Value.Raw = pconfigBytes
+				s.Machines[machineKey] = *updatedSpec
+			}
 		}
 	}
 

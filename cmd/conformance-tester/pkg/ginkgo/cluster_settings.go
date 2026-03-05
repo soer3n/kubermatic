@@ -13,6 +13,13 @@ type ClusterSpecModifier struct {
 	Modify func(spec *kubermaticv1.ClusterSpec)
 }
 
+// CloudSpecModifier is a struct that holds a name and a modify function for a cloud spec.
+type CloudSpecModifier struct {
+	Name   string
+	Group  string
+	Modify func(spec *kubermaticv1.CloudSpec)
+}
+
 // ClusterSettings is now a slice of modifiers, each representing a distinct test case.
 var ClusterSettings = []ClusterSpecModifier{
 	{

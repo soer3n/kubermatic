@@ -11,6 +11,41 @@ import (
 	kubevirtv1 "kubevirt.io/api/core/v1"
 )
 
+// CloudSpecSettings contains static cloud spec modifiers for KubeVirt.
+// Dynamic modifiers (VPCName/SubnetName, StorageClasses) are generated
+// by the provider's BuildCloudSpecSettings from discovered infrastructure.
+var CloudSpecSettings = []CloudSpecModifier{
+	// --- PreAllocatedDataVolumes (noop for now) ---
+	{
+		Name:  "with pre-allocated data volumes noop",
+		Group: "kubevirt-pre-allocated-dv",
+		Modify: func(spec *kubermaticv1.CloudSpec) {
+			// No-op: PreAllocatedDataVolumes is not configured for now.
+		},
+	},
+	// --- Image Cloning ---
+	{
+		Name:  "with image cloning enabled",
+		Group: "kubevirt-image-cloning",
+		Modify: func(spec *kubermaticv1.CloudSpec) {
+			if spec.Kubevirt == nil {
+				spec.Kubevirt = &kubermaticv1.KubevirtCloudSpec{}
+			}
+			spec.Kubevirt.ImageCloningEnabled = true
+		},
+	},
+	{
+		Name:  "with image cloning disabled",
+		Group: "kubevirt-image-cloning",
+		Modify: func(spec *kubermaticv1.CloudSpec) {
+			if spec.Kubevirt == nil {
+				spec.Kubevirt = &kubermaticv1.KubevirtCloudSpec{}
+			}
+			spec.Kubevirt.ImageCloningEnabled = false
+		},
+	},
+}
+
 var MachineSettings = []MachineSpecModifier[*kubevirt.RawConfig]{
 	{
 		Name:  "with primary disk OS image from an HTTP source",

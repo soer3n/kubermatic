@@ -24,6 +24,13 @@ type DatacenterSetting struct {
 	Modifier func(dc *kubermaticv1.Datacenter)
 }
 
+// CloudSpecModifier is a struct that holds a name and a modify function for a cloud spec.
+type CloudSpecModifier struct {
+	Name   string
+	Group  string
+	Modify func(spec *kubermaticv1.CloudSpec)
+}
+
 type DefaultDatacenterSettings struct {
 	VPCs           []VPC
 	StorageClasses []v1.StorageClass
@@ -43,4 +50,5 @@ type ProviderInterface interface {
 	MemoryModifiers(memories []string) []MachineSpecModifier[any]
 	DiscoverDefaultDatacenterSettings(ctx context.Context, providerConfig *providerconfig.Config, secrets legacytypes.Secrets) (*DefaultDatacenterSettings, error)
 	BuildDefaultDatacenterSettings(settings *DefaultDatacenterSettings) []DatacenterSetting
+	BuildCloudSpecSettings(settings *DefaultDatacenterSettings) []CloudSpecModifier
 }

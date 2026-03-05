@@ -69,6 +69,10 @@ func (a KubeVirtProviderAdapter) BuildDefaultDatacenterSettings(settings *settin
 	return raw
 }
 
+func (a KubeVirtProviderAdapter) BuildCloudSpecSettings(settings *settings.DefaultDatacenterSettings) []settings.CloudSpecModifier {
+	return a.inner.BuildCloudSpecSettings(settings)
+}
+
 type DefaultDatacenterSettings struct {
 	VPCs []VPC
 }
@@ -180,6 +184,48 @@ func (k *KubeVirtProvider) BuildDefaultDatacenterSettings(defaultSettings *setti
 				},
 			})
 		}
+	}
+
+	return modifiers
+}
+
+func (k *KubeVirtProvider) BuildCloudSpecSettings(defaultSettings *settings.DefaultDatacenterSettings) []settings.CloudSpecModifier {
+	var modifiers []settings.CloudSpecModifier
+
+	// --- VPCName / SubnetName from discovered VPCs ---
+	for _, vpc := range defaultSettings.VPCs {
+		for _, subnet := range vpc.Subnets {
+			modifiers = append(modifiers, settings.CloudSpecModifier{
+				Name:  fmt.Sprintf("with vpc %s and subnet %s", vpc.Name, subnet.Name),
+				Group: "kubevirt-vpc-subnet",
+				Modify: func(spec *kubermaticv1.CloudSpec) {
+					if spec.Kubevirt == nil {
+						spec.Kubevirt = &kubermaticv1.KubevirtCloudSpec{}
+					}
+					spec.Kubevirt.VPCName = vpc.Name
+					spec.Kubevirt.SubnetName = subnet.Name
+				},
+			})
+		}
+	}
+
+	// --- StorageClasses from discovered storage classes ---
+	for _, sc := range defaultSettings.StorageClasses {
+		modifiers = append(modifiers, settings.CloudSpecModifier{
+			Name:  fmt.Sprintf("with storage class %s", sc.Name),
+			Group: "kubevirt-storage-class",
+			Modify: func(spec *kubermaticv1.CloudSpec) {
+				if spec.Kubevirt == nil {
+					spec.Kubevirt = &kubermaticv1.KubevirtCloudSpec{}
+				}
+				spec.Kubevirt.StorageClasses = []kubermaticv1.KubeVirtInfraStorageClass{
+					{
+						Name:           sc.Name,
+						IsDefaultClass: ptr.To(true),
+					},
+				}
+			},
+		})
 	}
 
 	return modifiers

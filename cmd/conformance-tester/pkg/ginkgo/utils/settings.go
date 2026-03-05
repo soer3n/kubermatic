@@ -9,7 +9,6 @@ import (
 	"k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/ginkgo/settings"
 	legacytypes "k8c.io/kubermatic/v2/cmd/conformance-tester/pkg/types"
 	"k8c.io/machine-controller/sdk/providerconfig"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var DefaultMachineResources = ResourceSettings{
@@ -79,10 +78,19 @@ func GetDatacenterDescriptions(provider string, secrets legacytypes.Secrets) map
 	return groupedSettings
 }
 
-func GetClusterDescriptions(client ctrlclient.Client) map[string]Description {
+func GetClusterDescriptions(provider string, secrets legacytypes.Secrets) map[string]Description {
 	groupedSettings := map[string]Description{}
 	groupedSettingsDesc := map[string][]string{}
 	for _, modifier := range settings.ClusterSettings {
+		groupedSettingsDesc[modifier.Group] = append(groupedSettingsDesc[modifier.Group], modifier.Name)
+	}
+
+	providerConfig, err := build.GetProviderConfig(context.Background(), &zap.SugaredLogger{}, secrets, providerconfig.OperatingSystemUbuntu, providerconfig.CloudProvider(provider))
+	if err != nil {
+		panic(err)
+	}
+	cloudSpecModifiers := build.GenericCloudSpecSettings(context.Background(), providerConfig, secrets)
+	for _, modifier := range cloudSpecModifiers {
 		groupedSettingsDesc[modifier.Group] = append(groupedSettingsDesc[modifier.Group], modifier.Name)
 	}
 

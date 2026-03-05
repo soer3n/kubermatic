@@ -81,7 +81,8 @@ func GetTableEntries(rootCtx context.Context, log *zap.SugaredLogger, runtimeOpt
 		versions = append(versions, versionObj)
 	}
 	log.Info("generating clusters...")
-	newClusters, _, scenarios := buildNewClusters(rootCtx, versions, settings.ClusterSettings, includedSeeds, excludedSeeds, seed, opts, kkpConfig, log, versionManager, nil, providerConfig, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
+	cloudSpecModifiers := GenericCloudSpecSettings(rootCtx, providerConfig, opts.Secrets)
+	newClusters, _, scenarios := buildNewClusters(rootCtx, versions, settings.ClusterSettings, cloudSpecModifiers, includedSeeds, excludedSeeds, seed, opts, kkpConfig, log, versionManager, nil, providerConfig, opts.Excluded.ClusterDescriptions, opts.Included.ClusterDescriptions)
 	resolver := configvar.NewResolver(rootCtx, runtimeOpts.SeedClusterClient)
 	log.Info("generating scenarios...")
 	machineSettings := MachineSettings(rootCtx, providerConfig, legacyOpts.KubermaticNamespace, opts.Secrets, &opts.Resources)

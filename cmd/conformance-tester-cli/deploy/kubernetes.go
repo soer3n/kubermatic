@@ -44,7 +44,7 @@ const (
 	// ConformanceNamespace is the dedicated namespace for conformance tests.
 	ConformanceNamespace = "conformance-tests"
 	// ConformanceImage is the Docker image used for running tests.
-	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-16400001032026"
+	ConformanceImage = "docker.io/soer3n/conformance:ginkgo-09510005032026"
 
 	GracefulDeletionPeriod = 15 * time.Minute
 )

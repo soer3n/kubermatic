@@ -55,7 +55,7 @@ var _ = Describe("KubeVirt", func() {
 					}
 				}
 
-				It(fmt.Sprintf("%s and operating system set to %v and datacenter %v and machine %v", entry.Description, osDistro, seed.Spec.Datacenters[entry.ClusterSpec.Cloud.DatacenterName].Location, strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
+				It(fmt.Sprintf("operating system set to %v and datacenter %v and cluster settings %s and machine %v", osDistro, seed.Spec.Datacenters[entry.ClusterSpec.Cloud.DatacenterName].Location, entry.Description, strings.Join(machineDescription, " and ")), label, clusterLabel, func() {
 					cluster := &kubermaticv1.Cluster{}
 					if err := runtimeOpts.SeedClusterClient.Get(rootCtx, types.NamespacedName{Name: entry.ClusterName}, cluster); err != nil {
 						log.Errorf("Failed to get cluster %s: %v", name, err)
